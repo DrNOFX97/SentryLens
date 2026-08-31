@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Automatiza a Parte 1 e Parte 2 do guia docs/LAB_WAZUH_HYPERV.md:
     ativa o Hyper-V, cria o Virtual Switch e cria a VM Ubuntu Server
