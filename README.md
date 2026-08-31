@@ -109,10 +109,15 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   no próprio script (ver commit "Corrige parsing quebrado em scripts
   PowerShell sem BOM UTF-8" — ficheiros `.ps1` com acentos/travessões
   sem BOM UTF-8 partem o parser do Windows PowerShell 5.1).
-- ⚠️ Falta ainda gerar um evento de teste (logon falhado) no Windows
-  para confirmar os 23 Event IDs classificados e a deteção de força
-  bruta com dados reais (Parte 6 do
-  [guia](docs/LAB_WAZUH_HYPERV.md#parte-6--valida%C3%A7%C3%A3o-final)).
+- ✅ **Telemetria Windows confirmada com dados reais** — logon falhado
+  gerado de propósito (`Start-Process -Credential` com password errada
+  contra o próprio utilizador, sem risco de bloqueio — limiar da
+  política é 10 tentativas). Apareceu classificado em menos de 5s:
+  `rule.id 60122`, Event ID `4625`, `friendly_name: "Failed Logon"`,
+  `severity: high` — confirma a Parte 6 do
+  [guia](docs/LAB_WAZUH_HYPERV.md#parte-6--valida%C3%A7%C3%A3o-final)
+  ponta-a-ponta (Windows → agente → manager → indexer → backend →
+  frontend).
 - ✅ **`log_analyzer.py` (Fase 1) recuperado** — estava só no repositório
   antigo `dashboard-seguranca` (nome de trabalho deste projeto antes do
   rebranding, entretanto apagado); trazido de volta com
