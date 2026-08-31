@@ -11,3 +11,6 @@ __pycache__/
 scripts/system_alerts_history.json
 scripts/*.log
 scripts/*.log.err
+
+# Estado local do Claude Code (não é conteúdo do projeto)
+.claude/
