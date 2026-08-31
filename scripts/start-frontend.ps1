@@ -8,21 +8,26 @@
 # Servir sempre por http://localhost mantém o CORS seguro sem exigir
 # que o utilizador abra um servidor à mão todos os dias.
 #
+# Usa scripts/serve_frontend.py em vez de `python -m http.server`:
+# esse serve a raiz do projeto inteira, incluindo scripts/.env (as
+# passwords reais do Wazuh ficavam descarregáveis por qualquer pedido
+# HTTP direto) e por omissão liga a todas as interfaces de rede, não
+# só a este PC. Achado pela revisão de segurança automática logo a
+# seguir a esta tarefa ter ficado a correr permanentemente.
+#
 # Pensado para ser chamado pela tarefa agendada "SentryLens-Frontend"
 # (logon do utilizador), depois de "SentryLens-Backend".
 
 $ErrorActionPreference = "Stop"
 
-$ProjectDir = Split-Path -Parent $PSScriptRoot
+$ScriptsDir = $PSScriptRoot
 $PythonExe = "C:\Users\Fernando Nuno\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"
 $Port = 5500
-$LogFile = Join-Path $PSScriptRoot "frontend.log"
-
-Set-Location $ProjectDir
+$LogFile = Join-Path $ScriptsDir "frontend.log"
 
 Start-Process -FilePath $PythonExe `
-    -ArgumentList "-m", "http.server", $Port `
-    -WorkingDirectory $ProjectDir `
+    -ArgumentList (Join-Path $ScriptsDir "serve_frontend.py"), $Port `
+    -WorkingDirectory $ScriptsDir `
     -WindowStyle Hidden `
     -RedirectStandardOutput $LogFile `
     -RedirectStandardError "$LogFile.err"
