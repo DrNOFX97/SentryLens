@@ -327,8 +327,11 @@ A interface está organizada em 4 abas:
 
 ## 4. Endpoints da API
 
-Todos devolvem JSON. CORS está aberto (`allow_origins=["*"]`) — restringir
-antes de expor isto fora de uma rede de confiança.
+Todos devolvem JSON. CORS restringido a origens loopback
+(`localhost`/`127.0.0.1`, qualquer porta) — nenhuma origem externa
+consegue ler as respostas. Ainda sem autenticação nos endpoints, por
+isso continua a assumir-se que só corre em ambiente de confiança
+(este PC).
 
 ### `GET /api/health`
 Confirma que o backend está de pé (não testa ligação ao Wazuh).
@@ -504,9 +507,15 @@ Se isto falhar, o problema é de rede/credenciais, não do backend.
 `--port 8001`.
 
 **CORS bloqueado no browser**
-→ O backend já tem CORS aberto (`allow_origins=["*"]`)
-→ Confirma que estás a aceder ao frontend via `http://localhost:5500`
-e não via `file://` diretamente (ver [Servir o frontend](#3-servir-o-frontend), Opção A)
+→ O backend aceita qualquer origem `localhost`/`127.0.0.1` (qualquer
+porta) — confirma que estás a aceder ao frontend por um desses dois
+hostnames, via `http://localhost:5500` (ou outra porta) e não via
+`file://` diretamente (ver [Servir o frontend](#3-servir-o-frontend), Opção A)
+→ Se precisares de aceder a partir de outro dispositivo na rede local
+(por IP), o CORS atual vai bloquear de propósito — restringido a
+loopback depois da auditoria de segurança de 2026-08-31 (ver
+`scripts/main.py`); alargar isto exige também pensar em autenticação,
+não é só mudar o CORS de volta
 
 **Nenhum alerta aparece mesmo com o agente `Active`**
 → Gera um evento de teste na máquina Windows (ex: `runas` com password

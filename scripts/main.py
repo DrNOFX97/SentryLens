@@ -70,13 +70,17 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# Em desenvolvimento local o frontend (ficheiro estático) corre numa origem
-# diferente do backend, por isso liberamos CORS. Em produção, restringir
-# allow_origins ao domínio real do frontend.
+# O frontend (ficheiro estático) corre numa porta diferente do backend,
+# por isso o CORS tem de ficar aberto entre portas — mas nunca a "*":
+# com allow_origins=["*"] e zero autenticação nos endpoints, qualquer
+# site que o browser tivesse aberto noutro separador conseguia ler
+# alertas de segurança e specs da máquina via fetch() (auditoria de
+# 2026-08-31). Restringido a loopback (qualquer porta em localhost/
+# 127.0.0.1) — nenhuma origem externa consegue ler as respostas.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
