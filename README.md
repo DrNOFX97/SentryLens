@@ -69,6 +69,17 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
 
 > Última verificação: sessão de desenvolvimento de 2026-08-31.
 
+> ⚠️ **Incidente de segurança já corrigido, mas vale a pena rodar as
+> passwords do Wazuh por precaução:** durante ~20 minutos neste dia, a
+> tarefa `SentryLens-Frontend` serviu `scripts/.env` (passwords reais
+> do Manager/Indexer) descarregável por HTTP a qualquer dispositivo na
+> rede local (`python -m http.server` serve a raiz do projeto inteira
+> e liga a todas as interfaces por omissão). Corrigido com
+> `scripts/serve_frontend.py` (whitelist fixa de ficheiros, só
+> `127.0.0.1`). Risco real de alguém ter explorado isto numa rede
+> doméstica numa janela de 20 min é baixo, mas se quiseres eliminar a
+> dúvida, roda as passwords do `wazuh-wui` e do `admin` do Indexer.
+
 - ✅ Laboratório Wazuh montado e a correr (VM `Wazuh-Manager`, IP
   `192.168.1.143` — ver nota sobre VirtualBox/Hyper-V acima).
 - ✅ Backend FastAPI completo (`scripts/main.py`, `wazuh_client.py`,
