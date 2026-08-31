@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Automatiza a Parte 5 do guia docs/LAB_WAZUH_HYPERV.md — instala o
     agente Wazuh no Windows (anfitrião ou outra VM Windows a monitorizar).
