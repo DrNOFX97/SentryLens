@@ -102,15 +102,17 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
 - ⚠️ **Porta 8000 ocupada** neste PC por um serviço Windows de
   terceiros (`httpd.exe` / `IBXDashboard`) — o backend usa **porta
   8001** (ver [Nota sobre a porta 8000](#nota-sobre-a-porta-8000)).
-- ⚠️ **Só há telemetria do lado Linux (o próprio manager)** — nenhum
-  agente Windows registado neste host ainda (Parte 5 do guia por
-  correr). `/api/agents` só mostra o manager auto-monitorizado
-  (`fnuno`, `127.0.0.1`, `os: Ubuntu`), alertas vêm classificados como
-  `"Evento não catalogado" / severity: info` (PAM, sudo, systemd), e
-  "Top Eventos" fica vazio (nenhum tem `windows_event_id`). Para ver os
-  23 Event IDs classificados e testar deteção de força bruta, falta
-  instalar o agente Windows (ver
-  [Parte 5 do guia](docs/LAB_WAZUH_HYPERV.md#parte-5--instalar-o-agente-wazuh-no-windows)).
+- ✅ **Agente Windows registado e `active`** — `install-wazuh-agent.ps1
+  -WazuhManagerIP 192.168.1.143` corrido com sucesso; `/api/agents`
+  mostra agora 2 agentes (`fnuno`/Ubuntu — o manager auto-monitorizado
+  — e `DIOGO`/Windows 11). Faltou corrigir primeiro um bug de encoding
+  no próprio script (ver commit "Corrige parsing quebrado em scripts
+  PowerShell sem BOM UTF-8" — ficheiros `.ps1` com acentos/travessões
+  sem BOM UTF-8 partem o parser do Windows PowerShell 5.1).
+- ⚠️ Falta ainda gerar um evento de teste (logon falhado) no Windows
+  para confirmar os 23 Event IDs classificados e a deteção de força
+  bruta com dados reais (Parte 6 do
+  [guia](docs/LAB_WAZUH_HYPERV.md#parte-6--valida%C3%A7%C3%A3o-final)).
 - ✅ **`log_analyzer.py` (Fase 1) recuperado** — estava só no repositório
   antigo `dashboard-seguranca` (nome de trabalho deste projeto antes do
   rebranding, entretanto apagado); trazido de volta com
