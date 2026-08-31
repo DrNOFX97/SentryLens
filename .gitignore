@@ -1,0 +1,13 @@
+# Segredos — nunca commitar credenciais reais do Wazuh
+scripts/.env
+.env
+
+# Python
+scripts/__pycache__/
+__pycache__/
+*.pyc
+
+# Estado local gerado em runtime (não é código-fonte)
+scripts/system_alerts_history.json
+scripts/*.log
+scripts/*.log.err

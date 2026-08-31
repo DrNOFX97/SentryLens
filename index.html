@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SentryLens</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <img src="logo.png" alt="SentryLens" class="logo">
+      <div>
+        <h1>SentryLens</h1>
+        <p>SentryLens — ligado ao Wazuh em tempo real</p>
+      </div>
+    </div>
+    <div class="controls">
+      <label for="window-select">Janela temporal:</label>
+      <select id="window-select">
+        <option value="1">Última hora</option>
+        <option value="6">Últimas 6 horas</option>
+        <option value="24" selected>Últimas 24 horas</option>
+        <option value="168">Última semana</option>
+      </select>
+      <button id="refresh-btn">🔄 Atualizar</button>
+      <span id="status-indicator" class="status-indicator status-unknown">● a verificar</span>
+    </div>
+  </header>
+
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="overview">📊 Visão Geral</button>
+    <button class="tab-btn" data-tab="alerts">🚨 Alertas</button>
+    <button class="tab-btn" data-tab="agents">🖥️ Agentes</button>
+    <button class="tab-btn" data-tab="system">⚙️ Sistema</button>
+  </nav>
+
+  <main class="container">
+
+    <!-- ===== Visão Geral ===== -->
+    <div class="tab-content active" id="tab-overview">
+      <section class="kpi-grid" id="kpi-grid">
+        <div class="card">
+          <h3>Total de Alertas</h3>
+          <div class="value" id="kpi-total">—</div>
+        </div>
+        <div class="card critical">
+          <h3>Críticos</h3>
+          <div class="value" id="kpi-critical">—</div>
+        </div>
+        <div class="card high">
+          <h3>Altos</h3>
+          <div class="value" id="kpi-high">—</div>
+        </div>
+        <div class="card medium">
+          <h3>Médios</h3>
+          <div class="value" id="kpi-medium">—</div>
+        </div>
+        <div class="card low">
+          <h3>Baixos</h3>
+          <div class="value" id="kpi-low">—</div>
+        </div>
+        <div class="card">
+          <h3>Agentes Ativos</h3>
+          <div class="value" id="kpi-agents">—</div>
+        </div>
+      </section>
+
+      <section class="system-summary-card" id="system-summary-card" title="Ver detalhe na aba Sistema">
+        <div class="summary-header">
+          <h3>🖥️ Estado do Sistema</h3>
+          <span class="health-badge" id="summary-health-badge">—</span>
+        </div>
+        <div class="summary-bars">
+          <div class="summary-metric">
+            <span class="summary-label">CPU</span>
+            <div class="progress-track"><div class="progress-fill" id="summary-cpu-bar"></div></div>
+            <span class="summary-pct" id="summary-cpu-pct">—</span>
+          </div>
+          <div class="summary-metric">
+            <span class="summary-label">RAM</span>
+            <div class="progress-track"><div class="progress-fill" id="summary-ram-bar"></div></div>
+            <span class="summary-pct" id="summary-ram-pct">—</span>
+          </div>
+          <div class="summary-metric">
+            <span class="summary-label">Disco</span>
+            <div class="progress-track"><div class="progress-fill" id="summary-disk-bar"></div></div>
+            <span class="summary-pct" id="summary-disk-pct">—</span>
+          </div>
+          <div class="summary-metric">
+            <span class="summary-label">Rede</span>
+            <div class="progress-track"><div class="progress-fill" id="summary-network-bar"></div></div>
+            <span class="summary-pct" id="summary-network-status">—</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel charts-panel">
+        <h2>📈 Análises</h2>
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h3>Alertas ao longo do tempo</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-alerts-timeline"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Distribuição por severidade</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-severity-donut"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Top Event IDs</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-top-events"></canvas></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Alertas ===== -->
+    <div class="tab-content" id="tab-alerts">
+      <section class="panel" id="brute-force-panel" style="display:none">
+        <h2>⚠️ Possíveis Ataques de Força Bruta</h2>
+        <div id="brute-force-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>🚨 Alertas Recentes</h2>
+        <div class="filter-row">
+          <select id="severity-filter">
+            <option value="">Todas as severidades</option>
+            <option value="critical">Crítico</option>
+            <option value="high">Alto</option>
+            <option value="medium">Médio</option>
+            <option value="low">Baixo</option>
+          </select>
+        </div>
+        <div class="table-scroll">
+          <table id="alerts-table">
+            <thead>
+              <tr>
+                <th>Hora</th>
+                <th>Severidade</th>
+                <th>Agente</th>
+                <th>IP</th>
+                <th>Event ID</th>
+                <th>Regra</th>
+                <th>Nível</th>
+                <th>Recomendação</th>
+                <th>Log completo</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-table-body">
+              <tr><td colspan="9" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Agentes ===== -->
+    <div class="tab-content" id="tab-agents">
+      <section class="panel">
+        <h2>🖥️ Agentes Wazuh</h2>
+        <div class="table-scroll">
+          <table id="agents-table">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>IP</th>
+                <th>SO</th>
+                <th>Estado</th>
+                <th>Último keep-alive</th>
+              </tr>
+            </thead>
+            <tbody id="agents-table-body">
+              <tr><td colspan="5" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Sistema ===== -->
+    <div class="tab-content" id="tab-system">
+      <section class="panel system-panel" id="system-panel">
+        <h2>🖥️ Estado do Sistema</h2>
+        <div class="system-grid">
+          <div class="system-card">
+            <div class="system-card-header">
+              <h3>CPU</h3>
+              <span class="system-card-value" id="sys-cpu-value">—</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" id="sys-cpu-bar"></div></div>
+            <div class="system-sub" id="sys-cpu-detail">—</div>
+          </div>
+          <div class="system-card">
+            <div class="system-card-header">
+              <h3>RAM</h3>
+              <span class="system-card-value" id="sys-ram-value">—</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" id="sys-ram-bar"></div></div>
+            <div class="system-sub" id="sys-ram-detail">—</div>
+          </div>
+          <div id="sys-disk-cards"></div>
+          <div class="system-card">
+            <div class="system-card-header">
+              <h3>Rede</h3>
+              <button id="speedtest-btn" title="Forçar medição imediata">🔄 Medir agora</button>
+              <span class="system-card-value">↓ <span id="sys-net-download">—</span> ↑ <span id="sys-net-upload">—</span> Mbps</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" id="sys-net-bar"></div></div>
+            <div class="system-sub" id="sys-net-sub">Última medição: —</div>
+          </div>
+        </div>
+
+        <h3 class="system-alerts-title">Interfaces de rede</h3>
+        <div class="table-scroll">
+          <table id="network-interfaces-table">
+            <thead>
+              <tr><th>Interface</th><th>IP</th><th>Velocidade</th></tr>
+            </thead>
+            <tbody id="network-interfaces-body">
+              <tr><td colspan="3" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="system-alerts-title" style="margin-top: 25px;">Alertas de sistema ativos</h3>
+        <div id="system-alerts-list" class="system-alerts-list">
+          <p class="empty-state">A carregar...</p>
+        </div>
+
+        <h3 class="system-alerts-title" style="margin-top: 25px;">Histórico de violações</h3>
+        <div class="table-scroll">
+          <table id="violations-history-table">
+            <thead>
+              <tr><th>Métrica</th><th>Nível</th><th>Início</th><th>Duração</th></tr>
+            </thead>
+            <tbody id="violations-history-body">
+              <tr><td colspan="4" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="system-alerts-title" style="margin-top: 25px;">Histórico de uso (sessão atual)</h3>
+        <div class="chart-card">
+          <div class="chart-canvas-wrap"><canvas id="chart-system-usage"></canvas></div>
+        </div>
+      </section>
+    </div>
+
+  </main>
+
+  <footer>
+    <p>SentryLens — Fase 2 do projeto CET. Ligação em tempo real ao Wazuh.</p>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"
+    integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
+    crossorigin="anonymous"></script>
+  <script src="app.js"></script>
+</body>
+</html>
