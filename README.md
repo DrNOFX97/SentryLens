@@ -158,7 +158,8 @@ Dashboard cybersec/
 │   ├── setup-hyperv-lab.ps1     ← 1) cria Hyper-V switch + VM (Windows, Admin)
 │   ├── install-wazuh.sh         ← 2) instala o Wazuh dentro da VM (via SSH)
 │   ├── install-wazuh-agent.ps1  ← 3) instala o agente no Windows (Admin)
-│   └── start-backend.ps1        ← wrapper usado pela tarefa agendada (ver Arranque automático)
+│   ├── start-backend.ps1        ← wrapper usado pela tarefa agendada SentryLens-Backend
+│   └── start-frontend.ps1       ← wrapper usado pela tarefa agendada SentryLens-Frontend
 │
 └── docs/
     ├── README.md                ← guia detalhado de setup do backend/frontend
@@ -271,17 +272,22 @@ preciso mexer no serviço `IBXDashboard` nem investigar mais, só usar
 ## 🚀 Arranque automático
 
 Configurado neste PC para que, ao iniciar sessão, tudo suba sozinho —
-três peças independentes:
+quatro peças independentes:
 
 | # | O quê | Onde | Como |
 |---|---|---|---|
 | 1 | VM `Wazuh-Manager` arranca em headless | Windows Task Scheduler | Tarefa `Wazuh-Manager-VM`, trigger "ao iniciar sessão", corre `VBoxManage startvm "Wazuh-Manager" --type headless` |
 | 2 | `wazuh-manager` resiste a falhar no boot | VM (systemd override) | `/etc/systemd/system/wazuh-manager.service.d/override.conf` — `Restart=on-failure`, `RestartSec=15` (o `wazuh-apid` por vezes morre por race condition com o Indexer a arrancar ao mesmo tempo) |
 | 3 | Backend FastAPI arranca em segundo plano | Windows Task Scheduler | Tarefa `SentryLens-Backend`, trigger "ao iniciar sessão", corre `scripts/start-backend.ps1` (uvicorn escondido, logs em `scripts/backend.log`) |
+| 4 | Frontend arranca e abre no browser | Windows Task Scheduler | Tarefa `SentryLens-Frontend`, trigger "ao iniciar sessão" com atraso de 10s (depois do backend), corre `scripts/start-frontend.ps1` (`python -m http.server 5500` escondido + abre `http://localhost:5500/index.html`, logs em `scripts/frontend.log`) |
 
-Gerir as tarefas: `Get-ScheduledTask -TaskName "SentryLens-Backend","Wazuh-Manager-VM"`
+Gerir as tarefas: `Get-ScheduledTask -TaskName "SentryLens-Backend","SentryLens-Frontend","Wazuh-Manager-VM"`
 no PowerShell, ou pela app "Agendador de Tarefas" do Windows.
 `Unregister-ScheduledTask -TaskName <nome>` remove uma.
+
+A tarefa 4 existe porque abrir `index.html` por duplo-clique (`file://`)
+deixou de funcionar depois da correção de CORS de 2026-08-31 — ver
+[Servir o frontend](#3-servir-o-frontend).
 
 É normal, nos primeiros 1–3 minutos depois do login, `/api/agents`,
 `/api/alerts`, etc. devolverem `502` enquanto a VM e os serviços Wazuh
@@ -296,8 +302,12 @@ O frontend é HTML/CSS/JS puro (`index.html`, `app.js`, `style.css`, na
 raiz do repo, ao lado uns dos outros). `app.js` aponta para
 `API_BASE = "http://localhost:8001"`.
 
-**Opção A — servidor estático simples (recomendado, evita problemas de
-CORS/cache que acontecem ao abrir via `file://`):**
+**Opção A — automático (já configurado neste PC):** a tarefa agendada
+`SentryLens-Frontend` serve o frontend em `localhost:5500` e abre o
+browser sozinha ao iniciares sessão — ver [Arranque automático](#-arranque-automático).
+Não precisas de fazer nada.
+
+**Opção B — servidor estático manual:**
 
 ```bash
 python -m http.server 5500
@@ -305,11 +315,12 @@ python -m http.server 5500
 
 Depois abrir `http://localhost:5500/index.html`.
 
-**Opção B — abrir diretamente:**
+**Opção C — abrir diretamente (não recomendado):**
 
-Duplo-clique em `index.html`. Funciona, mas alguns browsers bloqueiam
-`fetch()` para `localhost` a partir de `file://` — se o dashboard
-ficar preso em "a carregar...", usa a Opção A.
+Duplo-clique em `index.html`. **Deixou de funcionar** desde que o CORS
+do backend ficou restrito a `localhost`/`127.0.0.1` (correção de
+segurança de 2026-08-31) — `file://` envia `Origin: null`, que essa
+restrição não reconhece de propósito. Usa a Opção A ou B.
 
 O dashboard atualiza automaticamente a cada 30 segundos, ou
 manualmente com o botão "🔄 Atualizar". O indicador no canto superior
@@ -500,7 +511,8 @@ Para adicionar um Event ID novo: acrescentar uma entrada a
 
 **Erro 502 "Erro ao contactar Wazuh Manager/Indexer"**
 → Confirma o IP e as passwords em `scripts/.env`
-→ Confirma que a VM está `Running` no Hyper-V Manager
+→ Confirma que a VM está a correr: `VBoxManage list runningvms`
+(VirtualBox, não Hyper-V — ver nota no início deste README)
 → Testa conectividade básica primeiro: `ping <IP_DA_VM>` e
 `Test-NetConnection <IP_DA_VM> -Port 55000`
 → Testa a autenticação diretamente:
@@ -508,6 +520,25 @@ Para adicionar um Event ID novo: acrescentar uma entrada a
 curl -k -u wazuh-wui:PASSWORD -X POST "https://IP_DA_VM:55000/security/user/authenticate?raw=true"
 ```
 Se isto falhar, o problema é de rede/credenciais, não do backend.
+
+**VM aparece `Running` mas `ping <IP_DA_VM>` não responde de todo**
+→ Sintoma observado em 2026-08-31: a VM tinha soft lockups do kernel
+(`watchdog: BUG: soft lockup - CPU#N stuck for Ns!`, visível com
+`VBoxManage controlvm "Wazuh-Manager" screenshotpng ficheiro.png`),
+sobretudo em processos de I/O do OpenSearch (`opensearch[node]`,
+`iou-sqp-*`) — mesmo `systemd-network` ficou preso, por isso a VM
+nunca chega a responder na rede. Ligado ao disco `C:\` estar a 90%
+cheio (o próprio dashboard já assinala isto como "Crítico" na aba
+Sistema) — o Indexer é pesado em escrita, e pouco espaço livre num
+SSD quase cheio degrada I/O o suficiente para travar a VM.
+→ **Remédio imediato:** `VBoxManage controlvm "Wazuh-Manager" poweroff`
+seguido de `VBoxManage startvm "Wazuh-Manager" --type headless` —
+não se resolve sozinho, precisa de reiniciar.
+→ **Remédio de fundo:** libertar espaço em `C:\`, ou mover o
+armazenamento da VM (`C:\Users\<utilizador>\VirtualBox VMs\`) para
+`D:\` se houver um segundo disco com mais espaço livre — confirma com
+`VBoxManage showvminfo "Wazuh-Manager" --machinereadable | grep CfgFile`
+onde está atualmente.
 
 **`uvicorn` falha com `WinError 10013` na porta 8000**
 → Ver [Nota sobre a porta 8000](#nota-sobre-a-porta-8000) — usa
