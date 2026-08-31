@@ -1,0 +1,160 @@
+[
+  {
+    "EventID": 4625,
+    "TimeCreated": "2024-01-15T08:23:45Z",
+    "Computer": "WORKSTATION-01",
+    "TargetUserName": "administrator",
+    "IpAddress": "192.168.1.100",
+    "LogonType": 3,
+    "FailureReason": "Invalid password"
+  },
+  {
+    "EventID": 4625,
+    "TimeCreated": "2024-01-15T08:24:12Z",
+    "Computer": "WORKSTATION-01",
+    "TargetUserName": "administrator",
+    "IpAddress": "192.168.1.100",
+    "LogonType": 3,
+    "FailureReason": "Invalid password"
+  },
+  {
+    "EventID": 4625,
+    "TimeCreated": "2024-01-15T08:24:47Z",
+    "Computer": "WORKSTATION-01",
+    "TargetUserName": "administrator",
+    "IpAddress": "192.168.1.100",
+    "LogonType": 3,
+    "FailureReason": "Invalid password"
+  },
+  {
+    "EventID": 4625,
+    "TimeCreated": "2024-01-15T08:25:20Z",
+    "Computer": "WORKSTATION-01",
+    "TargetUserName": "administrator",
+    "IpAddress": "192.168.1.100",
+    "LogonType": 3,
+    "FailureReason": "Invalid password"
+  },
+  {
+    "EventID": 4625,
+    "TimeCreated": "2024-01-15T08:25:52Z",
+    "Computer": "WORKSTATION-01",
+    "TargetUserName": "administrator",
+    "IpAddress": "192.168.1.100",
+    "LogonType": 3,
+    "FailureReason": "Invalid password"
+  },
+  {
+    "EventID": 4625,
+    "TimeCreated": "2024-01-15T08:26:15Z",
+    "Computer": "WORKSTATION-01",
+    "TargetUserName": "administrator",
+    "IpAddress": "192.168.1.100",
+    "LogonType": 3,
+    "FailureReason": "Invalid password"
+  },
+  {
+    "EventID": 4672,
+    "TimeCreated": "2024-01-15T09:12:33Z",
+    "Computer": "SERVER-DC01",
+    "SubjectUserName": "DOMAIN\\admin_account",
+    "PrivilegeList": "SeBackupPrivilege, SeRestorePrivilege, SeTakeOwnershipPrivilege"
+  },
+  {
+    "EventID": 4698,
+    "TimeCreated": "2024-01-15T10:45:20Z",
+    "Computer": "SERVER-DC01",
+    "TaskName": "\\Microsoft\\Windows\\System32\\tasks\\SuspiciousTask",
+    "SubjectUserName": "DOMAIN\\attacker_user"
+  },
+  {
+    "EventID": 4726,
+    "TimeCreated": "2024-01-15T11:20:15Z",
+    "Computer": "SERVER-DC01",
+    "TargetUserName": "guest_account",
+    "SubjectUserName": "DOMAIN\\admin"
+  },
+  {
+    "EventID": 4720,
+    "TimeCreated": "2024-01-15T12:05:40Z",
+    "Computer": "SERVER-DC01",
+    "TargetUserName": "new_service_account",
+    "SubjectUserName": "DOMAIN\\admin",
+    "SamAccountName": "svc_account_01"
+  },
+  {
+    "EventID": 4724,
+    "TimeCreated": "2024-01-15T13:15:25Z",
+    "Computer": "SERVER-DC01",
+    "TargetUserName": "service_account",
+    "SubjectUserName": "DOMAIN\\admin"
+  },
+  {
+    "EventID": 4728,
+    "TimeCreated": "2024-01-15T14:30:50Z",
+    "Computer": "SERVER-DC01",
+    "TargetUserName": "suspicious_user",
+    "GroupName": "Domain Admins",
+    "SubjectUserName": "DOMAIN\\attacker"
+  },
+  {
+    "EventID": 4719,
+    "TimeCreated": "2024-01-15T15:45:12Z",
+    "Computer": "SERVER-DC01",
+    "SubjectUserName": "DOMAIN\\admin_account",
+    "AuditPolicyChange": "Success"
+  },
+  {
+    "EventID": 5140,
+    "TimeCreated": "2024-01-15T16:20:33Z",
+    "Computer": "SERVER-FILE01",
+    "ShareName": "\\\\SERVER-FILE01\\ConfidentialData",
+    "ClientAddress": "192.168.1.50",
+    "UserName": "DOMAIN\\user_01"
+  },
+  {
+    "EventID": 4722,
+    "TimeCreated": "2024-01-15T17:05:20Z",
+    "Computer": "SERVER-DC01",
+    "TargetUserName": "disabled_account",
+    "SubjectUserName": "DOMAIN\\admin"
+  },
+  {
+    "EventID": 4688,
+    "TimeCreated": "2024-01-15T18:12:47Z",
+    "Computer": "WORKSTATION-02",
+    "NewProcessName": "C:\\Windows\\System32\\cmd.exe",
+    "SubjectUserName": "DOMAIN\\user_02",
+    "CommandLine": "cmd.exe /c powershell -Command Get-Process"
+  },
+  {
+    "EventID": 4701,
+    "TimeCreated": "2024-01-15T19:25:15Z",
+    "Computer": "SERVER-DC01",
+    "TaskName": "\\Microsoft\\Windows\\WindowsUpdate\\ScheduledStartup",
+    "Changes": "Task updated by system"
+  },
+  {
+    "EventID": 4738,
+    "TimeCreated": "2024-01-15T20:40:33Z",
+    "Computer": "SERVER-DC01",
+    "TargetUserName": "service_user",
+    "SubjectUserName": "DOMAIN\\admin",
+    "Changes": "Password expires, Enabled"
+  },
+  {
+    "EventID": 4732,
+    "TimeCreated": "2024-01-15T21:15:50Z",
+    "Computer": "SERVER-DC01",
+    "MemberName": "DOMAIN\\test_user",
+    "GroupName": "Remote Desktop Users",
+    "SubjectUserName": "DOMAIN\\admin"
+  },
+  {
+    "EventID": 4797,
+    "TimeCreated": "2024-01-15T22:30:12Z",
+    "Computer": "SERVER-DC01",
+    "TargetUserName": "frequent_login_user",
+    "BadPasswordCount": 15
+  }
+]

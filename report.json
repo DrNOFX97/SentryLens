@@ -1,0 +1,217 @@
+{
+  "generated_at": "2026-08-25T16:40:23.798541",
+  "total_alerts": 21,
+  "statistics": {
+    "event_4625": 6,
+    "total_events": 20,
+    "severity_high": 11,
+    "event_4672": 1,
+    "event_4698": 1,
+    "event_4726": 1,
+    "event_4720": 1,
+    "severity_medium": 6,
+    "event_4724": 1,
+    "event_4728": 1,
+    "event_4719": 1,
+    "event_5140": 1,
+    "severity_low": 3,
+    "event_4722": 1,
+    "event_4688": 1,
+    "event_4701": 1,
+    "event_4738": 1,
+    "event_4732": 1,
+    "event_4797": 1,
+    "severity_critical": 1
+  },
+  "alerts": [
+    {
+      "event_id": "4625",
+      "timestamp": "2024-01-15T08:23:45Z",
+      "source": "WORKSTATION-01",
+      "severity": "high",
+      "title": "Failed Logon",
+      "description": "Falha de logon para utilizador administrator de 192.168.1.100",
+      "recommendation": "Implementar bloqueio de conta após N falhas. Considerar MFA."
+    },
+    {
+      "event_id": "4625",
+      "timestamp": "2024-01-15T08:24:12Z",
+      "source": "WORKSTATION-01",
+      "severity": "high",
+      "title": "Failed Logon",
+      "description": "Falha de logon para utilizador administrator de 192.168.1.100",
+      "recommendation": "Implementar bloqueio de conta após N falhas. Considerar MFA."
+    },
+    {
+      "event_id": "4625",
+      "timestamp": "2024-01-15T08:24:47Z",
+      "source": "WORKSTATION-01",
+      "severity": "high",
+      "title": "Failed Logon",
+      "description": "Falha de logon para utilizador administrator de 192.168.1.100",
+      "recommendation": "Implementar bloqueio de conta após N falhas. Considerar MFA."
+    },
+    {
+      "event_id": "4625",
+      "timestamp": "2024-01-15T08:25:20Z",
+      "source": "WORKSTATION-01",
+      "severity": "high",
+      "title": "Failed Logon",
+      "description": "Falha de logon para utilizador administrator de 192.168.1.100",
+      "recommendation": "Implementar bloqueio de conta após N falhas. Considerar MFA."
+    },
+    {
+      "event_id": "4625",
+      "timestamp": "2024-01-15T08:25:52Z",
+      "source": "WORKSTATION-01",
+      "severity": "high",
+      "title": "Failed Logon",
+      "description": "Falha de logon para utilizador administrator de 192.168.1.100",
+      "recommendation": "Implementar bloqueio de conta após N falhas. Considerar MFA."
+    },
+    {
+      "event_id": "4625",
+      "timestamp": "2024-01-15T08:26:15Z",
+      "source": "WORKSTATION-01",
+      "severity": "high",
+      "title": "Failed Logon",
+      "description": "Falha de logon para utilizador administrator de 192.168.1.100",
+      "recommendation": "Implementar bloqueio de conta após N falhas. Considerar MFA."
+    },
+    {
+      "event_id": "4672",
+      "timestamp": "2024-01-15T09:12:33Z",
+      "source": "SERVER-DC01",
+      "severity": "high",
+      "title": "Special Privileges Assigned",
+      "description": "Privilégios especiais atribuídos a DOMAIN\\admin_account",
+      "recommendation": "Revisar porque foram necessários privilégios especiais. Validar legitimidade."
+    },
+    {
+      "event_id": "4698",
+      "timestamp": "2024-01-15T10:45:20Z",
+      "source": "SERVER-DC01",
+      "severity": "high",
+      "title": "Scheduled Task Created",
+      "description": "Tarefa agendada criada: \\Microsoft\\Windows\\System32\\tasks\\SuspiciousTask",
+      "recommendation": "Auditar tarefa agendada. Validar se foi criada por administrador autorizado."
+    },
+    {
+      "event_id": "4726",
+      "timestamp": "2024-01-15T11:20:15Z",
+      "source": "SERVER-DC01",
+      "severity": "high",
+      "title": "User Account Deleted",
+      "description": "{\"EventID\": 4726, \"TimeCreated\": \"2024-01-15T11:20:15Z\", \"Computer\": \"SERVER-DC01\", \"TargetUserName\": \"guest_account\", \"SubjectUserName\": \"DOMAIN\\\\admin\"}",
+      "recommendation": "Investigar porque foi removida a conta. Verificar se foi intencional."
+    },
+    {
+      "event_id": "4720",
+      "timestamp": "2024-01-15T12:05:40Z",
+      "source": "SERVER-DC01",
+      "severity": "medium",
+      "title": "User Account Created",
+      "description": "{\"EventID\": 4720, \"TimeCreated\": \"2024-01-15T12:05:40Z\", \"Computer\": \"SERVER-DC01\", \"TargetUserName\": \"new_service_account\", \"SubjectUserName\": \"DOMAIN\\\\admin\", \"SamAccountName\": \"svc_account_01\"}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4724",
+      "timestamp": "2024-01-15T13:15:25Z",
+      "source": "SERVER-DC01",
+      "severity": "medium",
+      "title": "Password Reset Attempt",
+      "description": "{\"EventID\": 4724, \"TimeCreated\": \"2024-01-15T13:15:25Z\", \"Computer\": \"SERVER-DC01\", \"TargetUserName\": \"service_account\", \"SubjectUserName\": \"DOMAIN\\\\admin\"}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4728",
+      "timestamp": "2024-01-15T14:30:50Z",
+      "source": "SERVER-DC01",
+      "severity": "high",
+      "title": "Member Added to Global Group",
+      "description": "{\"EventID\": 4728, \"TimeCreated\": \"2024-01-15T14:30:50Z\", \"Computer\": \"SERVER-DC01\", \"TargetUserName\": \"suspicious_user\", \"GroupName\": \"Domain Admins\", \"SubjectUserName\": \"DOMAIN\\\\attacker\"}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4719",
+      "timestamp": "2024-01-15T15:45:12Z",
+      "source": "SERVER-DC01",
+      "severity": "high",
+      "title": "Security Policy Changed",
+      "description": "{\"EventID\": 4719, \"TimeCreated\": \"2024-01-15T15:45:12Z\", \"Computer\": \"SERVER-DC01\", \"SubjectUserName\": \"DOMAIN\\\\admin_account\", \"AuditPolicyChange\": \"Success\"}",
+      "recommendation": "Revisão urgente. Políticas de segurança foram alteradas."
+    },
+    {
+      "event_id": "5140",
+      "timestamp": "2024-01-15T16:20:33Z",
+      "source": "SERVER-FILE01",
+      "severity": "low",
+      "title": "Network Share Accessed",
+      "description": "{\"EventID\": 5140, \"TimeCreated\": \"2024-01-15T16:20:33Z\", \"Computer\": \"SERVER-FILE01\", \"ShareName\": \"\\\\\\\\SERVER-FILE01\\\\ConfidentialData\", \"ClientAddress\": \"192.168.1.50\", \"UserName\": \"DOMAIN\\\\user_01\"",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4722",
+      "timestamp": "2024-01-15T17:05:20Z",
+      "source": "SERVER-DC01",
+      "severity": "low",
+      "title": "User Account Enabled",
+      "description": "{\"EventID\": 4722, \"TimeCreated\": \"2024-01-15T17:05:20Z\", \"Computer\": \"SERVER-DC01\", \"TargetUserName\": \"disabled_account\", \"SubjectUserName\": \"DOMAIN\\\\admin\"}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4688",
+      "timestamp": "2024-01-15T18:12:47Z",
+      "source": "WORKSTATION-02",
+      "severity": "low",
+      "title": "Process Created",
+      "description": "{\"EventID\": 4688, \"TimeCreated\": \"2024-01-15T18:12:47Z\", \"Computer\": \"WORKSTATION-02\", \"NewProcessName\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"SubjectUserName\": \"DOMAIN\\\\user_02\", \"CommandLine\": \"cmd.exe",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4701",
+      "timestamp": "2024-01-15T19:25:15Z",
+      "source": "SERVER-DC01",
+      "severity": "medium",
+      "title": "Scheduled Task Updated",
+      "description": "{\"EventID\": 4701, \"TimeCreated\": \"2024-01-15T19:25:15Z\", \"Computer\": \"SERVER-DC01\", \"TaskName\": \"\\\\Microsoft\\\\Windows\\\\WindowsUpdate\\\\ScheduledStartup\", \"Changes\": \"Task updated by system\"}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4738",
+      "timestamp": "2024-01-15T20:40:33Z",
+      "source": "SERVER-DC01",
+      "severity": "medium",
+      "title": "User Account Changed",
+      "description": "{\"EventID\": 4738, \"TimeCreated\": \"2024-01-15T20:40:33Z\", \"Computer\": \"SERVER-DC01\", \"TargetUserName\": \"service_user\", \"SubjectUserName\": \"DOMAIN\\\\admin\", \"Changes\": \"Password expires, Enabled\"}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4732",
+      "timestamp": "2024-01-15T21:15:50Z",
+      "source": "SERVER-DC01",
+      "severity": "medium",
+      "title": "Member Added to Local Group",
+      "description": "{\"EventID\": 4732, \"TimeCreated\": \"2024-01-15T21:15:50Z\", \"Computer\": \"SERVER-DC01\", \"MemberName\": \"DOMAIN\\\\test_user\", \"GroupName\": \"Remote Desktop Users\", \"SubjectUserName\": \"DOMAIN\\\\admin\"}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "4797",
+      "timestamp": "2024-01-15T22:30:12Z",
+      "source": "SERVER-DC01",
+      "severity": "medium",
+      "title": "User Account Locked Out",
+      "description": "{\"EventID\": 4797, \"TimeCreated\": \"2024-01-15T22:30:12Z\", \"Computer\": \"SERVER-DC01\", \"TargetUserName\": \"frequent_login_user\", \"BadPasswordCount\": 15}",
+      "recommendation": "Investigar e tomar ação apropriada."
+    },
+    {
+      "event_id": "anomaly_brute_force",
+      "timestamp": "2026-08-25T16:40:23.797686",
+      "source": "administrator",
+      "severity": "critical",
+      "title": "Possível Ataque de Força Bruta Detectado",
+      "description": "Utilizador 'administrator' teve 6 tentativas de logon falhadas",
+      "recommendation": "Bloquear conta temporariamente e investigar origem das tentativas"
+    }
+  ]
+}

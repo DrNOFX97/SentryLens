@@ -12,7 +12,7 @@ O projeto tem duas fases que partilham a mesma lógica de classificação:
 
 | Fase | O que faz | Onde está |
 |---|---|---|
-| **Fase 1** | Analisa ficheiros de log estáticos (XML exportado do Windows Event Viewer) e gera um relatório | `log_analyzer_real.py` (não incluído neste repo — script standalone de uma sessão anterior) |
+| **Fase 1** | Analisa ficheiros de log estáticos (JSON ou CSV) e gera um relatório HTML | [`log_analyzer.py`](log_analyzer.py) — ver [`QUICKSTART.md`](QUICKSTART.md) |
 | **Fase 2** *(este repo)* | Liga-se ao vivo a um laboratório Wazuh (Hyper-V) via API e mostra os alertas num dashboard web | `scripts/` (backend) + `index.html` / `app.js` / `style.css` (frontend) |
 
 A classificação de Event ID → nome amigável / severidade / recomendação
@@ -111,8 +111,11 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   23 Event IDs classificados e testar deteção de força bruta, falta
   instalar o agente Windows (ver
   [Parte 5 do guia](docs/LAB_WAZUH_HYPERV.md#parte-5--instalar-o-agente-wazuh-no-windows)).
-- ❌ `log_analyzer_real.py` (script standalone da Fase 1) não está
-  neste repo — existiu apenas numa sessão de trabalho anterior.
+- ✅ **`log_analyzer.py` (Fase 1) recuperado** — estava só no repositório
+  antigo `dashboard-seguranca` (nome de trabalho deste projeto antes do
+  rebranding, entretanto apagado); trazido de volta com
+  `sample_events.json` (dados de exemplo), `QUICKSTART.md`, e o par
+  `report.html`/`report.json` gerado por ele.
 - ❌ Sem autenticação no dashboard, sem websockets, sem persistência
   própria de histórico — ver [Próximos passos](#-próximos-passos).
 
@@ -126,8 +129,15 @@ Dashboard cybersec/
 ├── CLAUDE.md                    ← instruções do projeto para o Claude Code
 ├── index.html                   ← frontend: página do dashboard
 ├── app.js                       ← frontend: lógica (fetch às APIs, render)
-├── style.css                    ← frontend: estilos (tema escuro)
+├── style.css                    ← frontend: estilos
 ├── logo.png
+│
+├── log_analyzer.py              ← Fase 1: analisa logs estáticos (JSON/CSV), gera relatório HTML
+├── sample_events.json           ← dados de exemplo para testar o log_analyzer.py
+├── report.html / report.json    ← exemplo de output gerado pelo log_analyzer.py
+├── QUICKSTART.md                ← guia rápido do log_analyzer.py (Fase 1)
+├── HARDENING_CHECKLIST.md       ← checklist de hardening Windows, referência autónoma
+├── INCIDENT_RESPONSE.md         ← playbook de resposta a incidentes, referência autónoma
 │
 ├── scripts/                     ← backend FastAPI + automação do laboratório
 │   ├── main.py                  ← app FastAPI, endpoints REST
@@ -521,10 +531,8 @@ que vais usar para correr `uvicorn`
 3. **Persistência própria** — guardar histórico de alertas numa base
    de dados própria (o Wazuh só guarda 90 dias por default).
 4. **Exportar relatório** — botão para gerar um relatório HTML com
-   dados ao vivo, no mesmo espírito do relatório da Fase 1.
-5. Se precisares de reprocessar ficheiros XML estáticos (Fase 1), o
-   `log_analyzer_real.py` original existe apenas numa sessão de
-   trabalho anterior — recuperar/recriar antes de precisar dele.
+   dados ao vivo, no mesmo espírito do relatório da Fase 1
+   (`log_analyzer.py`, já neste repo).
 
 ---
 
