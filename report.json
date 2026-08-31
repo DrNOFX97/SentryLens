@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-25T16:40:23.798541",
+  "generated_at": "2026-08-31T12:14:54.841625",
   "total_alerts": 21,
   "statistics": {
     "event_4625": 6,
@@ -206,7 +206,7 @@
     },
     {
       "event_id": "anomaly_brute_force",
-      "timestamp": "2026-08-25T16:40:23.797686",
+      "timestamp": "2026-08-31T12:14:54.840563",
       "source": "administrator",
       "severity": "critical",
       "title": "Possível Ataque de Força Bruta Detectado",

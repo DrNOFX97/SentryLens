@@ -5,6 +5,7 @@ Análise de logs de segurança com geração de relatório HTML
 Projeto CET - Cibersegurança
 """
 
+import html
 import json
 import csv
 import re
@@ -135,10 +136,18 @@ class WindowsEventLogAnalyzer:
     def _detect_anomalies(self):
         """Detecta padrões anómalos como brute force, múltiplos logons falhados, etc."""
         failed_logons = defaultdict(int)
-        
+
         for event in self.events:
-            # Contar tentativas de logon falhado por usuário
-            if event.get('EventID') == 4625 or event.get('event_id') == '4625':
+            # Contar tentativas de logon falhado por usuário. CSV vem sempre
+            # como string (csv.DictReader), por isso comparar "EventID == 4625"
+            # (int) falha silenciosamente para logs CSV — normalizamos para
+            # int antes de comparar, tal como analyze_events() já faz.
+            event_id = event.get('EventID', event.get('event_id', ''))
+            try:
+                event_id = int(event_id)
+            except (TypeError, ValueError):
+                pass
+            if event_id == 4625:
                 user = event.get('TargetUserName', event.get('target_user', 'Unknown'))
                 failed_logons[user] += 1
         
@@ -494,27 +503,37 @@ class WindowsEventLogAnalyzer:
         severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
         sorted_alerts = sorted(self.alerts, key=lambda x: severity_order.get(x.severity, 5))
         
-        html = ""
+        # Os campos do alerta vêm de logs que podem ter sido manipulados por
+        # um atacante (username, hostname, nome de tarefa, etc.) — escapamos
+        # tudo antes de meter no HTML para evitar XSS armazenado no report.html.
+        report_html = ""
         for alert in sorted_alerts:
-            html += f"""
-            <div class="alert-item {alert.severity}">
+            severity = html.escape(str(alert.severity))
+            title = html.escape(str(alert.title))
+            event_id = html.escape(str(alert.event_id))
+            source = html.escape(str(alert.source))
+            timestamp = html.escape(str(alert.timestamp))
+            description = html.escape(str(alert.description))
+            recommendation = html.escape(str(alert.recommendation))
+            report_html += f"""
+            <div class="alert-item {severity}">
                 <div class="alert-title">
-                    <span>{alert.title} (ID: {alert.event_id})</span>
-                    <span class="alert-badge">{alert.severity}</span>
+                    <span>{title} (ID: {event_id})</span>
+                    <span class="alert-badge">{severity}</span>
                 </div>
                 <div class="alert-details">
-                    <strong>Fonte:</strong> {alert.source} | <strong>Data:</strong> {alert.timestamp}
+                    <strong>Fonte:</strong> {source} | <strong>Data:</strong> {timestamp}
                 </div>
                 <div class="alert-details">
-                    {alert.description}
+                    {description}
                 </div>
                 <div class="alert-recommendation">
-                    <strong>Recomendação:</strong> {alert.recommendation}
+                    <strong>Recomendação:</strong> {recommendation}
                 </div>
             </div>
             """
-        
-        return html
+
+        return report_html
     
     def _generate_summary_html(self):
         """Gera tabela resumida dos eventos detectados"""
@@ -527,7 +546,7 @@ class WindowsEventLogAnalyzer:
         if not event_counts:
             return '<p>Sem eventos para exibir.</p>'
         
-        html = """
+        table_html = """
         <table>
             <thead>
                 <tr>
@@ -539,28 +558,30 @@ class WindowsEventLogAnalyzer:
             </thead>
             <tbody>
         """
-        
+
+        # event_id vem das chaves de self.statistics, alimentadas por
+        # EventID/event_id do log — não confiar nele ao meter em HTML.
         for event_id, count in sorted(event_counts.items(), key=lambda x: x[1], reverse=True):
             try:
                 event_id_int = int(event_id)
             except (TypeError, ValueError):
                 event_id_int = None
             event_info = self.CRITICAL_EVENTS.get(event_id_int, {"name": "Desconhecido", "severity": "info"})
-            html += f"""
+            table_html += f"""
                 <tr>
-                    <td>{event_id}</td>
-                    <td>{event_info['name']}</td>
+                    <td>{html.escape(str(event_id))}</td>
+                    <td>{html.escape(str(event_info['name']))}</td>
                     <td>{count}</td>
-                    <td><span class="alert-badge" style="background: #3498db; color: white;">{event_info['severity']}</span></td>
+                    <td><span class="alert-badge" style="background: #3498db; color: white;">{html.escape(str(event_info['severity']))}</span></td>
                 </tr>
             """
-        
-        html += """
+
+        table_html += """
             </tbody>
         </table>
         """
-        
-        return html
+
+        return table_html
     
     def export_alerts_json(self, output_file="alerts.json"):
         """Exporta alertas para JSON"""
