@@ -63,7 +63,7 @@ class WindowsEventLogAnalyzer:
         4704: {"name": "User Right Assigned", "severity": "high"},
         4713: {"name": "Kerberos Policy Changed", "severity": "high"},
         4719: {"name": "Security Policy Changed", "severity": "high"},
-        4797: {"name": "User Account Locked Out", "severity": "medium"},
+        4797: {"name": "Blank Password Query Attempt", "severity": "medium"},
         5140: {"name": "Network Share Accessed", "severity": "low"},
         5145: {"name": "Network Share Permission Checked", "severity": "low"},
     }

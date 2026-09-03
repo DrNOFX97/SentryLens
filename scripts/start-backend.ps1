@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PythonExe = "C:\Users\Fernando Nuno\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"
+$PythonExe = "C:\Python314\python.exe"
 $LogFile = Join-Path $ScriptsDir "backend.log"
 
 Set-Location $ScriptsDir
