@@ -14,6 +14,7 @@ servidor estático simples).
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -31,7 +32,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from admin_activity import build_admin_activity_report
 from event_catalog import classify_alert
+from lifecycle import build_lifecycle_report
+from rbac import build_privileges_report, load_rbac_baseline
 from system_monitor import (
     check_thresholds,
     get_history,
@@ -63,6 +67,10 @@ WAZUH_INDEXER_PASSWORD = os.getenv("WAZUH_INDEXER_PASSWORD", "")
 # a verificação TLS fica desligada por omissão (False). Se apontares para um
 # Wazuh com certificado válido/CA confiável, define WAZUH_VERIFY_SSL=true.
 WAZUH_VERIFY_SSL = os.getenv("WAZUH_VERIFY_SSL", "false").strip().lower() in ("1", "true", "yes")
+
+# Caminho do ficheiro de baseline RBAC (cargos -> grupos permitidos/proibidos)
+# usado pelo endpoint /api/privileges. Ver rbac.py para o schema esperado.
+RBAC_BASELINE_PATH = os.getenv("RBAC_BASELINE_PATH", "rbac_baseline.example.json")
 
 app = FastAPI(
     title="SentryLens",
@@ -358,3 +366,46 @@ async def force_speedtest():
         return result
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao medir velocidade de rede: {e}")
+
+
+@app.get("/api/lifecycle")
+async def get_lifecycle(days: int = Query(30, ge=1, le=90, description="Janela temporal em dias")):
+    """Painel de ciclo de vida de contas: contagens, linha temporal e deteções de risco."""
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=days * 24, size=2000)
+        return build_lifecycle_report(raw_alerts, days)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/privileges")
+async def get_privileges(days: int = Query(30, ge=1, le=90, description="Janela temporal em dias")):
+    """Painel de desvios RBAC: privilégios atribuídos fora do baseline de cargos versus grupos."""
+    try:
+        baseline = load_rbac_baseline(RBAC_BASELINE_PATH)
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Baseline RBAC não encontrado em '{RBAC_BASELINE_PATH}': {e}",
+        )
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Baseline RBAC inválido (JSON malformado) em '{RBAC_BASELINE_PATH}': {e}",
+        )
+
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=days * 24, size=2000)
+        return build_privileges_report(raw_alerts, baseline)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/admin-activity")
+async def get_admin_activity(days: int = Query(30, ge=1, le=90, description="Janela temporal em dias")):
+    """Painel de atividade de contas administrativas: privilégios especiais, tarefas agendadas e deteções de risco."""
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=days * 24, size=2000)
+        return build_admin_activity_report(raw_alerts, admin_prefix=os.getenv("ADMIN_ACCOUNT_PREFIX", "adm."))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")

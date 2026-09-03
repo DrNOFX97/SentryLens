@@ -6,6 +6,8 @@ scripts/.env
 scripts/__pycache__/
 __pycache__/
 *.pyc
+scripts/.venv/
+.venv/
 
 # Estado local gerado em runtime (não é código-fonte)
 scripts/system_alerts_history.json
