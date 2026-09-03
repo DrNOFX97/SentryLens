@@ -321,6 +321,11 @@ header {
   min-width: 180px;
 }
 
+#privileges-deviations-table td.wrap {
+  white-space: normal;
+  min-width: 180px;
+}
+
 .alert-row.critical { background: #fdf1f0; }
 .alert-row.high { background: #fef8ee; }
 .alert-row.medium { background: #fdfbea; }
@@ -570,6 +575,22 @@ table th {
 .detection-item.level-high { border-left-color: #f39c12; background: #fef8ee; }
 .detection-item.level-medium { border-left-color: #d4ac0d; background: #fdfbea; }
 .detection-item.level-low { border-left-color: #27ae60; background: #f0f9f3; }
+
+/* Bloco de destaque para adições a grupos críticos (painel Privilégios) —
+   mesmo padrão visual de #brute-force-panel (borda esquerda vermelha grossa
+   + fundo ligeiramente rosado), mas como bloco interno em vez do painel
+   inteiro, por isso tem o próprio padding/border-radius. Fica sempre
+   visível, mesmo com a lista vazia (zero é informação de auditoria). */
+.critical-additions-block {
+  border-left: 5px solid #e74c3c;
+  background: #fdf1f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.critical-additions-block .bf-item:last-child {
+  margin-bottom: 0;
+}
 
 /* Banner de erro dentro de um painel (ver renderPanelError em app.js) —
    reutiliza a paleta clara já usada em .card.critical/.alert-row.critical

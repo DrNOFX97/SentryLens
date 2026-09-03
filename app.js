@@ -752,18 +752,193 @@ async function loadLifecyclePanel(days) {
 document.getElementById("lifecycle-type-filter").addEventListener("change", applyLifecycleFilters);
 document.getElementById("lifecycle-user-filter").addEventListener("input", applyLifecycleFilters);
 
+// --- Painel: Auditoria de Privilégios (tab-privileges) ---
+
+function renderPrivilegesDeviationsTable(deviations) {
+  const tbody = document.getElementById("privileges-deviations-body");
+  tbody.innerHTML = "";
+
+  if (!deviations || deviations.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Sem desvios ao baseline neste período</td></tr>';
+    return;
+  }
+
+  deviations.forEach((d) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(d.user)}</td>
+      <td>${escapeHtml(d.cargo)}</td>
+      <td>${escapeHtml(d.group)}</td>
+      <td class="wrap">${escapeHtml(d.reason)}</td>
+      <td>${escapeHtml(d.executed_by)}</td>
+      <td class="mono">${escapeHtml(formatTimestamp(d.timestamp))}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// Bloco de destaque (sempre visível, ver .critical-additions-block em
+// style.css) para adições a grupos críticos — zero é informação de auditoria,
+// por isso nunca escondemos o bloco, só mudamos a mensagem.
+function renderCriticalAdditionsBlock(additions) {
+  const container = document.getElementById("privileges-critical-block");
+
+  if (!additions || additions.length === 0) {
+    container.innerHTML = '<p class="empty-state">Nenhuma adição a grupo crítico neste período</p>';
+    return;
+  }
+
+  container.innerHTML = additions
+    .map(
+      (a) => `
+        <div class="bf-item">
+          <span><strong>${escapeHtml(a.user)}</strong> adicionado a <strong>${escapeHtml(a.group)}</strong> por ${escapeHtml(a.executed_by)}</span>
+          <span>${escapeHtml(formatTimestamp(a.timestamp))}</span>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderPrivilegesGroupsChart(groupRanking) {
+  const sorted = [...(groupRanking || [])].sort((a, b) => b.count - a.count).slice(0, 10);
+
+  renderChart("chart-privileges-groups", {
+    type: "bar",
+    data: {
+      labels: sorted.map((g) => g.group),
+      datasets: [{ label: "Movimentações", data: sorted.map((g) => g.count), backgroundColor: "#0b7d92" }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+    },
+  });
+}
+
+async function loadPrivilegesPanel(days) {
+  try {
+    const data = await fetchJSON(`/api/privileges?days=${days}`);
+    renderPanelError("#privileges-panel", null);
+
+    document.getElementById("kpi-privileges-total").textContent = data.total_movements ?? 0;
+    document.getElementById("kpi-privileges-deviations").textContent = (data.deviations || []).length;
+    document.getElementById("kpi-privileges-critical").textContent = (data.critical_additions || []).length;
+
+    renderPrivilegesGroupsChart(data.group_ranking || []);
+    renderPrivilegesDeviationsTable(data.deviations || []);
+    renderCriticalAdditionsBlock(data.critical_additions || []);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#privileges-panel", err.message || "Erro ao carregar o painel de privilégios.");
+  }
+}
+
+// --- Painel: Contas Privilegiadas (tab-admin-activity) ---
+
+function renderAdminEventComparisonChart(eventCounts) {
+  const admin = eventCounts?.admin ?? 0;
+  const normal = eventCounts?.normal ?? 0;
+
+  renderChart("chart-admin-event-comparison", {
+    type: "doughnut",
+    data: {
+      labels: ["Administrativos", "Normais"],
+      datasets: [{ data: [admin, normal], backgroundColor: ["#8e44ad", "#0b7d92"], borderWidth: 0 }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+    },
+  });
+}
+
+// Procura o timestamp mais recente entre scheduled_tasks/processes cujo user
+// corresponda à conta indicada; devolve null se não encontrar nenhum (nunca
+// inventamos um valor, a coluna "Última Atividade" mostra "—" nesse caso).
+function findLastActivity(user, scheduledTasks, processes) {
+  const events = [...(scheduledTasks || []), ...(processes || [])].filter(
+    (e) => e.user === user && e.timestamp
+  );
+  if (events.length === 0) return null;
+  return events.reduce((latest, e) => (new Date(e.timestamp) > new Date(latest.timestamp) ? e : latest)).timestamp;
+}
+
+function renderAdminAccountsTable(accounts, specialPrivilegesByUser, scheduledTasks, processes) {
+  const tbody = document.getElementById("admin-accounts-body");
+  tbody.innerHTML = "";
+
+  if (!accounts || accounts.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Nenhuma conta administrativa identificada neste período</td></tr>';
+    return;
+  }
+
+  accounts.forEach((user) => {
+    const count = specialPrivilegesByUser?.[user] ?? 0;
+    const lastActivity = findLastActivity(user, scheduledTasks, processes);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(user)}</td>
+      <td>${escapeHtml(count)}</td>
+      <td class="mono">${lastActivity ? escapeHtml(formatTimestamp(lastActivity)) : "—"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderAdminScheduledTasksTable(tasks) {
+  const tbody = document.getElementById("admin-scheduled-tasks-body");
+  tbody.innerHTML = "";
+
+  if (!tasks || tasks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Sem tarefas agendadas por contas administrativas neste período</td></tr>';
+    return;
+  }
+
+  tasks.forEach((t) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(t.user)}</td>
+      <td class="mono">${escapeHtml(formatTimestamp(t.timestamp))}</td>
+      <td>${escapeHtml(t.agent_name)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadAdminActivityPanel(days) {
+  try {
+    const data = await fetchJSON(`/api/admin-activity?days=${days}`);
+    renderPanelError("#admin-activity-panel", null);
+
+    renderAdminEventComparisonChart(data.event_counts || {});
+    renderAdminAccountsTable(
+      data.admin_accounts || [],
+      data.special_privileges_by_user || {},
+      data.scheduled_tasks || [],
+      data.processes || []
+    );
+    renderAdminScheduledTasksTable(data.scheduled_tasks || []);
+    renderDetections("admin-activity-detections", data.detections || []);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#admin-activity-panel", err.message || "Erro ao carregar o painel de contas administrativas.");
+  }
+}
+
 // Ponto de entrada dos painéis novos (ciclo de vida, privilégios, contas
 // admin) — independente de refreshDashboard() (painéis Wazuh antigos) e do
 // window-select (horas); usa sempre period-select (dias) no momento da
 // chamada, nunca reatribui esse .value.
-//
-// Estrutura preparada para os painéis 2 e 3 (privilégios, contas admin):
-// quando existirem loadPrivilegesPanel(days)/loadAdminActivityPanel(days),
-// basta acrescentá-los a este array do Promise.allSettled.
 async function refreshNewPanels() {
   const days = periodSelect.value;
   await Promise.allSettled([
     loadLifecyclePanel(days),
+    loadPrivilegesPanel(days),
+    loadAdminActivityPanel(days),
   ]);
 }
 
