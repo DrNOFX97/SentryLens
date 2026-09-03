@@ -39,6 +39,13 @@ Assunções documentadas:
     - Qualquer timestamp que não seja parseável, ou qualquer evento sem
       os campos necessários para uma deteção específica, é ignorado
       nessa deteção em concreto; nunca faz a função inteira falhar.
+    - Valores de "severity": usa-se deliberadamente o slug ASCII sem
+      acentuação ("critico", "medio", "alto", "baixo") em vez da palavra
+      acentuada, por ser um valor de enumeração da API (não texto de
+      leitura), consistente com a mesma convenção já usada no projeto
+      irmão `ad-iam-lab` (campo `nivel_risco` do baseline RBAC) e em
+      `admin_activity.py`. O texto de leitura (`name`, `explanation`)
+      mantém sempre acentuação completa em português de Portugal.
 """
 
 from __future__ import annotations
@@ -370,7 +377,7 @@ def _detect_criacao_fora_de_horario(
     created_records: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     """Deteta criação de conta (4720) fora do horário laboral habitual:
-    antes das 08:00, depois das 20:00, ou num sabado/domingo, usando as
+    antes das 08:00, depois das 20:00, ou num sábado/domingo, usando as
     componentes de hora e dia da semana do timestamp tal como recebido
     (ver assunção de fuso horário no docstring do módulo). Severidade:
     medio.
@@ -392,7 +399,7 @@ def _detect_criacao_fora_de_horario(
         if local_time > WORK_DAY_END:
             reasons.append("depois das 20:00")
         if weekday >= 5:
-            dia = "sabado" if weekday == 5 else "domingo"
+            dia = "sábado" if weekday == 5 else "domingo"
             reasons.append(f"num {dia}")
 
         if not reasons:
@@ -420,8 +427,8 @@ def _detect_escalada_imediata(
     group_add_records: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     """Deteta "criação com escalada imediata": uma conta criada (4720) que
-    no mesmo dia é adicionada a um grupo critico (4728/4732/4756 com
-    memberName correspondente a um dos grupos criticos monitorizados).
+    no mesmo dia é adicionada a um grupo crítico (4728/4732/4756 com
+    memberName correspondente a um dos grupos críticos monitorizados).
     A comparação de dia usa a data (AAAA-MM-DD) extraída do timestamp tal
     como recebido, sem conversão de fuso horário. Severidade: alto.
     """
@@ -454,7 +461,7 @@ def _detect_escalada_imediata(
                     "explanation": (
                         f"A conta '{user}' foi criada em "
                         f"{created['timestamp_raw']} e no mesmo dia foi "
-                        f"adicionada ao grupo critico '{group_name}' em "
+                        f"adicionada ao grupo crítico '{group_name}' em "
                         f"{group_add['timestamp_raw']}. Escalar privilégios "
                         "logo após a criação de uma conta é um padrão comum em "
                         "movimentos laterais e criação de contas persistentes "

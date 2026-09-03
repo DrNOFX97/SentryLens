@@ -130,6 +130,8 @@ def build_privileges_report(
     group_counts: dict[str, int] = {}
 
     for alert in alerts or []:
+        if not isinstance(alert, dict):
+            continue
         event_id = _extract_event_id(alert)
         if event_id not in GROUP_MOVEMENT_EVENT_IDS:
             continue

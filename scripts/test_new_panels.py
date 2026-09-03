@@ -1,14 +1,14 @@
 """
-Testes de regressao dos 3 paineis novos da Fase 2 (lifecycle, privileges,
-admin-activity), sem precisar do laboratorio Wazuh real ligado. Mocka a
-resposta de WazuhIndexerClient.get_recent_alerts e valida, atraves dos
-endpoints reais /api/lifecycle e /api/privileges, e da funcao pura
-build_admin_activity_report, as 4 deteccoes de risco de cada painel mais o
+Testes de regressão dos 3 painéis novos da Fase 2 (lifecycle, privileges,
+admin-activity), sem precisar do laboratório Wazuh real ligado. Mocka a
+resposta de WazuhIndexerClient.get_recent_alerts e valida, através dos
+endpoints reais /api/lifecycle e /api/privileges, e da função pura
+build_admin_activity_report, as 4 deteções de risco de cada painel mais o
 caso vazio (sem alertas) nos 3 endpoints.
 
-Mesmo estilo de teste do ficheiro irmao test_with_mock.py: TestClient(main.app),
-main.app.router.on_startup.clear() para nao arrancar o loop de monitorizacao
-de sistema, AsyncMock para mockar o cliente do Wazuh Indexer, e a funcao
+Mesmo estilo de teste do ficheiro irmão test_with_mock.py: TestClient(main.app),
+main.app.router.on_startup.clear() para não arrancar o loop de monitorização
+de sistema, AsyncMock para mockar o cliente do Wazuh Indexer, e a função
 check(label, condition) que acumula falhas e faz sys.exit(1) no fim se houver
 alguma.
 
@@ -26,8 +26,8 @@ from fastapi.testclient import TestClient
 import main
 from admin_activity import build_admin_activity_report
 
-# Desliga o startup event (loop de monitorizacao de sistema da Fase 2) - estes
-# testes validam so os paineis de lifecycle/privileges/admin-activity, nao
+# Desliga o startup event (loop de monitorização de sistema da Fase 2) - estes
+# testes validam só os painéis de lifecycle/privileges/admin-activity, não
 # devem tocar em psutil/speedtest nem escrever no system_alerts_history.json
 # real.
 main.app.router.on_startup.clear()
@@ -49,9 +49,9 @@ def _alert(
     rule_id: str = "60000",
     level: int = 8,
 ) -> dict[str, Any]:
-    """Constroi um alerta mock no formato devolvido pelo Wazuh Indexer (ver
+    """Constrói um alerta mock no formato devolvido pelo Wazuh Indexer (ver
     test_with_mock.py para a forma exata), parametrizado pelos campos que
-    cada deteccao dos 3 paineis novos realmente le.
+    cada deteção dos 3 painéis novos realmente lê.
     """
     return {
         "@timestamp": timestamp,
@@ -63,24 +63,24 @@ def _alert(
 
 
 # ---------------------------------------------------------------------------
-# Cenario 2: painel Lifecycle - uma ocorrencia de cada uma das 4 deteccoes
-# de lifecycle.py. Cada deteccao usa um utilizador proprio para nao haver
-# contaminacao cruzada entre deteccoes (ex: o utilizador da "conta
-# descartavel" nao aparece em mais nenhum outro evento).
+# Cenário 2: painel Lifecycle - uma ocorrência de cada uma das 4 deteções
+# de lifecycle.py. Cada deteção usa um utilizador próprio para não haver
+# contaminação cruzada entre deteções (ex: o utilizador da "conta
+# descartável" não aparece em mais nenhum outro evento).
 # ---------------------------------------------------------------------------
 LIFECYCLE_ALERTS: list[dict[str, Any]] = [
     # Offboarding falhado: conta desativada (4725) e depois faz login com
-    # sucesso (4624) apos a desativacao.
+    # sucesso (4624) após a desativação.
     _alert("2026-08-01T10:00:00Z", 4725, {"targetUserName": "offboard.user"}),
     _alert("2026-08-02T10:00:00Z", 4624, {"targetUserName": "offboard.user"}),
-    # Conta descartavel: criada (4720) e eliminada (4726) com menos de 24h
-    # de diferenca.
+    # Conta descartável: criada (4720) e eliminada (4726) com menos de 24h
+    # de diferença.
     _alert("2026-08-03T09:00:00Z", 4720, {"targetUserName": "discard.user"}),
     _alert("2026-08-03T15:00:00Z", 4726, {"targetUserName": "discard.user"}),
-    # Criacao fora de horario: conta criada as 02:00 (antes das 08:00).
+    # Criação fora de horário: conta criada às 02:00 (antes das 08:00).
     _alert("2026-08-04T02:00:00Z", 4720, {"targetUserName": "offhours.user"}),
-    # Criacao com escalada imediata: conta criada e, no mesmo dia, adicionada
-    # ao grupo critico "Domain Admins".
+    # Criação com escalada imediata: conta criada e, no mesmo dia, adicionada
+    # ao grupo crítico "Domain Admins".
     _alert("2026-08-05T09:00:00Z", 4720, {"targetUserName": "escalate.user"}),
     _alert(
         "2026-08-05T11:00:00Z",
@@ -94,23 +94,23 @@ LIFECYCLE_ALERTS: list[dict[str, Any]] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Cenario 3: painel Privileges. O endpoint /api/privileges chama
+# Cenário 3: painel Privileges. O endpoint /api/privileges chama
 # build_privileges_report(raw_alerts, baseline) SEM user_to_cargo (ver
 # main.py), pelo que, dentro deste endpoint, TODOS os utilizadores caem em
-# "cargo desconhecido" e TODAS as adicoes geram sempre desvio com a razao
-# "cargo desconhecido no baseline" - independentemente do grupo a que sao
-# adicionados corresponder ou nao aos grupos_permitidos de um cargo real do
-# rbac_baseline.example.json. Por isso as 3 adicoes abaixo (uma a um grupo
-# fora dos permitidos de um cargo real, uma a um grupo critico, e uma a um
-# grupo qualquer para um utilizador sem cargo mapeavel) geram, todas elas,
-# a mesma razao de desvio quando passam pelo endpoint. A adicao ao grupo
-# critico entra tambem em critical_additions, independentemente do desvio.
-# Inclui-se ainda uma remocao, que conta para total_movements e para o
+# "cargo desconhecido" e TODAS as adições geram sempre desvio com a razão
+# "cargo desconhecido no baseline" - independentemente do grupo a que são
+# adicionados corresponder ou não aos grupos_permitidos de um cargo real do
+# rbac_baseline.example.json. Por isso as 3 adições abaixo (uma a um grupo
+# fora dos permitidos de um cargo real, uma a um grupo crítico, e uma a um
+# grupo qualquer para um utilizador sem cargo mapeável) geram, todas elas,
+# a mesma razão de desvio quando passam pelo endpoint. A adição ao grupo
+# crítico entra também em critical_additions, independentemente do desvio.
+# Inclui-se ainda uma remoção, que conta para total_movements e para o
 # ranking de grupos mas nunca gera desvio.
 # ---------------------------------------------------------------------------
 PRIVILEGES_ALERTS: list[dict[str, Any]] = [
-    # Adicao a um grupo fora dos grupos_permitidos do cargo real "Tecnico de
-    # Suporte" (que so permite GG-IT-Suporte e DL-Partilha-IT-Leitura).
+    # Adição a um grupo fora dos grupos_permitidos do cargo real "Técnico de
+    # Suporte" (que só permite GG-IT-Suporte e DL-Partilha-IT-Leitura).
     _alert(
         "2026-08-10T09:00:00Z",
         4732,
@@ -120,7 +120,7 @@ PRIVILEGES_ALERTS: list[dict[str, Any]] = [
             "memberName": "CN=GG-RH-Confidencial,OU=Grupos,DC=nortada,DC=local",
         },
     ),
-    # Adicao a um grupo critico (Domain Admins).
+    # Adição a um grupo crítico (Domain Admins).
     _alert(
         "2026-08-11T09:00:00Z",
         4728,
@@ -130,7 +130,7 @@ PRIVILEGES_ALERTS: list[dict[str, Any]] = [
             "memberName": "CN=Domain Admins,CN=Users,DC=nortada,DC=local",
         },
     ),
-    # Adicao de um utilizador que nao ha como mapear a nenhum cargo.
+    # Adição de um utilizador que não há como mapear a nenhum cargo.
     _alert(
         "2026-08-12T09:00:00Z",
         4756,
@@ -140,7 +140,7 @@ PRIVILEGES_ALERTS: list[dict[str, Any]] = [
             "memberName": "CN=GG-Random-Group,OU=Grupos,DC=nortada,DC=local",
         },
     ),
-    # Remocao: conta para total_movements e group_ranking, nunca e desvio.
+    # Remoção: conta para total_movements e group_ranking, nunca é desvio.
     _alert(
         "2026-08-13T09:00:00Z",
         4733,
@@ -153,35 +153,35 @@ PRIVILEGES_ALERTS: list[dict[str, Any]] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Cenario 4: painel Admin Activity - uma ocorrencia de cada uma das 4
-# deteccoes de admin_activity.py. A deteccao "Conta administrativa sem
-# atividade" depende do instante de referencia `now`: em vez de passar pelo
+# Cenário 4: painel Admin Activity - uma ocorrência de cada uma das 4
+# deteções de admin_activity.py. A deteção "Conta administrativa sem
+# atividade" depende do instante de referência `now`: em vez de passar pelo
 # endpoint /api/admin-activity (onde `now` seria sempre datetime.now()),
 # chama-se build_admin_activity_report diretamente com um `now` fixo, para o
-# teste ser deterministico e nao depender da data em que corre.
+# teste ser determinístico e não depender da data em que corre.
 # ---------------------------------------------------------------------------
 ADMIN_ACTIVITY_NOW = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 ADMIN_ACTIVITY_ALERTS: list[dict[str, Any]] = [
-    # Violacao de separacao de contas: conta "adm." faz logon interativo
-    # local (logonType 2) numa maquina cujo nome nao contem "SERVER" nem "DC".
+    # Violação de separação de contas: conta "adm." faz logon interativo
+    # local (logonType 2) numa máquina cujo nome não contém "SERVER" nem "DC".
     _alert(
         "2026-08-31T10:00:00Z",
         4624,
         {"targetUserName": "adm.violation", "logonType": "2"},
         agent_name="WORKSTATION07",
     ),
-    # Conta administrativa sem atividade: ultimo evento muito antigo face a
-    # ADMIN_ACTIVITY_NOW (mais de reference_days=60 dias de diferenca).
+    # Conta administrativa sem atividade: último evento muito antigo face a
+    # ADMIN_ACTIVITY_NOW (mais de reference_days=60 dias de diferença).
     _alert("2026-01-01T09:00:00Z", 4672, {"subjectUserName": "adm.inactive"}),
-    # Atividade fora de horario: processo criado as 03:00 (antes das 08:00).
+    # Atividade fora de horário: processo criado às 03:00 (antes das 08:00).
     _alert(
         "2026-08-30T03:00:00Z",
         4688,
         {"subjectUserName": "adm.offhours"},
     ),
-    # Privilegio inesperado: utilizador sem prefixo "adm." e sem adesao a
-    # grupo critico observada recebe privilegios especiais (evento 4672).
+    # Privilégio inesperado: utilizador sem prefixo "adm." e sem adesão a
+    # grupo crítico observada recebe privilégios especiais (evento 4672).
     _alert("2026-08-30T10:00:00Z", 4672, {"subjectUserName": "regular.user"}),
 ]
 
@@ -207,7 +207,7 @@ def run() -> None:
     check("GET /api/privileges (vazio) devolve 200", resp_privileges_empty.status_code == 200)
     privileges_empty = resp_privileges_empty.json()
     check(
-        "Privileges vazio nao tem movimentos, desvios, adicoes criticas nem ranking",
+        "Privileges vazio não tem movimentos, desvios, adições críticas nem ranking",
         privileges_empty["total_movements"] == 0
         and privileges_empty["deviations"] == []
         and privileges_empty["critical_additions"] == []
@@ -218,7 +218,7 @@ def run() -> None:
     check("GET /api/admin-activity (vazio) devolve 200", resp_admin_empty.status_code == 200)
     admin_empty = resp_admin_empty.json()
     check(
-        "Admin Activity vazio nao tem contas admin, tarefas, processos nem deteccoes",
+        "Admin Activity vazio não tem contas admin, tarefas, processos nem deteções",
         admin_empty["admin_accounts"] == []
         and admin_empty["event_counts"] == {"admin": 0, "normal": 0}
         and admin_empty["special_privileges_by_user"] == {}
@@ -227,11 +227,11 @@ def run() -> None:
         and admin_empty["detections"] == [],
     )
     check(
-        "Admin Activity vazio tem distribuicao horaria com as 24 horas a zero",
+        "Admin Activity vazio tem distribuição horária com as 24 horas a zero",
         admin_empty["special_privileges_by_hour"] == {str(h): 0 for h in range(24)},
     )
 
-    # --- 2. Painel Lifecycle: uma ocorrencia de cada deteccao ---
+    # --- 2. Painel Lifecycle: uma ocorrência de cada deteção ---
     main.indexer_client.get_recent_alerts = AsyncMock(return_value=LIFECYCLE_ALERTS)
 
     resp_lifecycle = client.get("/api/lifecycle")
@@ -243,19 +243,19 @@ def run() -> None:
         "Offboarding falhado" in lifecycle_names,
     )
     check(
-        "Lifecycle deteta 'Conta descartavel'",
+        "Lifecycle deteta 'Conta descartável'",
         "Conta descartável" in lifecycle_names,
     )
     check(
-        "Lifecycle deteta 'Criacao fora de horario'",
+        "Lifecycle deteta 'Criação fora de horário'",
         "Criação fora de horário" in lifecycle_names,
     )
     check(
-        "Lifecycle deteta 'Criacao com escalada imediata'",
+        "Lifecycle deteta 'Criação com escalada imediata'",
         "Criação com escalada imediata" in lifecycle_names,
     )
 
-    # --- 3. Painel Privileges: desvio, grupo critico e cargo desconhecido ---
+    # --- 3. Painel Privileges: desvio, grupo crítico e cargo desconhecido ---
     main.indexer_client.get_recent_alerts = AsyncMock(return_value=PRIVILEGES_ALERTS)
 
     resp_privileges = client.get("/api/privileges")
@@ -263,36 +263,36 @@ def run() -> None:
     privileges = resp_privileges.json()
 
     check(
-        "Privileges conta as 4 movimentacoes (3 adicoes + 1 remocao)",
+        "Privileges conta as 4 movimentações (3 adições + 1 remoção)",
         privileges["total_movements"] == 4,
     )
     check(
-        "Privileges gera exatamente 3 desvios (so as adicoes contam)",
+        "Privileges gera exatamente 3 desvios (só as adições contam)",
         len(privileges["deviations"]) == 3,
     )
     check(
-        "Todos os desvios tem a razao 'cargo desconhecido no baseline' "
-        "(o endpoint nao passa user_to_cargo a build_privileges_report)",
+        "Todos os desvios têm a razão 'cargo desconhecido no baseline' "
+        "(o endpoint não passa user_to_cargo a build_privileges_report)",
         all(d["reason"] == "cargo desconhecido no baseline" for d in privileges["deviations"]),
     )
     check(
-        "Privileges regista a adicao ao grupo critico 'Domain Admins' em critical_additions",
+        "Privileges regista a adição ao grupo crítico 'Domain Admins' em critical_additions",
         any(c["group"] == "Domain Admins" and c["user"] == "sysadmin.new" for c in privileges["critical_additions"]),
     )
     check(
-        "Privileges tem group_ranking com as 4 movimentacoes",
+        "Privileges tem group_ranking com as 4 movimentações",
         sum(g["count"] for g in privileges["group_ranking"]) == 4,
     )
 
-    # --- 4. Painel Admin Activity: uma ocorrencia de cada deteccao ---
-    # Chamada direta a funcao pura (ver comentario acima de ADMIN_ACTIVITY_NOW),
-    # sem passar pelo endpoint, para fixar `now` de forma deterministica.
+    # --- 4. Painel Admin Activity: uma ocorrência de cada deteção ---
+    # Chamada direta à função pura (ver comentário acima de ADMIN_ACTIVITY_NOW),
+    # sem passar pelo endpoint, para fixar `now` de forma determinística.
     admin_activity = build_admin_activity_report(
         ADMIN_ACTIVITY_ALERTS, admin_prefix="adm.", now=ADMIN_ACTIVITY_NOW
     )
     admin_names = {d["name"] for d in admin_activity["detections"]}
     check(
-        "Admin Activity deteta 'Violacao de separacao de contas'",
+        "Admin Activity deteta 'Violação de separação de contas'",
         "Violação de separação de contas" in admin_names,
     )
     check(
@@ -300,11 +300,11 @@ def run() -> None:
         "Conta administrativa sem atividade" in admin_names,
     )
     check(
-        "Admin Activity deteta 'Atividade fora de horario'",
+        "Admin Activity deteta 'Atividade fora de horário'",
         "Atividade fora de horário" in admin_names,
     )
     check(
-        "Admin Activity deteta 'Privilegio inesperado'",
+        "Admin Activity deteta 'Privilégio inesperado'",
         "Privilégio inesperado" in admin_names,
     )
 
