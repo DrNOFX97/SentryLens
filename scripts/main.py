@@ -70,7 +70,10 @@ WAZUH_VERIFY_SSL = os.getenv("WAZUH_VERIFY_SSL", "false").strip().lower() in ("1
 
 # Caminho do ficheiro de baseline RBAC (cargos -> grupos permitidos/proibidos)
 # usado pelo endpoint /api/privileges. Ver rbac.py para o schema esperado.
-RBAC_BASELINE_PATH = os.getenv("RBAC_BASELINE_PATH", "rbac_baseline.example.json")
+RBAC_BASELINE_PATH = os.getenv(
+    "RBAC_BASELINE_PATH",
+    os.path.join(os.path.dirname(__file__), "rbac_baseline.example.json"),
+)
 
 app = FastAPI(
     title="SentryLens",
