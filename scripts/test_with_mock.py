@@ -136,6 +136,14 @@ def run() -> None:
         len(high_alerts) > 0 and all(a["severity"] == "high" for a in high_alerts),
     )
 
+    # --- GET /api/alerts com filtro de categoria ---
+    resp_autenticacao = client.get("/api/alerts", params={"category": "autenticacao"})
+    autenticacao_alerts = resp_autenticacao.json()["alerts"]
+    check(
+        "Filtro category=autenticacao só devolve alertas dessa categoria (7 eventos 4625)",
+        len(autenticacao_alerts) == 7 and all(a["category"] == "autenticacao" for a in autenticacao_alerts),
+    )
+
     # --- GET /api/stats ---
     resp_stats = client.get("/api/stats")
     check("GET /api/stats devolve 200", resp_stats.status_code == 200)
@@ -146,6 +154,10 @@ def run() -> None:
     check(
         "top_events inclui 4625 com contagem agregada (5 admin + 2 guest = 7)",
         event_4625_entry is not None and event_4625_entry["count"] == 7,
+    )
+    check(
+        "by_category agrega corretamente (7 autenticacao, 1 ciclo_de_vida, 1 geral)",
+        stats["by_category"] == {"autenticacao": 7, "ciclo_de_vida": 1, "geral": 1},
     )
 
     # --- GET /api/brute-force ---
