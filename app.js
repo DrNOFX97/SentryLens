@@ -7,6 +7,7 @@ const windowSelect = document.getElementById("window-select");
 const severityFilter = document.getElementById("severity-filter");
 const refreshBtn = document.getElementById("refresh-btn");
 const statusIndicator = document.getElementById("status-indicator");
+const periodSelect = document.getElementById("period-select");
 
 // Dados do Wazuh (nomes de agente, descrições de regra, username de logons
 // falhados, etc.) podem conter texto controlado por um atacante — escapamos
@@ -38,6 +39,15 @@ function severityBadge(severity) {
   return `<span class="severity-badge ${escapeHtml(severity)}">${escapeHtml(label)}</span>`;
 }
 
+// O backend dos painéis novos (ciclo de vida, privilégios, contas admin)
+// devolve severidade em slugs PT ("critico"/"alto"/"medio"/"baixo"); a app
+// usa classes em inglês (severityBadge, .detection-item, .alert-row, etc.)
+// — traduz aqui, num único sítio, para os 3 painéis novos.
+function mapSeverity(sev) {
+  const map = { critico: "critical", alto: "high", medio: "medium", baixo: "low" };
+  return map[sev] || sev;
+}
+
 function formatTimestamp(ts) {
   if (!ts) return "-";
   try {
@@ -54,6 +64,68 @@ async function fetchJSON(path) {
     throw new Error(body.detail || `Erro HTTP ${response.status}`);
   }
   return response.json();
+}
+
+// --- Helpers partilhados pelos painéis novos (ciclo de vida, privilégios,
+// contas admin) — reutilizáveis pelos 3, ver docs/README ou o comentário
+// de refreshNewPanels() mais abaixo para a estrutura esperada. ---
+
+// Renderiza uma lista de deteções de risco ({name, severity, explanation})
+// dentro do container indicado. severity vem em slugs PT do backend e é
+// traduzida com mapSeverity() antes de aplicar a classe .level-<...>.
+function renderDetections(containerId, detections) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (!detections || detections.length === 0) {
+    container.innerHTML = '<p class="empty-state">Sem deteções neste período</p>';
+    return;
+  }
+
+  container.innerHTML = detections
+    .map((d) => {
+      const level = escapeHtml(mapSeverity(d.severity));
+      return `
+        <div class="detection-item level-${level}">
+          <strong>${escapeHtml(d.name)}</strong>
+          <span>${escapeHtml(d.explanation)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+// Mostra (ou, com message vazio/null, esconde) um banner de erro dentro do
+// painel indicado por panelSelector (ex: "#lifecycle-panel").
+//
+// Decisão de paleta: reutilizamos a paleta CLARA já usada em
+// .card.critical/.alert-row.critical (fundo #fdf1f0, texto #c0392b), e não
+// a paleta escura de .status-error (#5c1e1e/#ff8080). Motivo: .status-error
+// foi pensada para o indicador de estado sobre o fundo navy do header; os
+// painéis novos são .panel com fundo branco/claro, tal como todos os
+// outros painéis da app, por isso a paleta clara é a que já convive bem
+// com esse fundo (é a mesma usada em #brute-force-panel/.alert-row.critical).
+function renderPanelError(panelSelector, message) {
+  const panel = document.querySelector(panelSelector);
+  if (!panel) return;
+
+  let banner = panel.querySelector(".panel-error-banner");
+  if (!message) {
+    if (banner) banner.remove();
+    return;
+  }
+
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.className = "panel-error-banner";
+    const heading = panel.querySelector("h2");
+    if (heading) {
+      heading.insertAdjacentElement("afterend", banner);
+    } else {
+      panel.insertBefore(banner, panel.firstChild);
+    }
+  }
+  banner.innerHTML = `⚠️ ${escapeHtml(message)}`;
 }
 
 async function loadStats(hours) {
@@ -575,6 +647,128 @@ function renderSystemUsageChart(history) {
   });
 }
 
+// --- Painel: Ciclo de Vida de Contas (tab-lifecycle) ---
+
+// event_id do Windows -> rótulo em português para a coluna "Tipo".
+const lifecycleEventLabels = {
+  4720: "Criada",
+  4722: "Ativada",
+  4725: "Desativada",
+  4726: "Eliminada",
+  4740: "Bloqueada",
+};
+
+function lifecycleEventTypeLabel(eventId) {
+  return lifecycleEventLabels[eventId] || String(eventId);
+}
+
+// Guarda o último resultado do fetch para os filtros (tipo/utilizador)
+// filtrarem client-side sem precisar de um novo pedido ao backend.
+let lastLifecycleEvents = [];
+
+function renderLifecycleEventsTable(events) {
+  const tbody = document.getElementById("lifecycle-events-body");
+  tbody.innerHTML = "";
+
+  if (!events || events.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Sem eventos neste período</td></tr>';
+    return;
+  }
+
+  events.forEach((ev) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="mono">${escapeHtml(formatTimestamp(ev.timestamp))}</td>
+      <td>${escapeHtml(lifecycleEventTypeLabel(ev.event_id))}</td>
+      <td>${escapeHtml(ev.target_user)}</td>
+      <td>${escapeHtml(ev.executed_by)}</td>
+      <td>${escapeHtml(ev.agent_name)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function applyLifecycleFilters() {
+  const typeFilter = document.getElementById("lifecycle-type-filter").value;
+  const userFilter = document.getElementById("lifecycle-user-filter").value.trim().toLowerCase();
+
+  let filtered = lastLifecycleEvents;
+  if (typeFilter) {
+    filtered = filtered.filter((ev) => String(ev.event_id) === typeFilter);
+  }
+  if (userFilter) {
+    filtered = filtered.filter((ev) => (ev.target_user || "").toLowerCase().includes(userFilter));
+  }
+  renderLifecycleEventsTable(filtered);
+}
+
+function renderLifecycleTimelineChart(timeline) {
+  const data = timeline || [];
+  renderChart("chart-lifecycle-timeline", {
+    type: "line",
+    data: {
+      labels: data.map((t) => t.date),
+      datasets: [
+        { label: "Criadas", data: data.map((t) => t.created), borderColor: "#0b7d92", backgroundColor: "rgba(11,125,146,0.08)", fill: false, tension: 0.25 },
+        { label: "Ativadas", data: data.map((t) => t.activated), borderColor: "#16a085", backgroundColor: "rgba(22,160,133,0.08)", fill: false, tension: 0.25 },
+        { label: "Desativadas", data: data.map((t) => t.disabled), borderColor: "#f39c12", backgroundColor: "rgba(243,156,18,0.08)", fill: false, tension: 0.25 },
+        { label: "Eliminadas", data: data.map((t) => t.deleted), borderColor: "#e74c3c", backgroundColor: "rgba(231,76,60,0.08)", fill: false, tension: 0.25 },
+        { label: "Bloqueadas", data: data.map((t) => t.locked), borderColor: "#8e44ad", backgroundColor: "rgba(142,68,173,0.08)", fill: false, tension: 0.25 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+    },
+  });
+}
+
+async function loadLifecyclePanel(days) {
+  try {
+    const data = await fetchJSON(`/api/lifecycle?days=${days}`);
+    renderPanelError("#lifecycle-panel", null);
+
+    const counts = data.counts || {};
+    document.getElementById("kpi-lifecycle-created").textContent = counts.created ?? 0;
+    document.getElementById("kpi-lifecycle-activated").textContent = counts.activated ?? 0;
+    document.getElementById("kpi-lifecycle-disabled").textContent = counts.disabled ?? 0;
+    document.getElementById("kpi-lifecycle-deleted").textContent = counts.deleted ?? 0;
+    document.getElementById("kpi-lifecycle-locked").textContent = counts.locked ?? 0;
+
+    renderLifecycleTimelineChart(data.timeline || []);
+
+    lastLifecycleEvents = data.events || [];
+    applyLifecycleFilters();
+
+    renderDetections("lifecycle-detections", data.detections || []);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#lifecycle-panel", err.message || "Erro ao carregar o painel de ciclo de vida.");
+  }
+}
+
+document.getElementById("lifecycle-type-filter").addEventListener("change", applyLifecycleFilters);
+document.getElementById("lifecycle-user-filter").addEventListener("input", applyLifecycleFilters);
+
+// Ponto de entrada dos painéis novos (ciclo de vida, privilégios, contas
+// admin) — independente de refreshDashboard() (painéis Wazuh antigos) e do
+// window-select (horas); usa sempre period-select (dias) no momento da
+// chamada, nunca reatribui esse .value.
+//
+// Estrutura preparada para os painéis 2 e 3 (privilégios, contas admin):
+// quando existirem loadPrivilegesPanel(days)/loadAdminActivityPanel(days),
+// basta acrescentá-los a este array do Promise.allSettled.
+async function refreshNewPanels() {
+  const days = periodSelect.value;
+  await Promise.allSettled([
+    loadLifecyclePanel(days),
+  ]);
+}
+
+periodSelect.addEventListener("change", refreshNewPanels);
+
 async function refreshDashboard() {
   const hours = windowSelect.value;
   const severity = severityFilter.value;
@@ -623,3 +817,8 @@ document.getElementById("system-summary-card").addEventListener("click", () => a
 // Carrega ao abrir e depois atualiza automaticamente a cada 30s
 refreshDashboard();
 setInterval(refreshDashboard, 30000);
+
+// Painéis novos (ciclo de vida, privilégios, contas admin) — independentes
+// dos painéis Wazuh acima, correm no seu próprio ciclo de 30s.
+refreshNewPanels();
+setInterval(refreshNewPanels, 30000);

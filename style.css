@@ -546,6 +546,44 @@ table th {
 .system-alert-item.level-aviso { border-left-color: #f39c12; background: #fef8ee; }
 .system-alert-item.level-critico { border-left-color: #e74c3c; background: #fdf1f0; }
 
+/* --- Deteções de risco (painéis novos: ciclo de vida, privilégios,
+   contas admin) — mesma ideia de .system-alert-item, mas com os 4 níveis
+   de severidade da app (critical/high/medium/low) em vez dos 2 do sistema
+   (aviso/critico). --- */
+
+.detection-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  border-left: 4px solid #ccc;
+  background: #fafafa;
+}
+
+.detection-item strong {
+  color: var(--ink-900);
+}
+
+.detection-item.level-critical { border-left-color: #e74c3c; background: #fdf1f0; }
+.detection-item.level-high { border-left-color: #f39c12; background: #fef8ee; }
+.detection-item.level-medium { border-left-color: #d4ac0d; background: #fdfbea; }
+.detection-item.level-low { border-left-color: #27ae60; background: #f0f9f3; }
+
+/* Banner de erro dentro de um painel (ver renderPanelError em app.js) —
+   reutiliza a paleta clara já usada em .card.critical/.alert-row.critical
+   (fundo #fdf1f0, texto #c0392b), não a paleta escura de .status-error,
+   porque este banner vive dentro de um .panel de fundo branco. */
+.panel-error-banner {
+  background: #fdf1f0;
+  color: #c0392b;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
 /* --- Análises / gráficos (Chart.js) --- */
 
 .charts-grid {

@@ -27,6 +27,12 @@
         <option value="24" selected>Últimas 24 horas</option>
         <option value="168">Última semana</option>
       </select>
+      <label for="period-select">Período (novos painéis):</label>
+      <select id="period-select">
+        <option value="7">7 dias</option>
+        <option value="30" selected>30 dias</option>
+        <option value="90">90 dias</option>
+      </select>
       <button id="refresh-btn">🔄 Atualizar</button>
       <span id="status-indicator" class="status-indicator status-unknown">● a verificar</span>
     </div>
@@ -37,6 +43,9 @@
     <button class="tab-btn" data-tab="alerts">🚨 Alertas</button>
     <button class="tab-btn" data-tab="agents">🖥️ Agentes</button>
     <button class="tab-btn" data-tab="system">⚙️ Sistema</button>
+    <button class="tab-btn" data-tab="lifecycle">📋 Ciclo de Vida</button>
+    <button class="tab-btn" data-tab="privileges">🔑 Privilégios</button>
+    <button class="tab-btn" data-tab="admin-activity">👤 Contas Admin</button>
   </nav>
 
   <main class="container">
@@ -248,6 +257,91 @@
         <div class="chart-card">
           <div class="chart-canvas-wrap"><canvas id="chart-system-usage"></canvas></div>
         </div>
+      </section>
+    </div>
+
+    <!-- ===== Ciclo de Vida de Contas ===== -->
+    <div class="tab-content" id="tab-lifecycle">
+      <section class="panel" id="lifecycle-panel">
+        <h2>📋 Ciclo de Vida de Contas</h2>
+
+        <section class="kpi-grid" id="lifecycle-kpi-grid">
+          <div class="card">
+            <h3>Criadas</h3>
+            <div class="value" id="kpi-lifecycle-created">—</div>
+          </div>
+          <div class="card">
+            <h3>Ativadas</h3>
+            <div class="value" id="kpi-lifecycle-activated">—</div>
+          </div>
+          <div class="card">
+            <h3>Desativadas</h3>
+            <div class="value" id="kpi-lifecycle-disabled">—</div>
+          </div>
+          <div class="card">
+            <h3>Eliminadas</h3>
+            <div class="value" id="kpi-lifecycle-deleted">—</div>
+          </div>
+          <div class="card">
+            <h3>Bloqueadas</h3>
+            <div class="value" id="kpi-lifecycle-locked">—</div>
+          </div>
+        </section>
+
+        <div class="chart-card">
+          <h3>Ciclo de vida ao longo do tempo</h3>
+          <div class="chart-canvas-wrap"><canvas id="chart-lifecycle-timeline"></canvas></div>
+        </div>
+
+        <h3 class="system-alerts-title" style="margin-top: 25px;">Eventos</h3>
+        <div class="filter-row">
+          <select id="lifecycle-type-filter">
+            <option value="">Todos os tipos</option>
+            <option value="4720">Criada</option>
+            <option value="4722">Ativada</option>
+            <option value="4725">Desativada</option>
+            <option value="4726">Eliminada</option>
+            <option value="4740">Bloqueada</option>
+          </select>
+          <input type="text" id="lifecycle-user-filter" placeholder="Filtrar por utilizador...">
+        </div>
+        <div class="table-scroll">
+          <table id="lifecycle-events-table">
+            <thead>
+              <tr>
+                <th>Data/Hora</th>
+                <th>Tipo</th>
+                <th>Utilizador Alvo</th>
+                <th>Executado Por</th>
+                <th>Agente</th>
+              </tr>
+            </thead>
+            <tbody id="lifecycle-events-body">
+              <tr><td colspan="5" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="system-alerts-title" style="margin-top: 25px;">Deteções de risco</h3>
+        <div id="lifecycle-detections" class="system-alerts-list">
+          <p class="empty-state">A carregar...</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Privilégios ===== -->
+    <div class="tab-content" id="tab-privileges">
+      <section class="panel" id="privileges-panel">
+        <h2>🔑 Privilégios</h2>
+        <p class="empty-state">Painel em construção.</p>
+      </section>
+    </div>
+
+    <!-- ===== Contas Admin ===== -->
+    <div class="tab-content" id="tab-admin-activity">
+      <section class="panel" id="admin-activity-panel">
+        <h2>👤 Contas Admin</h2>
+        <p class="empty-state">Painel em construção.</p>
       </section>
     </div>
 
