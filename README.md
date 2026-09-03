@@ -497,7 +497,7 @@ e `RECOMMENDATIONS` (ação sugerida), combinados por `classify_alert()`:
 | 4732 | Member Added to Local Group | medium |
 | 4738 | User Account Changed | medium |
 | 4756 | Member Added to Universal Group | high |
-| 4797 | User Account Locked Out | medium |
+| 4797 | Blank Password Query Attempt | medium |
 | 5140 | Network Share Accessed | low |
 | 5145 | Network Share Permission Checked | low |
 
