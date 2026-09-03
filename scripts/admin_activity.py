@@ -50,6 +50,14 @@ Limitações importantes, documentadas aqui para quem consumir este módulo:
    determinada (campos em falta) não é contabilizado em `event_counts`
    (nem como admin, nem como normal), para não inflacionar nenhuma das
    duas contagens com dados desconhecidos.
+
+7. Valores de "severity": usa-se deliberadamente o slug ASCII sem
+   acentuação ("critico", "medio", "alto", "baixo") em vez da palavra
+   acentuada, por ser um valor de enumeração da API (não texto de
+   leitura), consistente com a mesma convenção já usada no projeto
+   irmão `ad-iam-lab` (campo `nivel_risco` do baseline RBAC) e em
+   `lifecycle.py`. O texto de leitura ("name", "explanation") mantém
+   sempre acentuação completa em português de Portugal.
 """
 
 from __future__ import annotations
