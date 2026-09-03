@@ -131,6 +131,7 @@ def _enrich_alert(alert: dict) -> dict:
         "windows_event_id": win_event_id,
         "friendly_name": classification["friendly_name"],
         "severity": classification["severity"],
+        "category": classification["category"],
         "recommendation": classification["recommendation"],
         "full_log": alert.get("full_log", ""),
     }
@@ -225,10 +226,14 @@ async def get_alerts(
     min_level: int = Query(0, ge=0, le=16, description="Nível mínimo de severidade Wazuh"),
     agent_name: str | None = Query(None, description="Filtrar por nome de agente"),
     severity: str | None = Query(None, description="Filtrar por severidade classificada (critical/high/medium/low)"),
+    category: str | None = Query(
+        None,
+        description="Filtrar por categoria classificada (ciclo_de_vida/gestao_de_grupos/autenticacao/atividade_privilegiada/tarefas_agendadas/politica_seguranca/acesso_rede/geral)",
+    ),
 ):
     """
     Alertas recentes, já enriquecidos com a classificação de Event ID
-    (nome amigável, severidade, recomendação).
+    (nome amigável, severidade, categoria, recomendação).
     """
     try:
         raw_alerts = await indexer_client.get_recent_alerts(
@@ -238,6 +243,8 @@ async def get_alerts(
 
         if severity:
             enriched = [a for a in enriched if a["severity"] == severity]
+        if category:
+            enriched = [a for a in enriched if a["category"] == category]
 
         return {"total": len(enriched), "alerts": enriched}
     except Exception as e:
@@ -248,13 +255,15 @@ async def get_alerts(
 async def get_stats(hours: int = Query(24, ge=1, le=168)):
     """
     Estatísticas agregadas para os KPIs do dashboard:
-    total de alertas, contagem por severidade classificada, top eventos.
+    total de alertas, contagem por severidade e por categoria classificada,
+    top eventos.
     """
     try:
         raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=500)
         enriched = [_enrich_alert(a) for a in raw_alerts]
 
         severity_counts = Counter(a["severity"] for a in enriched)
+        category_counts = Counter(a["category"] for a in enriched)
         event_counts = Counter(
             (a["windows_event_id"], a["friendly_name"])
             for a in enriched
@@ -271,6 +280,7 @@ async def get_stats(hours: int = Query(24, ge=1, le=168)):
             "window_hours": hours,
             "total_alerts": len(enriched),
             "by_severity": dict(severity_counts),
+            "by_category": dict(category_counts),
             "top_events": top_events,
             "by_agent": dict(agent_counts),
         }
