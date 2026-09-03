@@ -1,0 +1,30 @@
+{
+  "cargos": {
+    "Técnico de Suporte": {
+      "departamento": "IT",
+      "grupos_permitidos": ["GG-IT-Suporte", "DL-Partilha-IT-Leitura"],
+      "grupos_proibidos": ["Domain Admins", "Enterprise Admins", "Schema Admins", "Account Operators", "Backup Operators"],
+      "nivel_risco": "baixo"
+    },
+    "Administrador de Sistemas": {
+      "departamento": "IT",
+      "conta_associada": "administrativa",
+      "grupos_permitidos": ["GG-IT-Admins", "Domain Admins"],
+      "grupos_proibidos": ["Enterprise Admins", "Schema Admins", "Account Operators", "Backup Operators"],
+      "nivel_risco": "critico"
+    },
+    "Analista Financeiro": {
+      "departamento": "Financeira",
+      "grupos_permitidos": ["GG-Financeira", "DL-Partilha-Financeira-Leitura"],
+      "grupos_proibidos": ["Domain Admins", "Enterprise Admins", "Schema Admins", "Account Operators", "Backup Operators"],
+      "nivel_risco": "medio"
+    }
+  },
+  "grupos_criticos": [
+    "Domain Admins",
+    "Enterprise Admins",
+    "Schema Admins",
+    "Account Operators",
+    "Backup Operators"
+  ]
+}
