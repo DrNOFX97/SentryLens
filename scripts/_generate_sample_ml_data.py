@@ -68,7 +68,7 @@ def build_events() -> list[dict]:
 
     # --- Mais atividade normal noutro dia, para dar volume à classe normal ---
     for i in range(8):
-        events.append(_event(4624, f"2026-09-03T{9 + i // 2}:0{(i % 2) * 3}0:00Z", user="mcosta", ip="192.168.1.10", level=3))
+        events.append(_event(4624, f"2026-09-03T{9 + i // 2:02d}:{(i % 2) * 30:02d}:00Z", user="mcosta", ip="192.168.1.10", level=3))
     for i in range(4):
         events.append(_event(4624, f"2026-09-03T1{i}:00:00Z", user="jsilva", ip="192.168.1.11", level=3))
 
