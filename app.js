@@ -990,7 +990,11 @@ async function refreshNewPanels() {
     loadLifecyclePanel(days),
     loadPrivilegesPanel(days),
     loadAdminActivityPanel(days),
-    loadMlAnomaliesPanel(days),
+    // /api/ml-anomalies usa "hours" (Query(24, ge=1, le=168)), não "dias" como
+    // os outros 3 painéis — convertemos e limitamos ao máximo aceite pelo
+    // endpoint (168h = 7 dias), para "30 dias"/"90 dias" mostrarem sempre os
+    // últimos 7 dias em vez de serem lidos como 30/90 HORAS.
+    loadMlAnomaliesPanel(Math.min(Number(days) * 24, 168)),
   ]);
 }
 
