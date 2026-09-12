@@ -1,0 +1,862 @@
+[
+  {
+    "@timestamp": "2026-09-01T09:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T09:01:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T09:02:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T09:10:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T09:11:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T09:12:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T08:30:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "adm.rsantos",
+          "ipAddress": "192.168.1.12"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T08:31:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "adm.rsantos",
+          "ipAddress": "192.168.1.12"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T08:32:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "adm.rsantos",
+          "ipAddress": "192.168.1.12"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-01T10:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5720",
+      "description": "Event 4720",
+      "level": 5
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4720"
+        },
+        "eventdata": {
+          "targetUserName": "novo.colaborador"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4720"
+  },
+  {
+    "@timestamp": "2026-09-01T10:05:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5738",
+      "description": "Event 4738",
+      "level": 5
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4738"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4738"
+  },
+  {
+    "@timestamp": "2026-09-01T11:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "6140",
+      "description": "Event 5140",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "5140"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 5140"
+  },
+  {
+    "@timestamp": "2026-09-01T11:05:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "6140",
+      "description": "Event 5140",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "5140"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 5140"
+  },
+  {
+    "@timestamp": "2026-09-01T15:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5725",
+      "description": "Event 4725",
+      "level": 5
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4725"
+        },
+        "eventdata": {
+          "targetUserName": "ex.colaborador"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4725"
+  },
+  {
+    "@timestamp": "2026-09-01T15:30:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5767",
+      "description": "Event 4767",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4767"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4767"
+  },
+  {
+    "@timestamp": "2026-09-02T03:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5625",
+      "description": "Event 4625",
+      "level": 10
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4625"
+        },
+        "eventdata": {
+          "targetUserName": "convidado",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4625"
+  },
+  {
+    "@timestamp": "2026-09-02T03:01:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5625",
+      "description": "Event 4625",
+      "level": 10
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4625"
+        },
+        "eventdata": {
+          "targetUserName": "convidado",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4625"
+  },
+  {
+    "@timestamp": "2026-09-02T03:02:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5625",
+      "description": "Event 4625",
+      "level": 10
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4625"
+        },
+        "eventdata": {
+          "targetUserName": "convidado",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4625"
+  },
+  {
+    "@timestamp": "2026-09-02T03:03:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5625",
+      "description": "Event 4625",
+      "level": 10
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4625"
+        },
+        "eventdata": {
+          "targetUserName": "convidado",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4625"
+  },
+  {
+    "@timestamp": "2026-09-02T03:04:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5625",
+      "description": "Event 4625",
+      "level": 10
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4625"
+        },
+        "eventdata": {
+          "targetUserName": "convidado",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4625"
+  },
+  {
+    "@timestamp": "2026-09-02T03:05:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5625",
+      "description": "Event 4625",
+      "level": 10
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4625"
+        },
+        "eventdata": {
+          "targetUserName": "convidado",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4625"
+  },
+  {
+    "@timestamp": "2026-09-02T03:06:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5740",
+      "description": "Event 4740",
+      "level": 10
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4740"
+        },
+        "eventdata": {
+          "targetUserName": "convidado",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4740"
+  },
+  {
+    "@timestamp": "2026-09-02T03:14:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5672",
+      "description": "Event 4672",
+      "level": 12
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4672"
+        },
+        "eventdata": {
+          "targetUserName": "adm.rsantos",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4672"
+  },
+  {
+    "@timestamp": "2026-09-02T03:15:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5698",
+      "description": "Event 4698",
+      "level": 12
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4698"
+        },
+        "eventdata": {
+          "targetUserName": "adm.rsantos",
+          "ipAddress": "203.0.113.50"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4698"
+  },
+  {
+    "@timestamp": "2026-09-03T9:000:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T9:030:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T10:000:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T10:030:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T11:000:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T11:030:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T12:000:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T12:030:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "mcosta",
+          "ipAddress": "192.168.1.10"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T10:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T11:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T12:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  },
+  {
+    "@timestamp": "2026-09-03T13:00:00Z",
+    "agent": {
+      "name": "WIN-PC01",
+      "ip": "192.168.1.5"
+    },
+    "rule": {
+      "id": "5624",
+      "description": "Event 4624",
+      "level": 3
+    },
+    "data": {
+      "win": {
+        "system": {
+          "eventID": "4624"
+        },
+        "eventdata": {
+          "targetUserName": "jsilva",
+          "ipAddress": "192.168.1.11"
+        }
+      }
+    },
+    "full_log": "Synthetic event 4624"
+  }
+]
