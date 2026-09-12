@@ -450,6 +450,44 @@ utilizador-alvo e assinala quem excedeu o `threshold`.
 }
 ```
 
+### `GET /api/ml-anomalies`
+Deteção de anomalias por Machine Learning (Isolation Forest), **lado a
+lado** com a classificação por regras do `event_catalog.py` — ver
+detalhe completo na secção [6. Deteção de anomalias por Machine
+Learning](#6-deteção-de-anomalias-por-machine-learning) logo a seguir
+ao catálogo de Event IDs.
+
+| Parâmetro | Tipo | Default | Descrição |
+|---|---|---|---|
+| `hours` | int (1–168) | 24 | Janela temporal (máximo 7 dias) |
+
+```json
+{
+  "total": 36,
+  "ml_anomalies_count": 7,
+  "rule_flagged_count": 8,
+  "agree_count": 3,
+  "diverge_count": 33,
+  "window_hours": 24,
+  "results": [
+    {
+      "timestamp": "2026-09-10T14:22:00+00:00",
+      "agent_name": "WIN-PC01",
+      "target_user": "administrator",
+      "windows_event_id": 4625,
+      "severity": "high",
+      "rule_flagged": true,
+      "ml_score": -0.0842,
+      "ml_is_anomaly": true,
+      "agreement": "agree"
+    }
+  ]
+}
+```
+Erro → `503` se o modelo ainda não foi treinado (`{"detail": "Modelo de
+ML não encontrado em '...'. Corre 'python train_anomaly_model.py'
+primeiro para o gerar."}`) ou `502` se falhar o pedido ao Wazuh Indexer.
+
 ### Endpoints de sistema (`system_monitor.py` — a máquina local, não o Wazuh)
 
 Não dependem do Wazuh; falham (500) só se algo correr mal a recolher
@@ -510,6 +548,117 @@ log Windows) recebe uma classificação por defeito segura:
 Para adicionar um Event ID novo: acrescentar uma entrada a
 `CRITICAL_EVENTS` (e opcionalmente a `RECOMMENDATIONS`) em
 `scripts/event_catalog.py`. Não é preciso tocar em `main.py`.
+
+---
+
+## 6. Deteção de anomalias por Machine Learning
+
+> ⚠️ **Nada disto foi treinado ou validado com dados reais do
+> laboratório.** O modelo entregue neste repo é treinado sobre um
+> fixture sintético, e os números de precisão/recall abaixo provam que
+> o *pipeline* (extração de features → treino → comparação com as
+> regras → endpoint → frontend) funciona de ponta a ponta — **não** são
+> uma estimativa de taxa de deteção em produção. Validação real requer
+> correr `attack_scenarios.py` contra o laboratório Kali/Wazuh durante
+> uns dias, exportar os alertas reais com `export_snapshot.py`, e
+> voltar a treinar. Isso ainda não aconteceu.
+
+O painel **🧠 ML Anomalias** (aba nova no frontend) usa um
+`IsolationForest` (scikit-learn) para sinalizar alertas anómalos, e
+mostra o resultado **lado a lado** com a classificação por regras já
+existente (`scripts/event_catalog.py`). É um segundo ponto de vista
+sobre os mesmos alertas, **nunca um substituto**: `event_catalog.py`
+continua a ser a única fonte de verdade para severidade/recomendação em
+todos os outros painéis, e nunca é modificado por nenhum dos scripts
+desta secção.
+
+### Extração de features (`scripts/feature_extractor.py`)
+
+Módulo único e partilhado entre treino e inferência — ambos importam
+só daqui, para que a lógica nunca divirja. Extrai 7 features por
+alerta, na ordem fixa `FEATURE_NAMES`: `hour_of_day`, `day_of_week`,
+`event_id_encoded`, `failed_attempts_last_hour`,
+`has_special_privileges`, `is_new_source_ip`, `severity_encoded`.
+`is_attack` (o rótulo verdadeiro, só usado em treino/avaliação) não faz
+parte do vetor — é atribuído à parte, por correspondência de timestamp
+com o log de ataques do `attack_scenarios.py`.
+
+### Como (re)treinar
+
+```bash
+cd scripts
+python train_anomaly_model.py
+```
+
+Lê `sample_events_real.json` + `sample_attack_log.jsonl` (por default;
+aceita `--events`/`--attack-log` para outros ficheiros, por exemplo um
+snapshot exportado do laboratório real), treina o `IsolationForest` +
+`StandardScaler`, e escreve:
+
+- `scripts/models/isolation_forest.pkl` + `scripts/models/scaler.pkl`
+  — **não versionados** (`.gitignore`), regeneráveis a qualquer momento
+  correndo o comando acima; o endpoint `/api/ml-anomalies` devolve
+  `503` até estes dois ficheiros existirem.
+- `scripts/ml_training_report.json` — **este sim é committed** —
+  precisão/recall/F1 do modelo de ML **e** da classificação por regras
+  existente contra o mesmo ground truth, mais uma comparação do que
+  cada abordagem deteta que a outra não deteta.
+
+### Desvio do plano original: `.xml` → `.json`
+
+O contrato original desta fase referia um ficheiro
+`sample_events_real.xml` como fixture de treino. Esse ficheiro **nunca
+existiu neste repositório**, e não há nenhuma ferramenta de parsing XML
+em lado nenhum do projeto. Em vez de introduzir uma dependência nova só
+para isto, `scripts/_generate_sample_ml_data.py` gera
+deterministicamente (sem aleatoriedade, para que o dataset e o
+`ml_training_report.json` sejam sempre reprodutíveis)
+`scripts/sample_events_real.json` — no mesmo formato de alerta que o
+Wazuh Indexer devolve de facto — e `scripts/sample_attack_log.jsonl`.
+Este é um **desvio documentado** do plano original, não um esquecimento.
+
+### Resultados no fixture sintético (36 eventos, 5 ataques rotulados)
+
+| | Precisão | Recall | F1 |
+|---|---|---|---|
+| ML (Isolation Forest) | 0,4286 | 0,6 | 0,5 |
+| Regras (`event_catalog.py`) | 0,625 | 1,0 | 0,7692 |
+
+Comparação: 3 alertas sinalizados por **ambas** as abordagens, 4 só
+pelo ML, 5 só pelas regras, 24 por nenhuma das duas. É uma divergência
+genuína — cada abordagem apanha coisas que a outra não apanha — e é
+precisamente esse contraste, não um número isolado, que é o ponto do
+exercício.
+
+### `scripts/attack_scenarios.py`
+
+Mesma categoria dos outros scripts de automação do laboratório
+(`setup-hyperv-lab.ps1`, `install-wazuh.sh`, `install-wazuh-agent.ps1`
+— ver [secção 1](#1-montar-o-laboratório-wazuh)): corre-se
+**manualmente na VM Kali**, nunca em automático, contra o agente
+Windows do laboratório. Lança cenários de ataque (`--list` mostra os
+disponíveis) e regista cada um numa linha JSON em
+`scripts/attack_log.jsonl`, que o `feature_extractor.py` usa para
+atribuir o rótulo `is_attack` aos eventos correspondentes do Wazuh por
+correspondência de timestamp.
+
+`scripts/export_snapshot.py` fecha o ciclo para quando houver
+laboratório real disponível: exporta `/api/alerts` + `/api/stats` +
+`scripts/attack_log.jsonl` para `scripts/snapshots/AAAA-MM-DD_HH-MM.json`
+(nunca sobrescreve um snapshot existente — acrescenta `_2`, `_3`, ...
+se já houver um para o mesmo minuto). É esse par
+export/retreino que falta para passar de "pipeline validado" a
+"deteção validada".
+
+### Nota sobre o seletor de período no painel ML
+
+O seletor de período partilhado do dashboard (`#period-select` — 7/30/90
+dias) é convertido para horas e limitado ao máximo aceite pelo
+endpoint (168h = 7 dias) só para este painel. Ou seja, escolher "30
+dias" ou "90 dias" continua a mostrar apenas os últimos 7 dias de
+análise de ML — o próprio painel assinala isto ao utilizador, e fica
+registado aqui para não ser uma surpresa para quem ler o código
+(`refreshNewPanels()` em `app.js`).
 
 ---
 
