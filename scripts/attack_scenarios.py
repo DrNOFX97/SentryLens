@@ -24,13 +24,32 @@ import argparse
 import json
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 DEFAULT_LOG_PATH = Path(__file__).parent / "attack_log.jsonl"
+
+
+def _redact_command_for_log(command: list[str]) -> str:
+    """
+    Constrói uma string de comando para logging, redactando valores de password.
+    A ferramenta real (subprocess.run) recebe o comando original com a password verdadeira.
+    """
+    redacted = []
+    skip_next = False
+    for i, arg in enumerate(command):
+        if skip_next:
+            redacted.append("***REDACTED***")
+            skip_next = False
+            continue
+        if arg in ("-p", "--password"):
+            redacted.append(arg)
+            skip_next = True
+        else:
+            redacted.append(arg)
+    return " ".join(redacted)
 
 
 @dataclass
@@ -153,14 +172,14 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = 
         result = subprocess.run(command, capture_output=True, text=True, timeout=args.timeout)
         entry = format_log_entry(
             scenario.name, args.target, scenario.tool, "launched",
-            {"returncode": result.returncode, "command": " ".join(command)},
+            {"returncode": result.returncode, "command": _redact_command_for_log(command)},
         )
     except subprocess.TimeoutExpired:
         entry = format_log_entry(scenario.name, args.target, scenario.tool, "failed",
-                                  {"reason": "timeout", "command": " ".join(command)})
+                                  {"reason": "timeout", "command": _redact_command_for_log(command)})
     except Exception as exc:
         entry = format_log_entry(scenario.name, args.target, scenario.tool, "failed",
-                                  {"reason": str(exc), "command": " ".join(command)})
+                                  {"reason": str(exc), "command": _redact_command_for_log(command)})
 
     append_attack_log(entry, log_path)
     return entry
