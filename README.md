@@ -466,8 +466,8 @@ ao catálogo de Event IDs.
   "total": 36,
   "ml_anomalies_count": 7,
   "rule_flagged_count": 8,
-  "agree_count": 3,
-  "diverge_count": 33,
+  "agree_count": 27,
+  "diverge_count": 9,
   "window_hours": 24,
   "results": [
     {

@@ -970,6 +970,7 @@ async function loadMlAnomaliesPanel(hours) {
     const total = data.total || 0;
     const agreementPct = total > 0 ? Math.round((data.agree_count / total) * 100) : 0;
     document.getElementById("kpi-ml-agreement").textContent = `${agreementPct}%`;
+    document.getElementById("kpi-ml-diverge").textContent = data.diverge_count ?? 0;
 
     renderMlAnomaliesTable(data.results || []);
   } catch (err) {
