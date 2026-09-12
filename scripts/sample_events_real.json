@@ -572,7 +572,7 @@
     "full_log": "Synthetic event 4698"
   },
   {
-    "@timestamp": "2026-09-03T9:000:00Z",
+    "@timestamp": "2026-09-03T09:00:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
@@ -596,7 +596,7 @@
     "full_log": "Synthetic event 4624"
   },
   {
-    "@timestamp": "2026-09-03T9:030:00Z",
+    "@timestamp": "2026-09-03T09:30:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
@@ -620,7 +620,7 @@
     "full_log": "Synthetic event 4624"
   },
   {
-    "@timestamp": "2026-09-03T10:000:00Z",
+    "@timestamp": "2026-09-03T10:00:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
@@ -644,7 +644,7 @@
     "full_log": "Synthetic event 4624"
   },
   {
-    "@timestamp": "2026-09-03T10:030:00Z",
+    "@timestamp": "2026-09-03T10:30:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
@@ -668,7 +668,7 @@
     "full_log": "Synthetic event 4624"
   },
   {
-    "@timestamp": "2026-09-03T11:000:00Z",
+    "@timestamp": "2026-09-03T11:00:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
@@ -692,7 +692,7 @@
     "full_log": "Synthetic event 4624"
   },
   {
-    "@timestamp": "2026-09-03T11:030:00Z",
+    "@timestamp": "2026-09-03T11:30:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
@@ -716,7 +716,7 @@
     "full_log": "Synthetic event 4624"
   },
   {
-    "@timestamp": "2026-09-03T12:000:00Z",
+    "@timestamp": "2026-09-03T12:00:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
@@ -740,7 +740,7 @@
     "full_log": "Synthetic event 4624"
   },
   {
-    "@timestamp": "2026-09-03T12:030:00Z",
+    "@timestamp": "2026-09-03T12:30:00Z",
     "agent": {
       "name": "WIN-PC01",
       "ip": "192.168.1.5"
