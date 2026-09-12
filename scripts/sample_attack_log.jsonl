@@ -1,0 +1,2 @@
+{"timestamp": "2026-09-02T03:00:00+00:00", "scenario": "brute_force_rdp", "target": "203.0.113.50", "tool": "hydra", "status": "launched", "details": {"returncode": 0, "command": "hydra ... rdp://192.168.1.5"}}
+{"timestamp": "2026-09-02T03:14:00+00:00", "scenario": "lateral_movement_schtasks", "target": "192.168.1.5", "tool": "crackmapexec", "status": "launched", "details": {"returncode": 0, "command": "crackmapexec smb ..."}}
