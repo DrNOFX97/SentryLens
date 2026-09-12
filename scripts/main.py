@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+import ml_anomalies
 from admin_activity import build_admin_activity_report
 from event_catalog import classify_alert
 from lifecycle import build_lifecycle_report
@@ -74,6 +75,10 @@ RBAC_BASELINE_PATH = os.getenv(
     "RBAC_BASELINE_PATH",
     os.path.join(os.path.dirname(__file__), "rbac_baseline.example.json"),
 )
+
+# Diretório com isolation_forest.pkl + scaler.pkl (ver train_anomaly_model.py),
+# usado pelo endpoint /api/ml-anomalies.
+ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", os.path.join(os.path.dirname(__file__), "models"))
 
 app = FastAPI(
     title="SentryLens",
@@ -420,5 +425,26 @@ async def get_admin_activity(days: int = Query(30, ge=1, le=90, description="Jan
     try:
         raw_alerts = await indexer_client.get_recent_alerts(hours=days * 24, size=2000)
         return build_admin_activity_report(raw_alerts, admin_prefix=os.getenv("ADMIN_ACCOUNT_PREFIX", "adm."))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/ml-anomalies")
+async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas")):
+    """
+    Deteção de anomalias por Machine Learning (Isolation Forest), lado a
+    lado com a classificação por regras do event_catalog.py. Corre em
+    paralelo com as regras — não as substitui.
+    """
+    try:
+        model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
+        report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
+        report["window_hours"] = hours
+        return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
