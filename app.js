@@ -61,7 +61,9 @@ async function fetchJSON(path) {
   const response = await fetch(`${API_BASE}${path}`);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `Erro HTTP ${response.status}`);
+    const error = new Error(body.detail || `Erro HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -972,7 +974,7 @@ async function loadMlAnomaliesPanel(hours) {
     renderMlAnomaliesTable(data.results || []);
   } catch (err) {
     console.error(err);
-    if (err.message && err.message.includes("503")) {
+    if (err.status === 503) {
       renderPanelError("#ml-anomalies-panel", "Modelo de ML ainda não foi treinado. Corre scripts/train_anomaly_model.py.");
     } else {
       renderPanelError("#ml-anomalies-panel", err.message || "Erro ao carregar o painel de ML.");
