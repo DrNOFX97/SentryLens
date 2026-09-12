@@ -929,16 +929,68 @@ async function loadAdminActivityPanel(days) {
   }
 }
 
+// --- Painel: ML Anomalias (tab-ml-anomalies) ---
+
+function renderMlAnomaliesTable(results) {
+  const tbody = document.getElementById("ml-anomalies-body");
+  tbody.innerHTML = "";
+
+  if (!results || results.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Sem eventos neste período</td></tr>';
+    return;
+  }
+
+  results.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.className = r.agreement === "diverge" ? "row-diverge" : "";
+    tr.innerHTML = `
+      <td class="mono">${escapeHtml(formatTimestamp(r.timestamp))}</td>
+      <td>${escapeHtml(r.agent_name)}</td>
+      <td>${escapeHtml(r.target_user)}</td>
+      <td>${escapeHtml(String(r.windows_event_id))}</td>
+      <td>${severityBadge(r.severity)}</td>
+      <td class="mono">${r.ml_score.toFixed(4)}</td>
+      <td>${r.ml_is_anomaly ? "⚠️ Sim" : "Não"}</td>
+      <td><span class="agreement-badge agreement-${r.agreement}">${r.agreement === "agree" ? "✅ Concorda" : "⚡ Diverge"}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadMlAnomaliesPanel(hours) {
+  try {
+    const data = await fetchJSON(`/api/ml-anomalies?hours=${hours}`);
+    renderPanelError("#ml-anomalies-panel", null);
+
+    document.getElementById("kpi-ml-total").textContent = data.total ?? 0;
+    document.getElementById("kpi-ml-anomalies").textContent = data.ml_anomalies_count ?? 0;
+    document.getElementById("kpi-ml-rule-flagged").textContent = data.rule_flagged_count ?? 0;
+    const total = data.total || 0;
+    const agreementPct = total > 0 ? Math.round((data.agree_count / total) * 100) : 0;
+    document.getElementById("kpi-ml-agreement").textContent = `${agreementPct}%`;
+
+    renderMlAnomaliesTable(data.results || []);
+  } catch (err) {
+    console.error(err);
+    if (err.message && err.message.includes("503")) {
+      renderPanelError("#ml-anomalies-panel", "Modelo de ML ainda não foi treinado. Corre scripts/train_anomaly_model.py.");
+    } else {
+      renderPanelError("#ml-anomalies-panel", err.message || "Erro ao carregar o painel de ML.");
+    }
+  }
+}
+
 // Ponto de entrada dos painéis novos (ciclo de vida, privilégios, contas
-// admin) — independente de refreshDashboard() (painéis Wazuh antigos) e do
-// window-select (horas); usa sempre period-select (dias) no momento da
-// chamada, nunca reatribui esse .value.
+// admin, ML anomalias) — independente de refreshDashboard() (painéis Wazuh
+// antigos) e do window-select (horas); usa sempre period-select (dias) no
+// momento da chamada, nunca reatribui esse .value.
 async function refreshNewPanels() {
   const days = periodSelect.value;
   await Promise.allSettled([
     loadLifecyclePanel(days),
     loadPrivilegesPanel(days),
     loadAdminActivityPanel(days),
+    loadMlAnomaliesPanel(days),
   ]);
 }
 
