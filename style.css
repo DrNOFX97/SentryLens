@@ -377,6 +377,24 @@ header {
   text-transform: uppercase;
 }
 
+.panel-note {
+  color: var(--navy-800);
+  opacity: 0.75;
+  font-size: 0.9em;
+  margin-bottom: 16px;
+}
+
+.agreement-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+.agreement-badge.agreement-agree { background: #e0f7fa; color: var(--cyan-700); }
+.agreement-badge.agreement-diverge { background: #fff3e0; color: #b45309; }
+
+tr.row-diverge { background: rgba(180, 83, 9, 0.06); }
+
 .agent-status.active { background: #d5f4e6; color: #1e7e42; }
 .agent-status.disconnected { background: #fadbd8; color: #c0392b; }
 .agent-status.never_connected { background: #eee; color: #888; }
