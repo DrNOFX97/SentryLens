@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import ml_anomalies
 from admin_activity import build_admin_activity_report
 from event_catalog import classify_alert
+from history_store import append_alerts_history
 from lifecycle import build_lifecycle_report
 from rbac import build_privileges_report, load_rbac_baseline
 from system_monitor import (
@@ -81,6 +82,12 @@ RBAC_BASELINE_PATH = os.getenv(
 # Diretório com isolation_forest.pkl + scaler.pkl (ver train_anomaly_model.py),
 # usado pelo endpoint /api/ml-anomalies.
 ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", os.path.join(os.path.dirname(__file__), "models"))
+
+# Diretório onde o histórico de alertas é persistido para além dos 90 dias
+# de retenção do Wazuh Indexer (ver scripts/history_store.py).
+SENTRYLENS_HISTORY_DIR = os.getenv(
+    "SENTRYLENS_HISTORY_DIR", os.path.join(os.path.dirname(__file__), "historico")
+)
 
 # O CORS (configurado mais abaixo) já restringe as origens a loopback, mas
 # isso não chega sozinho — foi por não haver autenticação nenhuma nos
@@ -243,7 +250,14 @@ async def _system_monitor_loop() -> None:
 async def _start_system_monitor() -> None:
     """Lança o loop de monitorização em background, sem bloquear o arranque do servidor."""
     app.state.system_monitor_task = asyncio.create_task(_system_monitor_loop())
-    app.state.alert_ws_poll_task = asyncio.create_task(alert_poll_loop(indexer_client, ws_manager, _enrich_alert))
+    app.state.alert_ws_poll_task = asyncio.create_task(
+        alert_poll_loop(
+            indexer_client,
+            ws_manager,
+            _enrich_alert,
+            on_new_alerts=lambda alerts: append_alerts_history(alerts, SENTRYLENS_HISTORY_DIR),
+        )
+    )
 
 
 @app.get("/api/health", dependencies=_REQUIRE_API_KEY)
