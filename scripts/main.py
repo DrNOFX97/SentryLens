@@ -30,7 +30,7 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 import ml_anomalies
@@ -48,6 +48,7 @@ from system_monitor import (
     record_usage_sample,
 )
 from wazuh_client import WazuhIndexerClient, WazuhManagerClient
+from websocket_alerts import ConnectionManager, alert_poll_loop
 
 load_dotenv()
 
@@ -93,7 +94,9 @@ SENTRYLENS_API_KEY = os.getenv("SENTRYLENS_API_KEY", "")
 
 async def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")) -> None:
     """
-    Dependency global aplicada a todos os endpoints /api/*. Usa
+    Aplicada individualmente a cada rota REST /api/* via
+    dependencies=_REQUIRE_API_KEY (nunca a nível de app — ver comentário
+    junto ao FastAPI(...) sobre porque isso rebentaria /ws/alerts). Usa
     secrets.compare_digest (em vez de ==) para evitar timing attacks na
     comparação da key.
     """
@@ -101,22 +104,35 @@ async def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")
         raise HTTPException(status_code=401, detail="API key inválida ou em falta")
 
 
-# dependencies=[Depends(...)] no construtor só protege rotas registadas via
-# add_api_route (os nossos @app.get/@app.post) — as rotas automáticas de
-# documentação (/docs, /redoc, /openapi.json) são adicionadas por dentro via
-# add_route() e NÃO herdam essa lista (armadilha conhecida do FastAPI).
-# Desligamo-las por completo (docs_url/redoc_url/openapi_url=None) em vez de
-# as tentar proteger à parte — este dashboard não precisa de Swagger UI, e
+# dependencies=[Depends(...)] no construtor do FastAPI aplica-se a TODAS as
+# rotas, incluindo @app.websocket (confirmado por teste dedicado ao
+# implementar /ws/alerts) — o que rebentaria esse endpoint, porque um
+# cliente WebSocket de browser real nunca consegue enviar o header
+# X-API-Key, e a HTTPException(401) levantada durante a resolução de
+# dependencies de um WebSocket não vira um close ASGI válido: a ligação
+# fica pendurada para sempre em vez de ser recusada. Por isso a dependency
+# deixou de estar aqui e passou a ser aplicada individualmente a cada rota
+# REST (dependencies=[Depends(require_api_key)] em cada @app.get/@app.post
+# abaixo) — /ws/alerts fica de fora de propósito e trata a sua própria
+# autenticação (query param, ver o endpoint mais abaixo).
+#
+# As rotas automáticas de documentação (/docs, /redoc, /openapi.json) são
+# adicionadas por dentro via add_route() e não herdariam a dependency de
+# qualquer forma (armadilha semelhante, já resolvida antes desta). Continuam
+# desligadas por completo — este dashboard não precisa de Swagger UI, e
 # assim ficam mesmo inacessíveis (404), não só "escondidas".
 app = FastAPI(
     title="SentryLens",
     description="SentryLens — análise de segurança Windows ligada ao Wazuh",
     version="2.0.0",
-    dependencies=[Depends(require_api_key)],
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
 )
+
+# Aplicada individualmente a cada rota REST abaixo (nunca a nível de app —
+# ver comentário acima sobre o WebSocket).
+_REQUIRE_API_KEY = [Depends(require_api_key)]
 
 # O frontend (ficheiro estático) corre numa porta diferente do backend,
 # por isso o CORS tem de ficar aberto entre portas — mas nunca a "*":
@@ -138,6 +154,8 @@ manager_client = WazuhManagerClient(
 indexer_client = WazuhIndexerClient(
     WAZUH_INDEXER_URL, WAZUH_INDEXER_USER, WAZUH_INDEXER_PASSWORD, verify_ssl=WAZUH_VERIFY_SSL
 )
+
+ws_manager = ConnectionManager()
 
 
 def _extract_windows_event_id(alert: dict) -> int | None:
@@ -225,15 +243,16 @@ async def _system_monitor_loop() -> None:
 async def _start_system_monitor() -> None:
     """Lança o loop de monitorização em background, sem bloquear o arranque do servidor."""
     app.state.system_monitor_task = asyncio.create_task(_system_monitor_loop())
+    app.state.alert_ws_poll_task = asyncio.create_task(alert_poll_loop(indexer_client, ws_manager, _enrich_alert))
 
 
-@app.get("/api/health")
+@app.get("/api/health", dependencies=_REQUIRE_API_KEY)
 async def health():
     """Confirma que o backend está de pé (não testa ligação ao Wazuh)."""
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
 
-@app.get("/api/agents")
+@app.get("/api/agents", dependencies=_REQUIRE_API_KEY)
 async def get_agents():
     """Lista de agentes Wazuh e o seu estado atual."""
     try:
@@ -257,7 +276,7 @@ async def get_agents():
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Manager: {e}")
 
 
-@app.get("/api/alerts")
+@app.get("/api/alerts", dependencies=_REQUIRE_API_KEY)
 async def get_alerts(
     hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas"),
     min_level: int = Query(0, ge=0, le=16, description="Nível mínimo de severidade Wazuh"),
@@ -288,7 +307,7 @@ async def get_alerts(
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
 
 
-@app.get("/api/stats")
+@app.get("/api/stats", dependencies=_REQUIRE_API_KEY)
 async def get_stats(hours: int = Query(24, ge=1, le=168)):
     """
     Estatísticas agregadas para os KPIs do dashboard:
@@ -325,7 +344,7 @@ async def get_stats(hours: int = Query(24, ge=1, le=168)):
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
 
 
-@app.get("/api/brute-force")
+@app.get("/api/brute-force", dependencies=_REQUIRE_API_KEY)
 async def detect_brute_force(
     hours: int = Query(24, ge=1, le=168),
     threshold: int = Query(5, ge=1, description="Nº mínimo de falhas para gerar alerta"),
@@ -363,7 +382,7 @@ async def detect_brute_force(
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
 
 
-@app.get("/api/system/specs")
+@app.get("/api/system/specs", dependencies=_REQUIRE_API_KEY)
 async def get_system_specs():
     """Snapshot actual de CPU/RAM/disco/rede desta máquina + última medição de velocidade de rede."""
     loop = asyncio.get_running_loop()
@@ -376,7 +395,7 @@ async def get_system_specs():
         raise HTTPException(status_code=500, detail=f"Erro ao recolher specs do sistema: {e}")
 
 
-@app.get("/api/system/alerts")
+@app.get("/api/system/alerts", dependencies=_REQUIRE_API_KEY)
 async def get_system_alerts():
     """Violações de threshold activas neste momento, com duração desde o início."""
     now = datetime.now(timezone.utc)
@@ -390,7 +409,7 @@ async def get_system_alerts():
     return {"active_violations": active}
 
 
-@app.get("/api/system/history")
+@app.get("/api/system/history", dependencies=_REQUIRE_API_KEY)
 async def get_system_history():
     """Violações de threshold já resolvidas."""
     history = get_history()
@@ -398,7 +417,7 @@ async def get_system_history():
     return {"history": resolved}
 
 
-@app.get("/api/system/usage-history")
+@app.get("/api/system/usage-history", dependencies=_REQUIRE_API_KEY)
 async def get_system_usage_history():
     """
     Últimas amostras de uso de CPU/RAM/disco (buffer em memória do backend,
@@ -407,7 +426,7 @@ async def get_system_usage_history():
     return {"history": get_usage_history()}
 
 
-@app.post("/api/system/speedtest")
+@app.post("/api/system/speedtest", dependencies=_REQUIRE_API_KEY)
 async def force_speedtest():
     """Força uma medição de velocidade de rede imediata (ignora a cache)."""
     loop = asyncio.get_running_loop()
@@ -418,7 +437,7 @@ async def force_speedtest():
         raise HTTPException(status_code=502, detail=f"Erro ao medir velocidade de rede: {e}")
 
 
-@app.get("/api/lifecycle")
+@app.get("/api/lifecycle", dependencies=_REQUIRE_API_KEY)
 async def get_lifecycle(days: int = Query(30, ge=1, le=90, description="Janela temporal em dias")):
     """Painel de ciclo de vida de contas: contagens, linha temporal e deteções de risco."""
     try:
@@ -428,7 +447,7 @@ async def get_lifecycle(days: int = Query(30, ge=1, le=90, description="Janela t
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
 
 
-@app.get("/api/privileges")
+@app.get("/api/privileges", dependencies=_REQUIRE_API_KEY)
 async def get_privileges(days: int = Query(30, ge=1, le=90, description="Janela temporal em dias")):
     """Painel de desvios RBAC: privilégios atribuídos fora do baseline de cargos versus grupos."""
     try:
@@ -451,7 +470,7 @@ async def get_privileges(days: int = Query(30, ge=1, le=90, description="Janela 
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
 
 
-@app.get("/api/admin-activity")
+@app.get("/api/admin-activity", dependencies=_REQUIRE_API_KEY)
 async def get_admin_activity(days: int = Query(30, ge=1, le=90, description="Janela temporal em dias")):
     """Painel de atividade de contas administrativas: privilégios especiais, tarefas agendadas e deteções de risco."""
     try:
@@ -461,7 +480,7 @@ async def get_admin_activity(days: int = Query(30, ge=1, le=90, description="Jan
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
 
 
-@app.get("/api/ml-anomalies")
+@app.get("/api/ml-anomalies", dependencies=_REQUIRE_API_KEY)
 async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas")):
     """
     Deteção de anomalias por Machine Learning (Isolation Forest), lado a
@@ -480,3 +499,27 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.websocket("/ws/alerts")
+async def websocket_alerts_endpoint(websocket: WebSocket) -> None:
+    """
+    Push de alertas novos aos clientes ligados. Autenticação própria via
+    query param `api_key` (?api_key=...) — o handshake de WebSocket do
+    browser não permite enviar headers HTTP arbitrários como X-API-Key, e
+    dependencies=[Depends(...)] a nível de app pode não proteger
+    automaticamente rotas @app.websocket (mesma família de armadilha que já
+    mordeu /docs — ver git log). Verificação explícita e independente, com
+    a mesma comparação segura (secrets.compare_digest) da autenticação REST.
+    """
+    api_key = websocket.query_params.get("api_key", "")
+    if not SENTRYLENS_API_KEY or not secrets.compare_digest(api_key, SENTRYLENS_API_KEY):
+        await websocket.close(code=1008)
+        return
+
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
