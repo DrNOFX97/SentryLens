@@ -255,14 +255,21 @@ Correr o backend:
 uvicorn main:app --reload --port 8001
 ```
 
-Confirmar que está de pé:
+Confirmar que está de pé (já precisa da API key — ver
+[Autenticação por API key](#-autenticação-por-api-key) acima):
 
 ```bash
-curl http://localhost:8001/api/health
+curl -H "X-API-Key: <a tua SENTRYLENS_API_KEY>" http://localhost:8001/api/health
 # {"status":"ok","timestamp":"2026-08-28T21:47:37.019106"}
 ```
 
-Documentação interativa (Swagger) em `http://localhost:8001/docs`.
+Sem o header, este pedido devolve `401`.
+
+> Não há documentação interativa (Swagger/`/docs`) — foi desligada de
+> propósito (`docs_url=None` em `main.py`), porque `dependencies=[Depends(...)]`
+> não protege essas rotas automáticas do FastAPI (só as registadas via
+> `@app.get`/`@app.post`), e mantê-las abertas exporia toda a topologia
+> da API sem autenticação.
 
 ### Nota sobre a porta 8000
 
