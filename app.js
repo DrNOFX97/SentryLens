@@ -615,6 +615,47 @@ async function forceSpeedtest() {
 
 document.getElementById("speedtest-btn").addEventListener("click", forceSpeedtest);
 
+async function exportReport() {
+  const btn = document.getElementById("export-report-btn");
+  const hours = windowSelect.value;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ A gerar...";
+  }
+  try {
+    const response = await fetch(`${API_BASE}/api/export/report?hours=${hours}`, {
+      headers: { "X-API-Key": API_KEY },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || `Erro HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match ? match[1] : "relatorio.html";
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Erro ao exportar relatório:", err);
+    alert("Erro ao exportar relatório: " + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "📄 Exportar relatório";
+    }
+  }
+}
+
+document.getElementById("export-report-btn")?.addEventListener("click", exportReport);
+
 // --- Gráficos (Chart.js) ---
 
 Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
