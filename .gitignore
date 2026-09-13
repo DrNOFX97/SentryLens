@@ -16,6 +16,7 @@ scripts/*.log.err
 scripts/attack_log.jsonl
 scripts/snapshots/
 scripts/models/
+scripts/historico/
 
 # Estado local do Claude Code (não é conteúdo do projeto)
 .claude/
