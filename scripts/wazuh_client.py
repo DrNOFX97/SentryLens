@@ -131,7 +131,13 @@ class WazuhIndexerClient:
 
         result = await self._search("wazuh-alerts-*", query)
         hits = result.get("hits", {}).get("hits", [])
-        return [hit["_source"] for hit in hits]
+        # O _id do documento OpenSearch (irmão de _source no hit, não fica lá
+        # dentro por omissão) é o único identificador verdadeiramente estável
+        # de cada alerta — nenhuma combinação de campos do próprio alerta
+        # (timestamp+regra+agente) garante unicidade sob rajadas no mesmo
+        # segundo. Necessário para o /ws/alerts (Fase 8) deduplicar alertas
+        # já enviados a um cliente ligado.
+        return [{**hit["_source"], "_id": hit["_id"]} for hit in hits]
 
     async def get_alert_stats(self, hours: int = 24) -> dict:
         """Agregação: contagem de alertas por nível de severidade e por rule.id."""
