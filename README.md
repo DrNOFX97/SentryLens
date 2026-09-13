@@ -823,14 +823,33 @@ specs desta própria máquina.
 | Endpoint | Descrição |
 |---|---|
 | `GET /api/system/specs` | Snapshot atual: CPU (modelo/freq/núcleos/uso), RAM (uso + módulos físicos), disco por partição (uso + modelo/SSD-HDD do disco físico), interfaces de rede, última medição de velocidade |
-| `GET /api/system/alerts` | Violações de threshold **ativas** neste momento (RAM/disco/rede), com duração |
+| `GET /api/system/alerts` | Violações de threshold **ativas** neste momento (CPU/RAM/disco/rede), com duração |
 | `GET /api/system/history` | Violações **já resolvidas** (histórico persistido em `scripts/system_alerts_history.json`) |
 | `GET /api/system/usage-history` | Buffer em memória (~1h, amostra a cada 30s) de CPU/RAM/disco — alimenta o gráfico "Histórico de uso" |
+| `GET /api/system/thresholds` | Devolve o dict `system_monitor.THRESHOLDS` completo (`cpu`/`ram`/`disk`/`network`, cada um com `warning`/`critical`) — ver nota abaixo |
 | `POST /api/system/speedtest` | Força uma medição de velocidade de rede imediata (Ookla Speedtest CLI), ignora a cache |
 
-Thresholds atuais (`system_monitor.THRESHOLDS`): RAM aviso/crítico
-85%/95%, disco 80%/90%, rede (download/upload) aviso abaixo de 700
-Mbps, crítico abaixo de 500 Mbps.
+> ✅ **Adicionado em 2026-09-14** — até aqui o CPU era a única métrica de
+> sistema cujo threshold vivia só no frontend (`app.js`, função
+> `cpuLevel()`, 80%/95% *hardcoded*), desligado do sistema de
+> alertas/histórico do backend que já cobria RAM/disco/rede: uma
+> violação de CPU nunca ficava registada em `/api/system/alerts` nem em
+> `/api/system/history`, ao contrário das outras 3 métricas.
+> `system_monitor.THRESHOLDS` passou a incluir `cpu` (aviso/crítico
+> 80%/95%), participando em `check_thresholds`/histórico/violações
+> ativas exatamente como as restantes já faziam. O novo `GET
+> /api/system/thresholds` (protegido pela mesma API key de todos os
+> outros endpoints REST) expõe esse dict como fonte única de verdade —
+> o frontend deixou de duplicar as constantes: `cpuLevel()` foi removida
+> de `app.js` e o nível de CPU passa a vir de `levelByMetric["cpu"]`
+> (calculado a partir de `/api/system/alerts`), tal como já acontecia
+> para RAM.
+
+Thresholds atuais (`system_monitor.THRESHOLDS`): CPU aviso/crítico
+80%/95%, RAM aviso/crítico 85%/95%, disco 80%/90%, rede
+(download/upload) aviso abaixo de 700 Mbps, crítico abaixo de 500 Mbps
+— para rede a lógica é invertida (dispara quando a velocidade *desce*
+abaixo do valor, não quando sobe).
 
 ---
 
@@ -1117,6 +1136,15 @@ que vais usar para correr `uvicorn`
    visível em todas as abas (ver [secção
    dedicada](#-exportar-relatório-html-getapiexportreport) na
    documentação da API).
+5. ~~**Expor thresholds via endpoint próprio** — o CPU não tinha
+   threshold nenhum no backend (só existia, *hardcoded*, no frontend),
+   ao contrário de RAM/disco/rede, que já eram trackeados pelo sistema
+   de alertas/histórico.~~ ✅ **Feito em 2026-09-14** —
+   `system_monitor.THRESHOLDS` passou a incluir `cpu` (aviso/crítico
+   80%/95%), e o novo `GET /api/system/thresholds` expõe o dict
+   completo como fonte única de verdade; o frontend deixou de duplicar
+   os valores (`cpuLevel()` removida de `app.js`) — ver a tabela de
+   [Endpoints de sistema](#4-endpoints-da-api) na documentação da API.
 
 ---
 
