@@ -1,0 +1,38 @@
+rgpd:
+  categorias_aplicaveis:
+    - autenticacao
+    - gestao_de_grupos
+    - ciclo_de_vida
+    - atividade_privilegiada
+  justificacao_aplicavel: >-
+    Este alerta envolve processamento de dados pessoais (identificadores de
+    utilizador, endereços IP de origem) — o RGPD aplica-se ao tratamento
+    destes dados, mesmo em contexto de deteção de segurança.
+  justificacao_nao_aplicavel: >-
+    Este alerta não envolve dados pessoais identificáveis (natureza de
+    infraestrutura, rede ou política), pelo que o RGPD não se aplica
+    diretamente a este evento.
+
+nis2:
+  severidades_incidente_significativo:
+    - critical
+    - high
+  justificacao_aplicavel: >-
+    A entidade está classificada como sujeita à NIS2 (Decreto-Lei n.º
+    125/2025) e este alerta atinge o limiar de severidade de incidente
+    significativo — a comunicação ao CNCS pode ser exigida dentro dos
+    prazos legais.
+  justificacao_nao_aplicavel_severidade: >-
+    A entidade está sujeita à NIS2, mas este alerta não atinge o limiar de
+    severidade de incidente significativo definido.
+  justificacao_nao_aplicavel_estatuto: >-
+    A entidade não está classificada como sujeita à NIS2 neste perfil — ver
+    scripts/org_profile.py.
+
+ai_act:
+  justificacao_aplicavel: >-
+    A organização opera um componente de IA ativo (deteção de anomalias por
+    Isolation Forest, ver GET /api/ml-anomalies) como parte do pipeline de
+    classificação de segurança — o AI Act pode aplicar-se a este sistema.
+  justificacao_nao_aplicavel: >-
+    A organização não tem componentes de IA ativos neste perfil.
