@@ -9,10 +9,13 @@ Correr:
     python test_ml_anomalies.py
 """
 
+import os
 import sys
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
 
 import main
 import ml_anomalies
@@ -56,7 +59,7 @@ def run() -> None:
     ml_anomalies._scaler = fake_scaler
 
     main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
-    client = TestClient(main.app)
+    client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
 
     resp = client.get("/api/ml-anomalies")
     check("GET /api/ml-anomalies devolve 200", resp.status_code == 200)

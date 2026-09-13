@@ -16,12 +16,15 @@ Correr:
     python test_new_panels.py
 """
 
+import os
 import sys
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
 
 import main
 from admin_activity import build_admin_activity_report
@@ -187,7 +190,7 @@ ADMIN_ACTIVITY_ALERTS: list[dict[str, Any]] = [
 
 
 def run() -> None:
-    client = TestClient(main.app)
+    client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
 
     # --- 1. Caso vazio nos 3 endpoints ---
     main.indexer_client.get_recent_alerts = AsyncMock(return_value=[])
