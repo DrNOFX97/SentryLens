@@ -339,16 +339,8 @@ function formatDuration(seconds) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-// CPU não tem threshold definido no backend (system_monitor.THRESHOLDS só
-// cobre RAM/disco/rede) — usamos aqui um limiar só visual, não ligado ao
-// sistema de alertas/histórico.
-function cpuLevel(usagePercent) {
-  if (usagePercent >= 95) return "critico";
-  if (usagePercent >= 80) return "aviso";
-  return "normal";
-}
-
 function metricLabel(metric) {
+  if (metric === "cpu") return "CPU";
   if (metric === "ram") return "RAM";
   if (metric === "network_download") return "Rede (download)";
   if (metric === "network_upload") return "Rede (upload)";
@@ -482,7 +474,7 @@ async function loadSystemPanel() {
 
   // CPU
   const cpuPct = specs.cpu.usage_percent;
-  const cpuLvl = cpuLevel(cpuPct);
+  const cpuLvl = levelByMetric["cpu"] || "normal";
   document.getElementById("sys-cpu-value").textContent = `${cpuPct.toFixed(1)}%`;
   setProgressBar(document.getElementById("sys-cpu-bar"), cpuPct, cpuLvl);
   const cpuModelLine = specs.cpu.frequency_mhz
