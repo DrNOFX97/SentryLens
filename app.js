@@ -2,6 +2,12 @@
 // Consome a API FastAPI (backend/main.py) e preenche a interface
 
 const API_BASE = "http://localhost:8001";
+// Tem de corresponder ao valor de SENTRYLENS_API_KEY em scripts/.env — ver
+// README.md para como gerar e configurar. Fica visível no código-fonte
+// entregue ao browser; aceitável só porque o CORS já restringe a loopback
+// e isto é um dashboard de laboratório local, não uma app exposta à
+// internet.
+const API_KEY = "";
 
 const windowSelect = document.getElementById("window-select");
 const severityFilter = document.getElementById("severity-filter");
@@ -58,7 +64,9 @@ function formatTimestamp(ts) {
 }
 
 async function fetchJSON(path) {
-  const response = await fetch(`${API_BASE}${path}`);
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: { "X-API-Key": API_KEY },
+  });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const error = new Error(body.detail || `Erro HTTP ${response.status}`);
@@ -504,7 +512,10 @@ async function forceSpeedtest() {
   btn.disabled = true;
   btn.textContent = "⏳ A medir...";
   try {
-    const response = await fetch(`${API_BASE}/api/system/speedtest`, { method: "POST" });
+    const response = await fetch(`${API_BASE}/api/system/speedtest`, {
+      method: "POST",
+      headers: { "X-API-Key": API_KEY },
+    });
     if (!response.ok) throw new Error(`Erro HTTP ${response.status}`);
     await loadSystemPanel();
   } catch (err) {
