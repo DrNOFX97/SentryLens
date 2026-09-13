@@ -24,32 +24,32 @@ língua".
 
 ## Arquitetura
 
+```mermaid
+flowchart TB
+    subgraph WIN["Windows (anfitrião real)"]
+        AGENT["Wazuh Agent (WazuhSvc)"]
+        BROWSER(["Browser"])
+        FRONTEND["index.html + app.js + style.css"]
+        BACKEND["FastAPI backend (scripts/main.py)<br/>porta 8001 (uvicorn)"]
+    end
+
+    subgraph VM["VM Ubuntu Server (switch externo 'Lab-Wazuh') — 192.168.1.143"]
+        MANAGER["wazuh-manager<br/>(analisa logs)"]
+        INDEXER["wazuh-indexer<br/>(OpenSearch, guarda alertas)"]
+        DASHBOARD["wazuh-dashboard<br/>(UI web do Wazuh, porta 443)"]
+    end
+
+    BROWSER -->|abre| FRONTEND
+    FRONTEND -->|"fetch() para /api/*"| BACKEND
+    FRONTEND -->|"WebSocket /ws/alerts (?api_key=...)"| BACKEND
+    BACKEND -->|"Manager API 55000, JWT"| MANAGER
+    BACKEND -->|"Indexer API 9200, Basic Auth — inclui polling interno a cada 10s"| INDEXER
+    AGENT -->|"envia Windows Event Logs"| MANAGER
 ```
-┌─────────────────────────── Windows (anfitrião real) ───────────────────────────┐
-│                                                                                  │
-│   Wazuh Agent (WazuhSvc) ──── envia Windows Event Logs ────┐                    │
-│                                                              │                   │
-│   Browser ──abre──► index.html + app.js + style.css         │                   │
-│                          │                                  │                   │
-│                          │ fetch() para /api/*               │                   │
-│                          ▼                                  │                   │
-│                   FastAPI backend (scripts/main.py)          │                   │
-│                   porta 8001 (uvicorn)                       │                   │
-│                          │                                  │                   │
-└──────────────────────────┼──────────────────────────────────┼───────────────────┘
-                            │                                  │
-                            │ Manager API (55000, JWT)          │  agente Windows
-                            │ Indexer API (9200, Basic Auth)    │  regista-se aqui
-                            ▼                                  ▼
-                ┌───────────────────────────────────────────────────┐
-                │         VM Ubuntu Server (Hyper-V, switch          │
-                │         externo "Lab-Wazuh") — 192.168.1.143       │
-                │                                                     │
-                │   wazuh-manager   wazuh-indexer   wazuh-dashboard  │
-                │   (analisa logs)  (OpenSearch,     (UI web do       │
-                │                    guarda alertas)  Wazuh, porta 443)│
-                └───────────────────────────────────────────────────┘
-```
+
+> O diagrama era originalmente arte ASCII; convertido para Mermaid nesta
+> sessão para acomodar o novo fluxo WebSocket (`/ws/alerts`) sem perder
+> nenhum dos nós/ligações já documentados.
 
 O backend nunca fala diretamente com o agente — ele consulta as duas
 APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
@@ -138,9 +138,13 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   `X-API-Key`, variável `SENTRYLENS_API_KEY`) — fecha o achado "zero
   autenticação" da auditoria de 2026-08-31 acima. Ver [secção
   dedicada](#-autenticação-por-api-key) na documentação da API.
-- ❌ Ainda sem websockets, sem persistência própria de histórico, sem
-  distinção entre múltiplos utilizadores (a key é partilhada, não é
-  login) — ver [Próximos passos](#-próximos-passos).
+- ✅ **Atualização em tempo real via WebSocket** (`WS /ws/alerts`) —
+  substitui o polling fixo de 30s do frontend por push imediato quando
+  há alertas novos; o polling de 30s passa a ser só o fallback se a
+  ligação WebSocket falhar. Ver [secção dedicada](#-websocket-em-tempo-real-wsalerts).
+- ❌ Ainda sem persistência própria de histórico, sem distinção entre
+  múltiplos utilizadores (a key é partilhada, não é login) — ver
+  [Próximos passos](#-próximos-passos).
 
 ---
 
@@ -345,9 +349,14 @@ do backend ficou restrito a `localhost`/`127.0.0.1` (correção de
 segurança de 2026-08-31) — `file://` envia `Origin: null`, que essa
 restrição não reconhece de propósito. Usa a Opção A ou B.
 
-O dashboard atualiza automaticamente a cada 30 segundos, ou
-manualmente com o botão "🔄 Atualizar". O indicador no canto superior
-direito mostra:
+O dashboard liga-se por WebSocket (`/ws/alerts`) ao carregar a página e
+atualiza-se **imediatamente** quando chega um alerta novo, em vez de
+esperar por um ciclo de polling — ver [secção
+dedicada](#-websocket-em-tempo-real-wsalerts). O polling fixo a cada 30
+segundos continua a existir só como *fallback* caso o WebSocket falhe,
+e o botão "🔄 Atualizar" continua disponível para forçar uma atualização
+manual a qualquer momento. O indicador no canto superior direito
+mostra:
 
 - **● ligado ao Wazuh** (verde) — todos os pedidos à API tiveram
   sucesso.
@@ -441,6 +450,88 @@ pedidos sem chave.
 O CORS mantém-se exatamente como antes (`allow_origin_regex`
 restrito a origens loopback) — a API key é uma camada adicional, não
 uma substituição.
+
+### 🔌 WebSocket em tempo real (`/ws/alerts`)
+
+> ✅ **Adicionado em 2026-09-13** — fecha o item "Websockets" da lista
+> de [Próximos passos](#-próximos-passos): o dashboard deixa de
+> depender só do polling de 30s para saber que há alertas novos.
+
+**`WS /ws/alerts`** — o backend mantém, desde sempre nesta versão, um
+ciclo interno (`alert_poll_loop`, em `scripts/websocket_alerts.py`,
+arrancado no evento `startup` do FastAPI ao lado do já existente loop
+de monitorização de sistema) que consulta o Wazuh Indexer **a cada
+10s** à procura de alertas novos — isto acontece sempre, com ou sem
+clientes WebSocket ligados. Quando um cliente está ligado a
+`/ws/alerts`, cada alerta novo detetado é reenviado (*pushed*) para
+ele assim que aparece, em vez de o frontend ter de o ir buscar por
+`fetch()`. Cada alerta é identificado de forma única pelo `_id` do
+documento no OpenSearch (campo já incluído em cada alerta devolvido por
+`WazuhIndexerClient.get_recent_alerts(...)` em `scripts/wazuh_client.py`)
+— é esse `_id` que o backend usa para saber quais alertas já foram
+enviados a um cliente e não os reenviar.
+
+> Não confundir os dois "10s"/"30s": o polling **interno** do backend
+> ao Wazuh Indexer é a cada **10s** (existe sempre, independente do
+> frontend); o polling do **frontend** ao backend é a cada **30s** e
+> só corre como *fallback*, quando o WebSocket não está disponível.
+
+**Autenticação — diferente da REST, e de propósito:** os endpoints
+`/api/*` exigem o header `X-API-Key` (ver secção acima), mas o
+handshake de WebSocket feito pelo browser não permite enviar headers
+HTTP arbitrários — por isso `/ws/alerts` autentica-se por **query
+param**, com a mesma `SENTRYLENS_API_KEY`:
+
+```
+ws://localhost:8001/ws/alerts?api_key=<a mesma SENTRYLENS_API_KEY>
+```
+
+Sem o parâmetro `api_key`, ou com um valor errado, o servidor **fecha
+a ligação com o código `1008`** antes de a aceitar (nunca chega a
+entregar nenhum alerta).
+
+**Formato das mensagens** enviadas pelo servidor a cada alerta novo:
+
+```json
+{
+  "type": "new_alert",
+  "alert": {
+    "timestamp": "2026-09-13T10:15:00Z",
+    "agent_name": "DESKTOP-ABC",
+    "rule_id": "60122",
+    "windows_event_id": 4625,
+    "friendly_name": "Failed Logon",
+    "severity": "high"
+  }
+}
+```
+O objeto em `alert` tem exatamente a mesma forma de um item da lista
+`alerts` de `GET /api/alerts`.
+
+**Comportamento do frontend (`app.js`):** `connectWebSocket()` liga-se
+por WebSocket ao carregar a página. Ao receber uma mensagem
+`new_alert`, chama `refreshDashboard()`, que volta a pedir tudo por
+REST e a re-renderizar, respeitando os filtros já selecionados (a
+mensagem WebSocket é só o "toque a rebate" — os dados em si continuam
+a vir da API REST). Se a ligação falhar ou cair, o frontend tenta
+reconectar com *backoff* exponencial: **1s, 2s, 4s, 8s, 16s** (5
+tentativas). Se todas falharem, mostra um aviso visível no topo do
+dashboard —
+
+> ⚠️ Ligação em tempo real indisponível — a atualizar a cada 30s
+
+— e passa a depender só do polling fixo de 30s como *fallback*
+definitivo. **Decisão consciente de simplicidade:** nesta versão não
+há nenhum retry automático depois de esgotadas as 5 tentativas (evita
+um loop de reconexão a correr para sempre em segundo plano) — o aviso
+só desaparece se a página for recarregada e a ligação WebSocket voltar
+a funcionar.
+
+**Testes:** `scripts/test_websocket_alerts.py` (mesmo padrão standalone
+dos outros scripts de teste do backend — sem framework, imprime
+`[OK]`/`[FALHOU]` por caso), cobrindo ligação recusada sem `api_key`,
+ligação recusada com `api_key` errada, ligação aceite com a key
+correta, e deteção de alertas novos vs. já vistos (por `_id`).
 
 ### `GET /api/health`
 Confirma que o backend está de pé (não testa ligação ao Wazuh).
@@ -791,6 +882,26 @@ se isto falhar mesmo com a key certa, confirma que reiniciaste o
 `uvicorn` depois de editar `scripts/.env` (variáveis de ambiente só
 são lidas no arranque)
 
+**Dashboard nunca atualiza em tempo real / aviso "⚠️ Ligação em tempo
+real indisponível — a atualizar a cada 30s" aparece sempre**
+→ Causa mais provável nº1: o backend não está a correr — o WebSocket
+precisa do mesmo `uvicorn` que serve o REST (confirma com o mesmo
+`curl` a `/api/health` da secção anterior)
+→ Causa mais provável nº2: a constante `API_KEY` em `app.js` está
+vazia ou não é exatamente igual à `SENTRYLENS_API_KEY` de
+`scripts/.env` — ao contrário do REST (que devolve `401` visível), o
+handshake do WebSocket com `api_key` errado ou em falta **falha
+silenciosamente**: o servidor fecha a ligação com o código `1008`
+antes de a aceitar, e o único sintoma visível é o dashboard nunca sair
+do polling de 30s (ver [WebSocket em tempo
+real](#-websocket-em-tempo-real-wsalerts))
+→ Confirma na consola do browser (F12 → aba Network → filtro "WS"): se
+a ligação aparece a fechar de imediato com código `1008`, é a key; se
+nem tenta ligar, o backend está em baixo ou inacessível
+→ Não é um erro bloqueante — o dashboard continua a funcionar
+normalmente via polling de 30s enquanto isto não for corrigido, só
+perde a atualização instantânea
+
 **`uvicorn` falha com `WinError 10013` na porta 8000**
 → Ver [Nota sobre a porta 8000](#nota-sobre-a-porta-8000) — usa
 `--port 8001`.
@@ -826,8 +937,14 @@ que vais usar para correr `uvicorn`
    já bloqueia acesso não autenticado na rede local, mas é uma única
    chave global (sem sessões, sem distinguir utilizadores); para
    produção real, evoluir para login por utilizador (ex: JWT).
-2. **Websockets** — substituir o polling de 30s por atualização em
-   tempo real.
+2. ~~**Websockets** — substituir o polling de 30s por atualização em
+   tempo real.~~ ✅ **Feito em 2026-09-13** — `WS /ws/alerts` já faz
+   push de alertas novos ao frontend (ver [secção
+   dedicada](#-websocket-em-tempo-real-wsalerts)). O polling de 30s
+   mantém-se só como *fallback* se a ligação WebSocket falhar (5
+   tentativas de reconexão com backoff exponencial); não há retry
+   automático depois disso nesta versão — decisão consciente de
+   simplicidade, só recarregar a página tenta de novo.
 3. **Persistência própria** — guardar histórico de alertas numa base
    de dados própria (o Wazuh só guarda 90 dias por default).
 4. **Exportar relatório** — botão para gerar um relatório HTML com
