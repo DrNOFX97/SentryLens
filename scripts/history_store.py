@@ -77,3 +77,30 @@ def append_alerts_history(alerts: list[dict], base_dir: str) -> None:
     """Aplica append_alert_history a cada alerta — é isto que main.py passa como on_new_alerts ao alert_poll_loop."""
     for alert in alerts:
         append_alert_history(alert, base_dir)
+
+
+def append_compliance_history(alert: dict, compliance_result: dict, base_dir: str) -> None:
+    """
+    Regista uma linha JSONL em <base_dir>/AAAA/MM-mês/AAAA-MM-DD-compliance.jsonl
+    com o veredito de conformidade deste alerta (ver
+    compliance_evaluator.evaluate_alert_compliance para a forma de
+    compliance_result) — registo de auditoria persistido mesmo quando o
+    veredito é "verificado_e_nao_aplicavel" em todas as normas; a
+    verificação em si nunca é omitida em silêncio.
+    """
+    dt = _alert_datetime(alert)
+    date_str = dt.strftime("%Y-%m-%d")
+    time_str = dt.strftime("%H:%M:%S")
+
+    record = {
+        "date": date_str,
+        "time": time_str,
+        "event_id": alert.get("windows_event_id"),
+        "rgpd_estado": compliance_result.get("rgpd", {}).get("estado"),
+        "nis2_estado": compliance_result.get("nis2", {}).get("estado"),
+        "ai_act_estado": compliance_result.get("ai_act", {}).get("estado"),
+    }
+
+    path = history_file_path(base_dir, date_str, "compliance")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
