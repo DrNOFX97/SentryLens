@@ -393,6 +393,32 @@ def run_report_generator_tests() -> None:
         "&lt;script&gt;" in html,
     )
 
+    # --- XSS via org_profile["nome"] (achado da ronda 1 de revisão AAA:
+    # só friendly_name estava coberto, mas o nome da organização também é
+    # texto dinâmico embutido no HTML via _esc()) ---
+    org_profile_malicioso = {
+        **org_profile_mock,
+        "nome": "<script>alert(2)</script>",
+    }
+    try:
+        html_org_malicioso = render_compliance_section(
+            [(alerta_normal, veredito_normal)], org_profile_malicioso
+        )
+        gerou_org_sem_excecao = True
+    except Exception as e:
+        html_org_malicioso = ""
+        gerou_org_sem_excecao = False
+        print(f"        excecao em render_compliance_section com nome malicioso: {e}")
+    check("render_compliance_section com org_profile malicioso não levanta exceção", gerou_org_sem_excecao)
+    check(
+        "XSS (org_profile.nome): tag <script> literal NÃO aparece no HTML",
+        "<script>alert(2)</script>" not in html_org_malicioso,
+    )
+    check(
+        "XSS (org_profile.nome): versão escapada (&lt;script&gt;) está presente",
+        "&lt;script&gt;alert(2)&lt;/script&gt;" in html_org_malicioso,
+    )
+
     # --- Lista vazia não deve levantar exceção ---
     try:
         html_vazio = render_compliance_section([], org_profile_mock)

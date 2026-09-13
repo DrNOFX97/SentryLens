@@ -322,10 +322,14 @@ def generate_html_report(
         com .get() defensivo
     generated_at: timestamp ISO de quando o relatório foi gerado
     hours: janela temporal usada para os dados (para mostrar no cabeçalho)
-    compliance_html: bloco HTML já pronto para a secção de conformidade da
-        Fase 7 (ainda não existe) — vazio por agora, só para o contrato da
-        função não mudar quando essa fase estiver pronta. Insere tal como
-        vier (já deve vir escapado/seguro por quem o chamar no futuro).
+    compliance_html: bloco HTML já pronto com a secção de conformidade
+        (RGPD/NIS2/AI Act) — ver compliance_evaluator.evaluate_alert_compliance
+        + render_compliance_section() neste módulo, chamados por quem
+        gera o relatório (main.py). Fica vazio só se a avaliação de
+        conformidade falhar (isolada em try/except no chamador, para não
+        derrubar o relatório inteiro). Insere tal como vier (já deve vir
+        escapado/seguro por quem o construiu — render_compliance_section()
+        já escapa tudo).
 
     Devolve uma string HTML completa e autónoma (<!DOCTYPE html>...</html>),
     CSS embutido num <style> no <head>, ZERO pedidos a recursos externos
@@ -354,7 +358,7 @@ def generate_html_report(
       {compliance_html}
     </section>"""
     else:
-        compliance_section = "\n    <!-- reservado para Fase 7 -->"
+        compliance_section = "\n    <!-- sem dados de conformidade para este período -->"
 
     return f"""<!DOCTYPE html>
 <html lang="pt">
