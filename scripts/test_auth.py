@@ -65,6 +65,16 @@ def run() -> None:
         os.environ["SENTRYLENS_API_KEY"] not in corpo_erro_errado,
     )
 
+    # --- /docs, /redoc, /openapi.json ficam desligados, mesmo sem X-API-Key ---
+    # dependencies=[Depends(...)] no construtor do FastAPI não protege estas
+    # rotas (são registadas por add_route(), não por add_api_route()) — por
+    # isso main.py desliga-as por completo (docs_url=None etc.) em vez de as
+    # tentar autenticar. Confirmamos aqui que ficam mesmo inacessíveis (404),
+    # não expostas sem autenticação (achado da ronda 1 de revisão).
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        resp_docs = client_sem_header.get(path)
+        check(f"GET {path} sem X-API-Key devolve 404 (desligado)", resp_docs.status_code == 404)
+
     print()
     if failures:
         print(f"[FALHOU] {len(failures)} teste(s) falharam: {failures}")

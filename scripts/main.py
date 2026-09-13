@@ -101,11 +101,21 @@ async def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")
         raise HTTPException(status_code=401, detail="API key inválida ou em falta")
 
 
+# dependencies=[Depends(...)] no construtor só protege rotas registadas via
+# add_api_route (os nossos @app.get/@app.post) — as rotas automáticas de
+# documentação (/docs, /redoc, /openapi.json) são adicionadas por dentro via
+# add_route() e NÃO herdam essa lista (armadilha conhecida do FastAPI).
+# Desligamo-las por completo (docs_url/redoc_url/openapi_url=None) em vez de
+# as tentar proteger à parte — este dashboard não precisa de Swagger UI, e
+# assim ficam mesmo inacessíveis (404), não só "escondidas".
 app = FastAPI(
     title="SentryLens",
     description="SentryLens — análise de segurança Windows ligada ao Wazuh",
     version="2.0.0",
     dependencies=[Depends(require_api_key)],
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # O frontend (ficheiro estático) corre numa porta diferente do backend,
