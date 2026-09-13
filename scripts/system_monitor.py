@@ -281,6 +281,7 @@ def get_usage_history() -> list[dict]:
 # --- Thresholds e histórico de transições -----------------------------------
 
 THRESHOLDS = {
+    "cpu": {"warning": 80, "critical": 95},
     "ram": {"warning": 85, "critical": 95},
     "disk": {"warning": 80, "critical": 90},
     "network": {"warning": 700, "critical": 500},
@@ -332,6 +333,9 @@ def _save_history(entries: list[dict]) -> None:
 def _current_metric_levels(specs: dict) -> dict[str, str | None]:
     """Calcula o nível actual (None/aviso/critico) de cada métrica monitorizada."""
     levels: dict[str, str | None] = {}
+
+    cpu_pct = specs.get("cpu", {}).get("usage_percent")
+    levels["cpu"] = _level_above(cpu_pct, **_kw(THRESHOLDS["cpu"]))
 
     ram_pct = specs.get("ram", {}).get("usage_percent")
     levels["ram"] = _level_above(ram_pct, **_kw(THRESHOLDS["ram"]))
