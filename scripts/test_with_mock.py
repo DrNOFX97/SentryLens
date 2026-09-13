@@ -9,10 +9,13 @@ Correr:
     python test_with_mock.py
 """
 
+import os
 import sys
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
 
 import main
 from event_catalog import classify_alert
@@ -100,7 +103,7 @@ def run() -> None:
     main.manager_client.get_agents = AsyncMock(return_value=MOCK_AGENTS)
     main.manager_client.get_agents_summary = AsyncMock(return_value=MOCK_AGENTS_SUMMARY)
 
-    client = TestClient(main.app)
+    client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
 
     # --- classify_alert (unidade) ---
     known = classify_alert(4625)
