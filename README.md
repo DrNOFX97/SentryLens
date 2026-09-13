@@ -142,9 +142,17 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   substitui o polling fixo de 30s do frontend por push imediato quando
   há alertas novos; o polling de 30s passa a ser só o fallback se a
   ligação WebSocket falhar. Ver [secção dedicada](#-websocket-em-tempo-real-wsalerts).
-- ❌ Ainda sem persistência própria de histórico, sem distinção entre
-  múltiplos utilizadores (a key é partilhada, não é login) — ver
-  [Próximos passos](#-próximos-passos).
+- ✅ **Persistência própria de histórico de alertas**
+  (`scripts/history_store.py`) — cada alerta novo detetado pelo polling
+  interno do WebSocket (`alert_poll_loop`, a cada 10s) passa também a
+  ficar gravado em disco, em ficheiros JSONL organizados por ano/mês, para
+  sobreviver aos 90 dias de retenção do Wazuh Indexer. Ver [secção
+  dedicada](#-histórico-próprio-de-alertas-scriptshistorico), logo a
+  seguir ao WebSocket na documentação da API.
+- ❌ Ainda sem distinção entre múltiplos utilizadores (a key é partilhada,
+  não é login), e sem camada de índice/consulta rápida sobre o histórico
+  (ex: SQLite para perguntas tipo "todos os alertas RGPD entre março e
+  maio") — ver [Próximos passos](#-próximos-passos).
 
 ---
 
@@ -532,6 +540,68 @@ dos outros scripts de teste do backend — sem framework, imprime
 `[OK]`/`[FALHOU]` por caso), cobrindo ligação recusada sem `api_key`,
 ligação recusada com `api_key` errada, ligação aceite com a key
 correta, e deteção de alertas novos vs. já vistos (por `_id`).
+
+### 🗄️ Histórico próprio de alertas (`scripts/historico/`)
+
+> ✅ **Adicionado em 2026-09-14** — fecha o item "Persistência própria" da
+> lista de [Próximos passos](#-próximos-passos): os alertas passam a
+> sobreviver para além dos 90 dias que o Wazuh Indexer guarda por
+> política de retenção (para não encher o disco da VM do laboratório).
+
+**Motivação:** o Wazuh Indexer (OpenSearch) apaga alertas com mais de 90
+dias. O SentryLens passa a guardar o seu próprio histórico de longo
+prazo, em paralelo, para não depender dessa janela.
+
+**Mecanismo — reaproveita a deteção de alertas novos, não cria um
+segundo poller:** o mesmo `alert_poll_loop` do WebSocket (Fase 8,
+`scripts/websocket_alerts.py`, que já corre a cada 10s a consultar o
+Wazuh Indexer — ver [WebSocket em tempo
+real](#-websocket-em-tempo-real-wsalerts) acima) chama agora, para cada
+alerta novo que deteta, também `append_alerts_history()` do novo módulo
+`scripts/history_store.py`. Não há um segundo ciclo de polling
+independente só para o histórico — é o mesmo evento "alerta novo
+detetado" a alimentar duas coisas (o push por WebSocket e a escrita em
+disco).
+
+**Estrutura de pastas** — ano com 4 dígitos, mês com número + nome por
+extenso em português (com acento), sem pasta de dia (o dia entra no
+nome do ficheiro, sempre com a data completa `AAAA-MM-DD` à frente):
+
+```
+scripts/historico/
+  2026/
+    09-setembro/
+      2026-09-13-alerts.jsonl
+```
+
+**Formato de cada linha** — JSONL *append-only* (nunca sobrescreve, só
+acrescenta), um alerta por linha, com `date` sempre como primeira chave
+do objeto (para o ficheiro ordenar bem cronologicamente mesmo aberto num
+editor de texto ou exportado para outra ferramenta):
+
+```json
+{"date": "2026-09-13", "time": "14:32:07", "event_id": 4625, "severity": "high", "friendly_name": "Failed Logon", "agent_name": "WIN-PC01", "rule_id": "60122"}
+```
+
+**Configuração** — localização configurável via `SENTRYLENS_HISTORY_DIR`
+(default: `scripts/historico`, documentada em `scripts/.env.example`).
+`scripts/historico/` está no `.gitignore` — é dado gerado em runtime, não
+código-fonte, o mesmo padrão de `scripts/system_alerts_history.json`,
+`scripts/snapshots/` e `scripts/models/`.
+
+> ⚠️ **Não confundir com os snapshots de treino de ML da Fase 6**
+> (`scripts/export_snapshot.py`, já existente e separado — ver [secção
+> 6](#6-deteção-de-anomalias-por-machine-learning)). Aquele gera um
+> formato completo de features para retreino do modelo de anomalias;
+> este histórico é um registo simplificado por alerta (os 7 campos
+> acima), pensado para retenção/consulta de longo prazo, não para
+> treino.
+
+**Fora de escopo nesta fase:** não há camada de índice (ex: SQLite) para
+consultas rápidas tipo "todos os alertas RGPD entre março e maio" — os
+ficheiros JSONL têm de ser lidos/filtrados manualmente por agora — nem
+um endpoint REST novo para consultar este histórico. Fica como trabalho
+futuro (ver [Próximos passos](#-próximos-passos)).
 
 ### `GET /api/health`
 Confirma que o backend está de pé (não testa ligação ao Wazuh).
@@ -945,8 +1015,13 @@ que vais usar para correr `uvicorn`
    tentativas de reconexão com backoff exponencial); não há retry
    automático depois disso nesta versão — decisão consciente de
    simplicidade, só recarregar a página tenta de novo.
-3. **Persistência própria** — guardar histórico de alertas numa base
-   de dados própria (o Wazuh só guarda 90 dias por default).
+3. ~~**Persistência própria** — guardar histórico de alertas numa base
+   de dados própria (o Wazuh só guarda 90 dias por default).~~ ✅ **Feito
+   em 2026-09-14** — `scripts/history_store.py` grava cada alerta novo
+   detetado pelo WebSocket em JSONL, por ano/mês, em
+   `scripts/historico/` (ver [secção dedicada](#-histórico-próprio-de-alertas-scriptshistorico)).
+   Falta ainda uma camada de índice/consulta rápida (ex: SQLite) sobre
+   esses ficheiros — isso continua por fazer.
 4. **Exportar relatório** — botão para gerar um relatório HTML com
    dados ao vivo, no mesmo espírito do relatório da Fase 1
    (`log_analyzer.py`, já neste repo).
