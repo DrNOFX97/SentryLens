@@ -656,11 +656,13 @@ dashboard (`--navy-950`, `--navy-800`, `--cyan-600`, `--cyan-700`,
 `--ink-900` — os mesmos tokens de `style.css`), para que o relatório
 exportado pareça uma extensão do dashboard, não um documento à parte.
 
-**Botão no frontend:** "📄 Exportar relatório" na aba Visão Geral
-(`index.html`/`app.js`), respeitando o período (`hours`) já selecionado
-no seletor de janela temporal do dashboard. Como o download exige o
-header `X-API-Key` (que um `<a href>` simples não consegue enviar), é
-feito via `fetch()` + `Blob` + link temporário criado em memória.
+**Botão no frontend:** "📄 Exportar relatório" no header de controlos
+partilhado (`index.html`/`app.js`, junto ao botão "🔄 Atualizar") —
+visível em todas as abas, não só na Visão Geral, tal como o próprio
+seletor de janela temporal que já vive nesse header. Respeita o período
+(`hours`) já selecionado no seletor. Como o download exige o header
+`X-API-Key` (que um `<a href>` simples não consegue enviar), é feito via
+`fetch()` + `Blob` + link temporário criado em memória.
 
 **Preparado para o futuro:** `generate_html_report` já recebe um
 parâmetro `compliance_html` (vazio por agora), reservado para a secção
@@ -1111,7 +1113,8 @@ que vais usar para correr `uvicorn`
    (`log_analyzer.py`, já neste repo).~~ ✅ **Feito em 2026-09-14** —
    `GET /api/export/report` (`scripts/report_generator.py`) gera um HTML
    autónomo com a paleta do dashboard, protegido pela mesma API key, com
-   botão "📄 Exportar relatório" na aba Visão Geral (ver [secção
+   botão "📄 Exportar relatório" no header de controlos partilhado,
+   visível em todas as abas (ver [secção
    dedicada](#-exportar-relatório-html-getapiexportreport) na
    documentação da API).
 
