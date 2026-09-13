@@ -134,8 +134,13 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   rebranding, entretanto apagado); trazido de volta com
   `sample_events.json` (dados de exemplo), `QUICKSTART.md`, e o par
   `report.html`/`report.json` gerado por ele.
-- ❌ Sem autenticação no dashboard, sem websockets, sem persistência
-  própria de histórico — ver [Próximos passos](#-próximos-passos).
+- ✅ **Autenticação por API key** nos endpoints `/api/*` (header
+  `X-API-Key`, variável `SENTRYLENS_API_KEY`) — fecha o achado "zero
+  autenticação" da auditoria de 2026-08-31 acima. Ver [secção
+  dedicada](#-autenticação-por-api-key) na documentação da API.
+- ❌ Ainda sem websockets, sem persistência própria de histórico, sem
+  distinção entre múltiplos utilizadores (a key é partilhada, não é
+  login) — ver [Próximos passos](#-próximos-passos).
 
 ---
 
@@ -358,9 +363,77 @@ A interface está organizada em 4 abas:
 
 Todos devolvem JSON. CORS restringido a origens loopback
 (`localhost`/`127.0.0.1`, qualquer porta) — nenhuma origem externa
-consegue ler as respostas. Ainda sem autenticação nos endpoints, por
-isso continua a assumir-se que só corre em ambiente de confiança
-(este PC).
+consegue ler as respostas. Todos os endpoints `/api/*` (incluindo
+`/api/health`) exigem também uma API key partilhada no header
+`X-API-Key` — ver a secção seguinte para como gerar e configurar.
+
+### 🔑 Autenticação por API key
+
+> ✅ **Adicionado em 2026-09-13** — fecha o achado da
+> [auditoria de segurança de 2026-08-31](#-estado-atual-do-projeto)
+> que sinalizava zero autenticação nos endpoints. A partir de agora,
+> **todos** os endpoints `/api/*`, incluindo `/api/health`, exigem
+> esta key.
+
+Mecanismo propositadamente simples — uma única key partilhada, sem
+sessões, sem múltiplos utilizadores, sem JWT — adequado ao que este
+dashboard é (ferramenta de laboratório local, não uma aplicação
+exposta à internet).
+
+**1. Gerar uma key forte:**
+
+```bash
+# Linux/macOS/Git Bash
+openssl rand -hex 32
+```
+
+```powershell
+# PowerShell (Windows-first, sem depender de OpenSSL instalado)
+-join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })
+```
+
+**2. Configurar no backend** — acrescentar a `scripts/.env` (variável
+também documentada em `scripts/.env.example`):
+
+```env
+SENTRYLENS_API_KEY=<a key gerada acima>
+```
+
+**3. Configurar no frontend** — editar a constante `API_KEY` perto do
+topo de `app.js` (ao lado de `API_BASE`) com o **mesmo valor**:
+
+```js
+const API_KEY = "<a mesma key de scripts/.env>";
+```
+
+Todos os pedidos do frontend passam a enviar o header `X-API-Key` com
+este valor.
+
+**Comportamento fail-closed:** sem `SENTRYLENS_API_KEY` definida no
+backend, ou com o header `X-API-Key` em falta ou errado no pedido, a
+API devolve sempre `401`:
+
+```json
+{"detail": "API key inválida ou em falta"}
+```
+
+Nunca fica "aberta" por omissão — se a variável de ambiente não
+estiver definida no backend, a API bloqueia tudo em vez de aceitar
+pedidos sem chave.
+
+> ⚠️ **Limitação honesta:** como o frontend é JavaScript estático
+> entregue tal-e-qual ao browser (sem build step), a key fica visível
+> no código-fonte (`view-source:`, DevTools) para quem aceder à
+> página. Isto é aceitável **só** porque o CORS já restringe os
+> pedidos a `localhost`/`127.0.0.1` e este é um dashboard de
+> laboratório de um único utilizador nesta máquina — **não é um
+> modelo de segurança válido** para uma aplicação exposta à internet
+> ou com múltiplos utilizadores. Não há rotação de keys nem suporte a
+> múltiplas keys nesta fase.
+
+O CORS mantém-se exatamente como antes (`allow_origin_regex`
+restrito a origens loopback) — a API key é uma camada adicional, não
+uma substituição.
 
 ### `GET /api/health`
 Confirma que o backend está de pé (não testa ligação ao Wazuh).
@@ -700,6 +773,17 @@ armazenamento da VM (`C:\Users\<utilizador>\VirtualBox VMs\`) para
 `VBoxManage showvminfo "Wazuh-Manager" --machinereadable | grep CfgFile`
 onde está atualmente.
 
+**Erro 401 Unauthorized**
+→ Causa mais provável: `SENTRYLENS_API_KEY` não está definida em
+`scripts/.env` (backend fica fail-closed e rejeita tudo), ou a
+constante `API_KEY` em `app.js` não tem exatamente o mesmo valor —
+ver [Autenticação por API key](#-autenticação-por-api-key)
+→ Confirma os dois lados diretamente: `curl -H "X-API-Key: <valor>"
+http://localhost:8001/api/health` deve devolver `{"status":"ok",...}`;
+se isto falhar mesmo com a key certa, confirma que reiniciaste o
+`uvicorn` depois de editar `scripts/.env` (variáveis de ambiente só
+são lidas no arranque)
+
 **`uvicorn` falha com `WinError 10013` na porta 8000**
 → Ver [Nota sobre a porta 8000](#nota-sobre-a-porta-8000) — usa
 `--port 8001`.
@@ -731,8 +815,10 @@ que vais usar para correr `uvicorn`
 
 ## 🚀 Próximos passos
 
-1. **Autenticação no dashboard** — atualmente qualquer pessoa na rede
-   local consegue aceder; para produção, adicionar login simples.
+1. **Autenticação multi-utilizador** — a [API key partilhada](#-autenticação-por-api-key)
+   já bloqueia acesso não autenticado na rede local, mas é uma única
+   chave global (sem sessões, sem distinguir utilizadores); para
+   produção real, evoluir para login por utilizador (ex: JWT).
 2. **Websockets** — substituir o polling de 30s por atualização em
    tempo real.
 3. **Persistência própria** — guardar histórico de alertas numa base
