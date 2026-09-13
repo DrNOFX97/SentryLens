@@ -9,6 +9,17 @@ const API_BASE = "http://localhost:8001";
 // internet.
 const API_KEY = "";
 
+// WebSocket de alertas em tempo real (/ws/alerts) — ver connectWebSocket()
+// mais abaixo. Autenticação vai por query param (não header) porque o
+// handshake de WebSocket do browser não permite headers HTTP arbitrários.
+const WS_URL = `${API_BASE.replace(/^http/, "ws")}/ws/alerts?api_key=${encodeURIComponent(API_KEY)}`;
+const WS_RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
+
+let ws = null;
+let wsReconnectAttempts = 0;
+let pollFallbackIntervalId = null;
+let realtimeFallbackBannerEl = null;
+
 const windowSelect = document.getElementById("window-select");
 const severityFilter = document.getElementById("severity-filter");
 const refreshBtn = document.getElementById("refresh-btn");
@@ -31,6 +42,82 @@ function escapeHtml(value) {
 function setStatus(ok) {
   statusIndicator.textContent = ok ? "● ligado ao Wazuh" : "● sem ligação";
   statusIndicator.className = "status-indicator " + (ok ? "status-ok" : "status-error");
+}
+
+// Aviso fixo no topo do dashboard quando o WebSocket de tempo real falha
+// definitivamente (5 tentativas de reconexão esgotadas) — ver
+// connectWebSocket(). Não há classe de banner de página inteira reutilizável
+// em style.css (.panel-error-banner é para dentro de um .panel de fundo
+// branco), por isso estiliza-se inline aqui; amarelo/laranja de aviso,
+// consistente com o resto da paleta (ver .level-aviso em style.css).
+function showRealtimeFallbackWarning() {
+  if (realtimeFallbackBannerEl) return;
+  realtimeFallbackBannerEl = document.createElement("div");
+  realtimeFallbackBannerEl.textContent =
+    "⚠️ Ligação em tempo real indisponível — a atualizar a cada 30s.";
+  realtimeFallbackBannerEl.style.cssText =
+    "background:#7a5200;color:#fff;text-align:center;padding:8px;font-size:14px;position:sticky;top:0;z-index:1000;";
+  document.body.insertBefore(realtimeFallbackBannerEl, document.body.firstChild);
+}
+
+function hideRealtimeFallbackWarning() {
+  if (realtimeFallbackBannerEl) {
+    realtimeFallbackBannerEl.remove();
+    realtimeFallbackBannerEl = null;
+  }
+}
+
+// Único sítio onde o polling fixo de 30s ainda existe — só arranca quando o
+// WebSocket falha definitivamente (ver connectWebSocket()/onclose abaixo).
+function startPollFallback() {
+  if (pollFallbackIntervalId) return;
+  pollFallbackIntervalId = setInterval(refreshDashboard, 30000);
+}
+
+// Liga o WebSocket de alertas em tempo real (/ws/alerts). Ao receber
+// {"type":"new_alert"} chama refreshDashboard() em vez de inserir a linha
+// manualmente — refreshDashboard() já busca/filtra tudo (severidade/janela
+// temporal selecionadas) e não vale a pena duplicar essa lógica aqui.
+// Reconecta com backoff exponencial (1s..16s, 5 tentativas); depois disso
+// entra em fallback definitivo de polling (startPollFallback +
+// showRealtimeFallbackWarning).
+function connectWebSocket() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    wsReconnectAttempts = 0;
+    hideRealtimeFallbackWarning();
+    if (pollFallbackIntervalId) {
+      clearInterval(pollFallbackIntervalId);
+      pollFallbackIntervalId = null;
+    }
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg && msg.type === "new_alert") {
+        refreshDashboard();
+      }
+    } catch (err) {
+      console.error("Mensagem WebSocket inválida:", err);
+    }
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+
+  ws.onclose = () => {
+    if (wsReconnectAttempts < WS_RECONNECT_DELAYS_MS.length) {
+      const delay = WS_RECONNECT_DELAYS_MS[wsReconnectAttempts];
+      wsReconnectAttempts++;
+      setTimeout(connectWebSocket, delay);
+    } else {
+      showRealtimeFallbackWarning();
+      startPollFallback();
+    }
+  };
 }
 
 function severityBadge(severity) {
@@ -1059,9 +1146,11 @@ tabButtons.forEach((btn) => {
 
 document.getElementById("system-summary-card").addEventListener("click", () => activateTab("system"));
 
-// Carrega ao abrir e depois atualiza automaticamente a cada 30s
+// Carrega ao abrir e liga o WebSocket de tempo real (/ws/alerts); o polling
+// fixo de 30s só volta a existir via startPollFallback() se a ligação
+// WebSocket falhar definitivamente (ver connectWebSocket()).
 refreshDashboard();
-setInterval(refreshDashboard, 30000);
+connectWebSocket();
 
 // Painéis novos (ciclo de vida, privilégios, contas admin) — independentes
 // dos painéis Wazuh acima, correm no seu próprio ciclo de 30s.
