@@ -242,6 +242,62 @@ def _render_system(system_specs: dict | None) -> str:
     return "".join(parts)
 
 
+def render_compliance_section(compliance_results: list[tuple[dict, dict]], org_profile: dict) -> str:
+    """
+    compliance_results: lista de tuplos (alerta, veredito), onde veredito é
+    o dict devolvido por compliance_evaluator.evaluate_alert_compliance
+    (este módulo NÃO importa compliance_evaluator — mantém-se puro, recebe
+    já calculado, quem chama é responsável por avaliar). Devolve um bloco
+    HTML (KPIs agregados por norma + tabela por alerta) pronto a passar
+    como o argumento compliance_html de generate_html_report. Todo o texto
+    dinâmico escapado com _esc(), mesma disciplina do resto do módulo.
+    """
+    if not compliance_results:
+        return '<p class="empty">Sem alertas para avaliar conformidade neste período.</p>'
+
+    counts = {
+        "rgpd": {"aplicavel": 0, "verificado_e_nao_aplicavel": 0},
+        "nis2": {"aplicavel": 0, "verificado_e_nao_aplicavel": 0},
+        "ai_act": {"aplicavel": 0, "verificado_e_nao_aplicavel": 0},
+    }
+    rows = []
+    for alert, compliance in compliance_results[:MAX_ALERTS_ROWS]:
+        for norma in counts:
+            estado = compliance.get(norma, {}).get("estado")
+            if estado in counts[norma]:
+                counts[norma][estado] += 1
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(_fmt_timestamp(alert.get('timestamp')))}</td>"
+            f"<td>{_esc(alert.get('friendly_name'))}</td>"
+            f"<td>{_esc(compliance.get('rgpd', {}).get('estado'))}</td>"
+            f"<td>{_esc(compliance.get('nis2', {}).get('estado'))}</td>"
+            f"<td>{_esc(compliance.get('ai_act', {}).get('estado'))}</td>"
+            "</tr>"
+        )
+
+    kpi_cards = "".join(
+        f'<div class="kpi-card"><div class="kpi-value">{_esc(counts[norma]["aplicavel"])}</div>'
+        f'<div class="kpi-label">{_esc(label)} aplicável</div></div>'
+        for norma, label in (("rgpd", "RGPD"), ("nis2", "NIS2"), ("ai_act", "AI Act"))
+    )
+
+    profile_note = (
+        f'<p class="note">Perfil da organização: {_esc(org_profile.get("nome"))} — '
+        f'sujeita a NIS2: {_esc("sim" if org_profile.get("estatuto_nis2_aplicavel") else "não")}, '
+        f'componentes de IA ativos: {_esc("sim" if org_profile.get("tem_componentes_ia_ativos") else "não")}.</p>'
+    )
+
+    table = (
+        '<table class="data-table">'
+        "<thead><tr><th>Timestamp</th><th>Evento</th><th>RGPD</th><th>NIS2</th><th>AI Act</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+    )
+
+    return f'<div class="kpi-grid">{kpi_cards}</div>{profile_note}{table}'
+
+
 def generate_html_report(
     *,
     stats: dict | None,

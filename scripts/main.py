@@ -35,11 +35,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import ml_anomalies
 from admin_activity import build_admin_activity_report
+from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
 from event_catalog import classify_alert
-from history_store import append_alerts_history
+from history_store import append_alerts_history, append_compliance_history
 from lifecycle import build_lifecycle_report
+from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
-from report_generator import generate_html_report
+from report_generator import generate_html_report, render_compliance_section
 from system_monitor import (
     THRESHOLDS,
     check_thresholds,
@@ -248,6 +250,16 @@ async def _system_monitor_loop() -> None:
         await asyncio.sleep(LOCAL_CHECK_INTERVAL_SECONDS)
 
 
+def _persist_new_alerts(alerts: list[dict]) -> None:
+    """Callback do alert_poll_loop (Fase 8): persiste histórico bruto (Fase 9) e o veredito de conformidade (Fase 7) de cada alerta novo."""
+    append_alerts_history(alerts, SENTRYLENS_HISTORY_DIR)
+    org_profile = get_org_profile()
+    rules = load_compliance_rules()
+    for alert in alerts:
+        result = evaluate_alert_compliance(alert, org_profile, rules)
+        append_compliance_history(alert, result, SENTRYLENS_HISTORY_DIR)
+
+
 @app.on_event("startup")
 async def _start_system_monitor() -> None:
     """Lança o loop de monitorização em background, sem bloquear o arranque do servidor."""
@@ -257,7 +269,7 @@ async def _start_system_monitor() -> None:
             indexer_client,
             ws_manager,
             _enrich_alert,
-            on_new_alerts=lambda alerts: append_alerts_history(alerts, SENTRYLENS_HISTORY_DIR),
+            on_new_alerts=_persist_new_alerts,
         )
     )
 
@@ -502,6 +514,40 @@ async def get_admin_activity(days: int = Query(30, ge=1, le=90, description="Jan
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
 
 
+@app.get("/api/compliance", dependencies=_REQUIRE_API_KEY)
+async def get_compliance(hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas")):
+    """Verificação de conformidade (RGPD/NIS2/AI Act) por alerta recente, mais um resumo agregado e o perfil da organização usado."""
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=500)
+        enriched = [_enrich_alert(a) for a in raw_alerts]
+        org_profile = get_org_profile()
+        rules = load_compliance_rules()
+
+        summary = {
+            "rgpd": {"aplicavel": 0, "verificado_e_nao_aplicavel": 0},
+            "nis2": {"aplicavel": 0, "verificado_e_nao_aplicavel": 0},
+            "ai_act": {"aplicavel": 0, "verificado_e_nao_aplicavel": 0},
+        }
+        results = []
+        for alert in enriched:
+            compliance = evaluate_alert_compliance(alert, org_profile, rules)
+            for norma, veredito in compliance.items():
+                summary[norma][veredito["estado"]] += 1
+            results.append({**alert, "compliance": compliance})
+
+        return {
+            "window_hours": hours,
+            "total": len(results),
+            "org_profile": org_profile,
+            "summary": summary,
+            "alerts": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
 @app.get("/api/ml-anomalies", dependencies=_REQUIRE_API_KEY)
 async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas")):
     """
@@ -552,6 +598,18 @@ async def export_report(hours: int = Query(24, ge=1, le=168, description="Janela
     except HTTPException:
         pass
 
+    compliance_html = ""
+    if alerts is not None:
+        try:
+            org_profile = get_org_profile()
+            rules = load_compliance_rules()
+            compliance_results = [
+                (a, evaluate_alert_compliance(a, org_profile, rules)) for a in alerts.get("alerts", [])
+            ]
+            compliance_html = render_compliance_section(compliance_results, org_profile)
+        except Exception:
+            compliance_html = ""
+
     html_content = generate_html_report(
         stats=stats,
         alerts=alerts,
@@ -559,6 +617,7 @@ async def export_report(hours: int = Query(24, ge=1, le=168, description="Janela
         system_specs=system_specs,
         generated_at=datetime.utcnow().isoformat(),
         hours=hours,
+        compliance_html=compliance_html,
     )
 
     filename = f"{datetime.utcnow().strftime('%Y-%m-%d')}-relatorio.html"
