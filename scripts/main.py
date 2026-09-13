@@ -30,7 +30,7 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 import ml_anomalies
@@ -39,6 +39,7 @@ from event_catalog import classify_alert
 from history_store import append_alerts_history
 from lifecycle import build_lifecycle_report
 from rbac import build_privileges_report, load_rbac_baseline
+from report_generator import generate_html_report
 from system_monitor import (
     check_thresholds,
     get_history,
@@ -513,6 +514,52 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
+async def export_report(hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas")):
+    """
+    Gera um relatório HTML autónomo com o estado atual do dashboard
+    (KPIs, alertas, agentes, sistema) e devolve-o como ficheiro para
+    download — não depende do backend estar a correr para o reabrir
+    depois. Reaproveita as mesmas funções internas dos endpoints já
+    existentes (get_stats, get_alerts, get_agents, get_system_specs);
+    cada uma pode falhar independentemente sem impedir o resto do
+    relatório de se gerar.
+    """
+    stats = alerts = agents = system_specs = None
+    try:
+        stats = await get_stats(hours=hours)
+    except HTTPException:
+        pass
+    try:
+        alerts = await get_alerts(hours=hours)
+    except HTTPException:
+        pass
+    try:
+        agents = await get_agents()
+    except HTTPException:
+        pass
+    try:
+        system_specs = await get_system_specs()
+    except HTTPException:
+        pass
+
+    html_content = generate_html_report(
+        stats=stats,
+        alerts=alerts,
+        agents=agents,
+        system_specs=system_specs,
+        generated_at=datetime.utcnow().isoformat(),
+        hours=hours,
+    )
+
+    filename = f"{datetime.utcnow().strftime('%Y-%m-%d')}-relatorio.html"
+    return Response(
+        content=html_content,
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.websocket("/ws/alerts")
