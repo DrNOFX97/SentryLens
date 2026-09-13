@@ -160,6 +160,12 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   não é login), e sem camada de índice/consulta rápida sobre o histórico
   (ex: SQLite para perguntas tipo "todos os alertas RGPD entre março e
   maio") — ver [Próximos passos](#-próximos-passos).
+- ✅ **Camada de conformidade regulatória (RGPD/NIS2/AI Act)** — cada
+  alerta passa a ser avaliado contra as 3 normas, com veredito explícito
+  ("aplicável" ou "verificado e não aplicável", nunca omitido em
+  silêncio) e registo de auditoria persistido. Ver [secção
+  dedicada](#-conformidade-regulatória-rgpd-nis2-ai-act) na
+  documentação da API.
 
 ---
 
@@ -664,11 +670,130 @@ seletor de janela temporal que já vive nesse header. Respeita o período
 `X-API-Key` (que um `<a href>` simples não consegue enviar), é feito via
 `fetch()` + `Blob` + link temporário criado em memória.
 
-**Preparado para o futuro:** `generate_html_report` já recebe um
-parâmetro `compliance_html` (vazio por agora), reservado para a secção
-de conformidade regulatória da Fase 7 (ainda não implementada) — para
-que o contrato da função não tenha de mudar quando essa fase estiver
-pronta.
+**Integração com a conformidade regulatória (Fase 7):** `generate_html_report`
+recebe um parâmetro `compliance_html` — quando os alertas da janela
+selecionada conseguem ser avaliados, `main.py` preenche-o com
+`report_generator.render_compliance_section(...)`, e o relatório exportado
+passa a incluir a secção de conformidade (RGPD/NIS2/AI Act) com os 3
+vereditos por alerta; se a avaliação falhar, `compliance_html` fica vazio
+e essa secção simplesmente não aparece, sem derrubar o resto do relatório.
+Ver [secção dedicada](#-conformidade-regulatória-rgpd-nis2-ai-act) logo a
+seguir à documentação deste endpoint.
+
+### 🛡️ Conformidade regulatória (RGPD, NIS2, AI Act)
+
+> ✅ **Adicionado em 2026-09-14 (Fase 7)** — cada alerta passa a ser
+> avaliado contra 3 normas regulatórias, mostrando **sempre** um
+> veredito por norma ("aplicável" ou "verificado e não aplicável") —
+> nunca omitindo a verificação em silêncio, mesmo quando o resultado é
+> "não aplicável".
+
+**Motivação:** um dashboard de segurança que gera alertas sobre
+identidade, grupos e privilégios toca inevitavelmente em obrigações
+regulatórias (proteção de dados pessoais, notificação de incidentes,
+sistemas de IA). Em vez de deixar essa análise implícita, o SentryLens
+regista explicitamente, por alerta, se cada norma se aplica ou não — e
+porquê.
+
+**Arquitetura em 5 camadas:**
+
+1. **Catálogo de regras** — [`scripts/compliance_rules.yaml`](scripts/compliance_rules.yaml)
+   (YAML, não Python, porque as regras/textos de justificação mudam com
+   mais frequência do que a lógica que as aplica): condições de
+   aplicabilidade por norma + texto de justificação para cada veredito
+   possível.
+2. **Motor de avaliação** — [`scripts/compliance_evaluator.py`](scripts/compliance_evaluator.py),
+   função pura `evaluate_alert_compliance(alert, org_profile, rules)`
+   (mesmo padrão de `lifecycle.py`/`rbac.py`/`admin_activity.py`: recebe
+   tudo já pronto, nunca fala com o Wazuh):
+   - **RGPD** — depende da **categoria** do alerta: autenticação, gestão
+     de grupos, ciclo de vida de contas e atividade privilegiada
+     envolvem dados pessoais (identificadores de utilizador, IPs de
+     origem) → aplicável; as restantes categorias → verificado e não
+     aplicável.
+   - **NIS2** — depende do **estatuto da entidade** (perfil) **e** da
+     **severidade** do alerta: só é "aplicável" se a organização estiver
+     sujeita à NIS2 *e* o alerta atingir o limiar de incidente
+     significativo (`severity` `critical`/`high`); caso contrário fica
+     "verificado e não aplicável", com justificação diferente consoante
+     falhe o estatuto ou a severidade.
+   - **AI Act** — depende só do **perfil**: se a organização opera um
+     componente de IA ativo (aqui, a deteção de anomalias por Isolation
+     Forest da Fase 6, `GET /api/ml-anomalies`) → aplicável; caso
+     contrário → verificado e não aplicável.
+3. **Perfil da organização** — [`scripts/org_profile.py`](scripts/org_profile.py),
+   função `get_org_profile()`. Fixo por agora — o CET não é uma empresa
+   real — com `estatuto_nis2_aplicavel=False`,
+   `processa_dados_pessoais=True`, `tem_componentes_ia_ativos=True`.
+   Lido **sempre** através da função, nunca do dict diretamente, para
+   poder ser substituído no futuro (ex: por uma pesquisa real de
+   enquadramento NIS2 a partir do NIPC/CAE de uma empresa) sem tocar no
+   motor de avaliação.
+4. **Relatório** — nova secção de conformidade no relatório HTML
+   exportável (`GET /api/export/report`, [secção 📄 acima](#-exportar-relatório-html-getapiexportreport)),
+   via `report_generator.render_compliance_section(...)`: mostra os 3
+   vereditos por alerta, mais um resumo agregado no topo. Módulo puro
+   (não importa `compliance_evaluator` — recebe os pares
+   alerta/veredito já calculados), com o mesmo escaping HTML do resto do
+   relatório.
+5. **Registo de auditoria** — `history_store.append_compliance_history(...)`
+   persiste o veredito de cada alerta novo em
+   `scripts/historico/AAAA/MM-mês/AAAA-MM-DD-compliance.jsonl` (mesma
+   pasta/dia do `alerts.jsonl` já existente da [Fase 9](#-histórico-próprio-de-alertas-scriptshistorico)),
+   reaproveitando a deteção de alertas novos já existente do
+   `alert_poll_loop` do WebSocket (Fase 8) — **sem criar um poller
+   novo**. O registo acontece mesmo quando o veredito é "não aplicável"
+   em todas as normas, porque a auditoria também é o registo de que a
+   verificação foi feita, não só dos casos "aplicável".
+
+**Endpoint:** `GET /api/compliance?hours=24` (protegido pela mesma
+`X-API-Key` de todos os outros endpoints REST). Avalia os alertas
+recentes do Wazuh Indexer contra as 3 normas e devolve o perfil da
+organização usado, um resumo agregado por norma, e o veredito completo
+por alerta:
+
+```json
+{
+  "window_hours": 24,
+  "total": 42,
+  "org_profile": {
+    "nome": "SentryLens (laboratório CET)",
+    "estatuto_nis2_aplicavel": false,
+    "processa_dados_pessoais": true,
+    "tem_componentes_ia_ativos": true
+  },
+  "summary": {
+    "rgpd": {"aplicavel": 30, "verificado_e_nao_aplicavel": 12},
+    "nis2": {"aplicavel": 5, "verificado_e_nao_aplicavel": 37},
+    "ai_act": {"aplicavel": 42, "verificado_e_nao_aplicavel": 0}
+  },
+  "alerts": [
+    {
+      "timestamp": "2026-09-14T10:15:00Z",
+      "friendly_name": "Failed Logon",
+      "severity": "high",
+      "compliance": {
+        "rgpd": {"estado": "aplicavel", "justificacao": "..."},
+        "nis2": {"estado": "verificado_e_nao_aplicavel", "justificacao": "..."},
+        "ai_act": {"estado": "aplicavel", "justificacao": "..."}
+      }
+    }
+  ]
+}
+```
+Cada item de `alerts` tem exatamente os mesmos campos de um item de
+`GET /api/alerts`, mais o campo `compliance` acrescentado. Erro →
+`502` `{"detail": "Erro ao contactar Wazuh Indexer: ..."}`, mesmo padrão
+dos outros endpoints que dependem do Indexer.
+
+> ⚠️ **Trabalho futuro, não implementado nesta fase:** o `org_profile.py`
+> atual é fixo (hardcoded) — não há pesquisa automática de enquadramento
+> NIS2 para uma empresa real a partir do seu NIPC/CAE. Está previsto (mas
+> **fora de escopo** desta fase) um módulo `nis2_lookup.py`, assíncrono,
+> que devolveria uma classificação sugerida com grau de confiança e
+> fontes — nunca um veredito jurídico definitivo, sempre "a confirmar
+> junto do CNCS". Esta fase entrega uma base funcional de conformidade
+> com um perfil fixo, não uma pesquisa automática por empresa real.
 
 ### `GET /api/health`
 Confirma que o backend está de pé (não testa ligação ao Wazuh).
@@ -814,6 +939,19 @@ com 5xx só porque uma das 4 fontes de dados internas (`get_stats`,
 `get_alerts`, `get_agents`, `get_system_specs`) está indisponível — a
 secção correspondente do relatório fica apenas marcada como
 "indisponível".
+
+### `GET /api/compliance`
+Verificação de conformidade regulatória (RGPD/NIS2/AI Act) por alerta
+recente, com resumo agregado e perfil da organização usado — ver
+detalhe completo na secção [🛡️ Conformidade regulatória
+(RGPD, NIS2, AI Act)](#-conformidade-regulatória-rgpd-nis2-ai-act) logo
+a seguir à exportação de relatório na documentação da API.
+
+| Parâmetro | Tipo | Default | Descrição |
+|---|---|---|---|
+| `hours` | int (1–168) | 24 | Janela temporal |
+
+Erro → `502` `{"detail": "Erro ao contactar Wazuh Indexer: ..."}`.
 
 ### Endpoints de sistema (`system_monitor.py` — a máquina local, não o Wazuh)
 
