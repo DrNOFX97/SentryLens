@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 import ml_anomalies
@@ -80,10 +81,31 @@ RBAC_BASELINE_PATH = os.getenv(
 # usado pelo endpoint /api/ml-anomalies.
 ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", os.path.join(os.path.dirname(__file__), "models"))
 
+# O CORS (configurado mais abaixo) já restringe as origens a loopback, mas
+# isso não chega sozinho — foi por não haver autenticação nenhuma nos
+# endpoints que a auditoria de 2026-08-31 teve de restringir o CORS em
+# primeiro lugar. Por isso os endpoints /api/* passam a exigir também uma
+# API key própria via header X-API-Key. Fail-closed deliberado: se a
+# variável não estiver definida (ou vier vazia), TODOS os pedidos são
+# recusados com 401 — nunca abrimos por omissão.
+SENTRYLENS_API_KEY = os.getenv("SENTRYLENS_API_KEY", "")
+
+
+async def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")) -> None:
+    """
+    Dependency global aplicada a todos os endpoints /api/*. Usa
+    secrets.compare_digest (em vez de ==) para evitar timing attacks na
+    comparação da key.
+    """
+    if not SENTRYLENS_API_KEY or not secrets.compare_digest(x_api_key, SENTRYLENS_API_KEY):
+        raise HTTPException(status_code=401, detail="API key inválida ou em falta")
+
+
 app = FastAPI(
     title="SentryLens",
     description="SentryLens — análise de segurança Windows ligada ao Wazuh",
     version="2.0.0",
+    dependencies=[Depends(require_api_key)],
 )
 
 # O frontend (ficheiro estático) corre numa porta diferente do backend,
