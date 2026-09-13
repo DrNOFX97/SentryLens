@@ -149,6 +149,13 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   sobreviver aos 90 dias de retenção do Wazuh Indexer. Ver [secção
   dedicada](#-histórico-próprio-de-alertas-scriptshistorico), logo a
   seguir ao WebSocket na documentação da API.
+- ✅ **Exportação de relatório HTML** (`scripts/report_generator.py`) —
+  novo endpoint `GET /api/export/report` gera um ficheiro HTML autónomo
+  (CSS embutido, paleta do dashboard, sem pedidos a recursos externos)
+  com o estado atual do dashboard, pronto para guardar offline, enviar
+  por email ou anexar a um relatório do CET. Ver [secção
+  dedicada](#-exportar-relatório-html-getapiexportreport), logo a seguir
+  ao histórico próprio de alertas na documentação da API.
 - ❌ Ainda sem distinção entre múltiplos utilizadores (a key é partilhada,
   não é login), e sem camada de índice/consulta rápida sobre o histórico
   (ex: SQLite para perguntas tipo "todos os alertas RGPD entre março e
@@ -385,11 +392,14 @@ A interface está organizada em 4 abas:
 
 ## 4. Endpoints da API
 
-Todos devolvem JSON. CORS restringido a origens loopback
-(`localhost`/`127.0.0.1`, qualquer porta) — nenhuma origem externa
-consegue ler as respostas. Todos os endpoints `/api/*` (incluindo
-`/api/health`) exigem também uma API key partilhada no header
-`X-API-Key` — ver a secção seguinte para como gerar e configurar.
+Todos devolvem JSON, com uma exceção: `GET /api/export/report` devolve
+o relatório em HTML como ficheiro para download (ver [secção
+dedicada](#-exportar-relatório-html-getapiexportreport)). CORS
+restringido a origens loopback (`localhost`/`127.0.0.1`, qualquer
+porta) — nenhuma origem externa consegue ler as respostas. Todos os
+endpoints `/api/*` (incluindo `/api/health`) exigem também uma API key
+partilhada no header `X-API-Key` — ver a secção seguinte para como
+gerar e configurar.
 
 ### 🔑 Autenticação por API key
 
@@ -603,6 +613,61 @@ ficheiros JSONL têm de ser lidos/filtrados manualmente por agora — nem
 um endpoint REST novo para consultar este histórico. Fica como trabalho
 futuro (ver [Próximos passos](#-próximos-passos)).
 
+### 📄 Exportar relatório HTML (`GET /api/export/report`)
+
+> ✅ **Adicionado em 2026-09-14** — fecha o item "Exportar relatório" da
+> lista de [Próximos passos](#-próximos-passos): já é possível gerar um
+> ficheiro HTML autónomo com o estado atual do dashboard, no mesmo
+> espírito do relatório da Fase 1 (`log_analyzer.py`).
+
+**Motivação:** guardar, enviar por email ou anexar a um relatório do CET
+o estado atual do dashboard (KPIs, alertas, agentes, sistema) num único
+ficheiro HTML autónomo — CSS embutido, sem pedidos a recursos externos —
+que abre offline em qualquer lado, sem depender do backend estar a
+correr para o reabrir depois.
+
+**Endpoint:** `GET /api/export/report?hours=24` — mesmo parâmetro
+`hours` (1–168) dos outros endpoints, protegido pela mesma autenticação
+`X-API-Key` de todos os endpoints REST (ver [Autenticação por API
+key](#-autenticação-por-api-key)). Devolve o HTML diretamente como
+ficheiro (`Content-Disposition: attachment`), com nome
+`AAAA-MM-DD-relatorio.html` (data do dia em que foi gerado).
+
+**Gerador (`scripts/report_generator.py`):** função pura
+`generate_html_report(...)` que não fala com o Wazuh diretamente —
+recebe os dados já obtidos pelas funções internas dos endpoints já
+existentes (`get_stats`, `get_alerts`, `get_agents`, `get_system_specs`).
+Cada uma destas 4 fontes pode falhar independentemente sem derrubar o
+relatório inteiro: o endpoint continua a devolver `200`, e só a secção
+correspondente do HTML aparece marcada como "indisponível" — o relatório
+nunca falha por completo só porque uma parte dos dados não está
+acessível.
+
+**Segurança — escaping do texto dinâmico:** todo o texto que vem dos
+alertas/agentes (nomes de agentes, descrições de regra, `full_log`) é
+escapado com `html.escape()` antes de entrar no HTML — a mesma
+disciplina já aplicada em `app.js` contra XSS armazenado (auditoria de
+2026-08-31). É especialmente necessário aqui porque, ao contrário do
+dashboard ao vivo, este ficheiro é gravado em disco e reaberto
+diretamente no browser, sem passar por nenhuma sanitização adicional.
+
+**Identidade visual:** reaproveita a paleta navy+ciano já usada no
+dashboard (`--navy-950`, `--navy-800`, `--cyan-600`, `--cyan-700`,
+`--ink-900` — os mesmos tokens de `style.css`), para que o relatório
+exportado pareça uma extensão do dashboard, não um documento à parte.
+
+**Botão no frontend:** "📄 Exportar relatório" na aba Visão Geral
+(`index.html`/`app.js`), respeitando o período (`hours`) já selecionado
+no seletor de janela temporal do dashboard. Como o download exige o
+header `X-API-Key` (que um `<a href>` simples não consegue enviar), é
+feito via `fetch()` + `Blob` + link temporário criado em memória.
+
+**Preparado para o futuro:** `generate_html_report` já recebe um
+parâmetro `compliance_html` (vazio por agora), reservado para a secção
+de conformidade regulatória da Fase 7 (ainda não implementada) — para
+que o contrato da função não tenha de mudar quando essa fase estiver
+pronta.
+
 ### `GET /api/health`
 Confirma que o backend está de pé (não testa ligação ao Wazuh).
 ```json
@@ -728,6 +793,25 @@ ao catálogo de Event IDs.
 Erro → `503` se o modelo ainda não foi treinado (`{"detail": "Modelo de
 ML não encontrado em '...'. Corre 'python train_anomaly_model.py'
 primeiro para o gerar."}`) ou `502` se falhar o pedido ao Wazuh Indexer.
+
+### `GET /api/export/report`
+Gera e devolve um relatório HTML autónomo com o estado atual do
+dashboard (KPIs, alertas, agentes, sistema) — ver [secção
+dedicada](#-exportar-relatório-html-getapiexportreport), logo a seguir
+ao histórico próprio de alertas na documentação da API, para motivação,
+comportamento de falha parcial e segurança do escaping.
+
+| Parâmetro | Tipo | Default | Descrição |
+|---|---|---|---|
+| `hours` | int (1–168) | 24 | Janela temporal (mesmo parâmetro dos outros endpoints) |
+
+Ao contrário dos restantes endpoints, não devolve JSON — devolve o
+ficheiro HTML diretamente, com `Content-Disposition: attachment` e nome
+`AAAA-MM-DD-relatorio.html` (data do dia em que foi gerado). Nunca falha
+com 5xx só porque uma das 4 fontes de dados internas (`get_stats`,
+`get_alerts`, `get_agents`, `get_system_specs`) está indisponível — a
+secção correspondente do relatório fica apenas marcada como
+"indisponível".
 
 ### Endpoints de sistema (`system_monitor.py` — a máquina local, não o Wazuh)
 
@@ -1022,9 +1106,14 @@ que vais usar para correr `uvicorn`
    `scripts/historico/` (ver [secção dedicada](#-histórico-próprio-de-alertas-scriptshistorico)).
    Falta ainda uma camada de índice/consulta rápida (ex: SQLite) sobre
    esses ficheiros — isso continua por fazer.
-4. **Exportar relatório** — botão para gerar um relatório HTML com
+4. ~~**Exportar relatório** — botão para gerar um relatório HTML com
    dados ao vivo, no mesmo espírito do relatório da Fase 1
-   (`log_analyzer.py`, já neste repo).
+   (`log_analyzer.py`, já neste repo).~~ ✅ **Feito em 2026-09-14** —
+   `GET /api/export/report` (`scripts/report_generator.py`) gera um HTML
+   autónomo com a paleta do dashboard, protegido pela mesma API key, com
+   botão "📄 Exportar relatório" na aba Visão Geral (ver [secção
+   dedicada](#-exportar-relatório-html-getapiexportreport) na
+   documentação da API).
 
 ---
 
