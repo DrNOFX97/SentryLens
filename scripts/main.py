@@ -41,6 +41,7 @@ from lifecycle import build_lifecycle_report
 from rbac import build_privileges_report, load_rbac_baseline
 from report_generator import generate_html_report
 from system_monitor import (
+    THRESHOLDS,
     check_thresholds,
     get_history,
     get_last_network_speed,
@@ -408,6 +409,12 @@ async def get_system_specs():
         return specs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao recolher specs do sistema: {e}")
+
+
+@app.get("/api/system/thresholds", dependencies=_REQUIRE_API_KEY)
+async def get_system_thresholds():
+    """Expõe os thresholds de aviso/crítico usados para CPU/RAM/disco/rede — fonte única de verdade, para o frontend deixar de duplicar estes valores."""
+    return THRESHOLDS
 
 
 @app.get("/api/system/alerts", dependencies=_REQUIRE_API_KEY)
