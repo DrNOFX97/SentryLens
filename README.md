@@ -2,6 +2,18 @@
 
 **Dashboard de Cibersegurança — Projeto CET (curso de cibersegurança)**
 
+<p align="center">
+  <img src="logo.png" alt="SentryLens" width="420"
+       style="background:#0a1622;border-radius:14px;padding:20px 30px;">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/PYTHON-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/FASTAPI-0.115.0-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI 0.115.0">
+  <img src="https://img.shields.io/badge/SQLITE-indice_de_historico-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
+  <img src="https://img.shields.io/badge/WAZUH-integracao_SIEM-0B7D92?style=flat-square" alt="Integração com Wazuh">
+</p>
+
 SentryLens é um dashboard que liga a um laboratório Wazuh real (SIEM
 open-source) e mostra, em tempo quase-real, os alertas de segurança
 gerados pelos Windows Security Event Logs de uma máquina monitorizada —
@@ -19,6 +31,19 @@ A classificação de Event ID → nome amigável / severidade / recomendação
 é **exatamente a mesma lógica da Fase 1**, centralizada em
 `scripts/event_catalog.py`, para que as duas fases "falem a mesma
 língua".
+
+### Stack técnica
+
+| Camada | Tecnologia |
+|---|---|
+| Backend | Python 3.12+, [FastAPI](https://fastapi.tiangolo.com/) 0.115.0, Uvicorn 0.32.0 |
+| Integração SIEM | Wazuh (Manager API + Indexer API/OpenSearch) via `httpx` |
+| Tempo real | WebSocket nativo do FastAPI (`/ws/alerts`) |
+| Persistência | JSONL (histórico bruto/conformidade) + SQLite (`history_index.py`) |
+| Machine Learning | scikit-learn 1.5.2 (Isolation Forest) |
+| Frontend | HTML/CSS/JavaScript puro (sem framework nem build step), Chart.js |
+| Testes | 11 scripts standalone (`scripts/test_*.py`) — sem pytest, ver [Testes](#-testes) |
+| SO alvo | Windows 10/11 (WMI/PowerShell para specs do sistema) |
 
 ---
 
@@ -192,19 +217,29 @@ Dashboard cybersec/
 ├── INCIDENT_RESPONSE.md         ← playbook de resposta a incidentes, referência autónoma
 │
 ├── scripts/                     ← backend FastAPI + automação do laboratório
-│   ├── main.py                  ← app FastAPI, endpoints REST
+│   ├── main.py                  ← app FastAPI, endpoints REST + WebSocket
 │   ├── wazuh_client.py          ← cliente para Manager API + Indexer API
 │   ├── event_catalog.py         ← classificação de Event IDs (Fase 1 reaproveitada)
-│   ├── requirements.txt         ← dependências Python do backend
-│   ├── .env                     ← credenciais reais (não versionar!)
-│   ├── .env.example             ← template de configuração
-│   ├── README.md                ← guia dos scripts de automação do laboratório
+│   ├── websocket_alerts.py      ← ConnectionManager + alert_poll_loop (/ws/alerts, 10s)
+│   ├── history_store.py         ← persistência JSONL (alerts.jsonl, compliance.jsonl)
+│   ├── history_index.py         ← índice SQLite sobre o histórico (history_index.py)
+│   ├── compliance_evaluator.py  ← motor RGPD/NIS2/AI Act, função pura
+│   ├── compliance_rules.yaml    ← catálogo de regras de conformidade
+│   ├── org_profile.py           ← perfil fixo da organização (get_org_profile())
+│   ├── nis2_lookup.py           ← classificação NIS2 sugerida (sem scraping)
+│   ├── report_generator.py      ← gerador de relatório HTML autónomo
+│   ├── lifecycle.py / rbac.py / admin_activity.py ← painéis de ciclo de vida/RBAC/admin
+│   ├── ml_anomalies.py / feature_extractor.py / train_anomaly_model.py ← Fase 6 (ML)
 │   ├── system_monitor.py        ← specs/saúde da máquina local (CPU/RAM/disco/rede)
+│   ├── test_*.py                ← 11 scripts de teste standalone (ver Testes)
+│   ├── requirements.txt         ← dependências Python do backend
+│   ├── .env / .env.example      ← credenciais reais (não versionar) / template
+│   ├── README.md                ← guia dos scripts de automação do laboratório
 │   ├── setup-hyperv-lab.ps1     ← 1) cria Hyper-V switch + VM (Windows, Admin)
 │   ├── install-wazuh.sh         ← 2) instala o Wazuh dentro da VM (via SSH)
 │   ├── install-wazuh-agent.ps1  ← 3) instala o agente no Windows (Admin)
-│   ├── start-backend.ps1        ← wrapper usado pela tarefa agendada SentryLens-Backend
-│   └── start-frontend.ps1       ← wrapper usado pela tarefa agendada SentryLens-Frontend
+│   ├── start-backend.ps1 / start-frontend.ps1 ← wrappers das tarefas agendadas
+│   └── historico/ · models/     ← dados gerados em runtime (gitignored)
 │
 └── docs/
     ├── README.md                ← guia detalhado de setup do backend/frontend
@@ -389,7 +424,7 @@ mostra:
   em baixo, ou backend incapaz de contactar o Wazuh — ver consola do
   browser, F12, para o erro exato).
 
-A interface está organizada em 4 abas:
+A interface está organizada em 9 abas:
 
 | Aba | Conteúdo |
 |---|---|
@@ -397,6 +432,45 @@ A interface está organizada em 4 abas:
 | 🚨 **Alertas** | Banner de força bruta (quando há suspeitos) + tabela densa com todos os campos de cada alerta, incl. log completo |
 | 🖥️ **Agentes** | Tabela de agentes Wazuh — nome, IP, SO, estado, último keep-alive |
 | ⚙️ **Sistema** | CPU/RAM/disco/rede desta máquina em detalhe (modelo, módulos, SSD/HDD), interfaces de rede, alertas de sistema ativos, histórico de violações, gráfico de uso |
+| 📋 **Ciclo de Vida** | Contagens, timeline e deteções de risco no ciclo de vida de contas (offboarding falhado, conta descartável, criação fora de horário) |
+| 🔑 **Privilégios** | Desvios RBAC — grupos atribuídos fora do baseline cargo→grupos permitidos |
+| 👤 **Contas Admin** | Atividade de contas administrativas — privilégios especiais, tarefas agendadas, deteções de risco |
+| 🧠 **ML Anomalias** | Deteção por Isolation Forest lado a lado com a classificação por regras |
+| 🛡️ **Conformidade** | Veredito RGPD/NIS2/AI Act por alerta, resumo agregado, perfil da organização |
+
+---
+
+## 🧪 Testes
+
+Sem laboratório Wazuh ligado — tudo mockado (`AsyncMock` sobre
+`WazuhIndexerClient`/`WazuhManagerClient`). Sem framework (nem pytest):
+11 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
+por caso e sai com `sys.exit(1)` se algo falhar.
+
+```bash
+cd scripts
+python test_with_mock.py         # classificação, /api/stats, /api/brute-force
+python test_new_panels.py        # /api/lifecycle, /api/privileges, /api/admin-activity
+python test_ml_anomalies.py      # /api/ml-anomalies
+python test_auth.py              # autenticação por API key (401/200, /docs desligado)
+python test_websocket_alerts.py  # /ws/alerts — auth por query param, _poll_once
+python test_history_store.py     # persistência JSONL de histórico
+python test_history_index.py     # índice SQLite + /api/history/query
+python test_compliance.py        # motor RGPD/NIS2/AI Act + /api/compliance
+python test_nis2_lookup.py       # classificação NIS2 sugerida + /api/nis2-lookup
+python test_report_generator.py  # gerador + /api/export/report
+python test_system_monitor.py    # THRESHOLDS + /api/system/thresholds
+```
+
+Todos definem `SENTRYLENS_API_KEY` em `os.environ` **antes** de
+`import main` (a autenticação é lida a nível de módulo) e fazem
+`main.app.router.on_startup.clear()` para não arrancar os loops de
+background (monitorização de sistema, polling de alertas do
+WebSocket). Correm no `.venv` de `scripts/` — o Python global desta
+máquina não tem `scikit-learn`/`joblib`/`PyYAML` instalados.
+
+> `scripts/test_feature_extractor.py` testa só `feature_extractor.py`
+> (Fase 6, extração de features de ML) — não usa `TestClient`/`main`.
 
 ---
 
