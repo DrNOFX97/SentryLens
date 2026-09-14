@@ -14,10 +14,18 @@ const API_KEY = "";
 // handshake de WebSocket do browser não permite headers HTTP arbitrários.
 const WS_URL = `${API_BASE.replace(/^http/, "ws")}/ws/alerts?api_key=${encodeURIComponent(API_KEY)}`;
 const WS_RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
+// Depois de esgotar as 5 tentativas iniciais, deixa de fazer backoff
+// exponencial (não faz sentido continuar a espaçar mais) e passa a tentar
+// uma vez a este ritmo fixo, em paralelo com o próprio polling de fallback
+// — mesma cadência de 30s, para o WebSocket poder recuperar sozinho sem
+// precisar de recarregar a página.
+const WS_RECOVERY_INTERVAL_MS = 30000;
 
 let ws = null;
 let wsReconnectAttempts = 0;
 let pollFallbackIntervalId = null;
+let wsRecoveryIntervalId = null;
+let inRealtimeFallback = false;
 let realtimeFallbackBannerEl = null;
 
 const windowSelect = document.getElementById("window-select");
@@ -74,22 +82,40 @@ function startPollFallback() {
   pollFallbackIntervalId = setInterval(refreshDashboard, 30000);
 }
 
+// Enquanto em fallback, tenta recuperar o WebSocket a cada
+// WS_RECOVERY_INTERVAL_MS — cada tentativa é uma ligação nova e única (não
+// volta a encadear o backoff exponencial, já esgotado). Se conseguir,
+// ws.onopen trata de limpar este intervalo e sair do fallback; se falhar,
+// ws.onclose vê inRealtimeFallback=true e não faz nada mais (deixa o
+// próprio intervalo tentar outra vez no próximo tick).
+function startWsRecovery() {
+  if (wsRecoveryIntervalId) return;
+  wsRecoveryIntervalId = setInterval(connectWebSocket, WS_RECOVERY_INTERVAL_MS);
+}
+
 // Liga o WebSocket de alertas em tempo real (/ws/alerts). Ao receber
 // {"type":"new_alert"} chama refreshDashboard() em vez de inserir a linha
 // manualmente — refreshDashboard() já busca/filtra tudo (severidade/janela
 // temporal selecionadas) e não vale a pena duplicar essa lógica aqui.
 // Reconecta com backoff exponencial (1s..16s, 5 tentativas); depois disso
-// entra em fallback definitivo de polling (startPollFallback +
-// showRealtimeFallbackWarning).
+// entra em fallback de polling (startPollFallback + showRealtimeFallbackWarning)
+// mas continua a tentar recuperar sozinho a cada 30s (startWsRecovery) — só
+// esta função chama new WebSocket(...), tanto nas tentativas iniciais como
+// nas de recuperação, por isso toda a lógica de estado vive só aqui.
 function connectWebSocket() {
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
     wsReconnectAttempts = 0;
+    inRealtimeFallback = false;
     hideRealtimeFallbackWarning();
     if (pollFallbackIntervalId) {
       clearInterval(pollFallbackIntervalId);
       pollFallbackIntervalId = null;
+    }
+    if (wsRecoveryIntervalId) {
+      clearInterval(wsRecoveryIntervalId);
+      wsRecoveryIntervalId = null;
     }
   };
 
@@ -109,13 +135,21 @@ function connectWebSocket() {
   };
 
   ws.onclose = () => {
+    if (inRealtimeFallback) {
+      // Foi só uma tentativa de recuperação a falhar — startWsRecovery()
+      // já está a correr e tenta outra vez no próximo tick, sem repetir o
+      // aviso nem duplicar o polling (já ativos).
+      return;
+    }
     if (wsReconnectAttempts < WS_RECONNECT_DELAYS_MS.length) {
       const delay = WS_RECONNECT_DELAYS_MS[wsReconnectAttempts];
       wsReconnectAttempts++;
       setTimeout(connectWebSocket, delay);
     } else {
+      inRealtimeFallback = true;
       showRealtimeFallbackWarning();
       startPollFallback();
+      startWsRecovery();
     }
   };
 }
