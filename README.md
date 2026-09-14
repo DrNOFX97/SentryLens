@@ -157,15 +157,19 @@ APIs do Wazuh Manager/Indexer, que já têm os alertas processados.
   dedicada](#-exportar-relatório-html-getapiexportreport), logo a seguir
   ao histórico próprio de alertas na documentação da API.
 - ❌ Ainda sem distinção entre múltiplos utilizadores (a key é partilhada,
-  não é login), e sem camada de índice/consulta rápida sobre o histórico
-  (ex: SQLite para perguntas tipo "todos os alertas RGPD entre março e
-  maio") — ver [Próximos passos](#-próximos-passos).
+  não é login) — ver [Próximos passos](#-próximos-passos).
 - ✅ **Camada de conformidade regulatória (RGPD/NIS2/AI Act)** — cada
   alerta passa a ser avaliado contra as 3 normas, com veredito explícito
   ("aplicável" ou "verificado e não aplicável", nunca omitido em
   silêncio) e registo de auditoria persistido. Ver [secção
   dedicada](#-conformidade-regulatória-rgpd-nis2-ai-act) na
   documentação da API.
+- ✅ **Índice SQLite sobre o histórico** (`scripts/history_index.py`) —
+  consultas tipo "todos os alertas RGPD aplicável entre março e maio"
+  deixam de exigir percorrer pastas/ficheiros JSONL à mão; novo
+  endpoint `GET /api/history/query`. Ver [secção
+  dedicada](#-índice-sqlite-do-histórico-scriptshistory_indexpy), logo
+  a seguir ao histórico próprio de alertas na documentação da API.
 
 ---
 
@@ -573,11 +577,14 @@ segundo poller:** o mesmo `alert_poll_loop` do WebSocket (Fase 8,
 `scripts/websocket_alerts.py`, que já corre a cada 10s a consultar o
 Wazuh Indexer — ver [WebSocket em tempo
 real](#-websocket-em-tempo-real-wsalerts) acima) chama agora, para cada
-alerta novo que deteta, também `append_alerts_history()` do novo módulo
-`scripts/history_store.py`. Não há um segundo ciclo de polling
+alerta novo que deteta, `main._persist_new_alerts(...)` — que grava
+`append_alert_history()` (histórico bruto), `append_compliance_history()`
+(veredito de conformidade, Fase 7) e `history_index.index_alert()` (índice
+SQLite, ver secção dedicada abaixo), todos de `scripts/history_store.py`
+e `scripts/history_index.py`. Não há um segundo ciclo de polling
 independente só para o histórico — é o mesmo evento "alerta novo
-detetado" a alimentar duas coisas (o push por WebSocket e a escrita em
-disco).
+detetado" a alimentar três coisas (o push por WebSocket, a escrita em
+disco, e o índice).
 
 **Estrutura de pastas** — ano com 4 dígitos, mês com número + nome por
 extenso em português (com acento), sem pasta de dia (o dia entra no
@@ -613,11 +620,68 @@ código-fonte, o mesmo padrão de `scripts/system_alerts_history.json`,
 > acima), pensado para retenção/consulta de longo prazo, não para
 > treino.
 
-**Fora de escopo nesta fase:** não há camada de índice (ex: SQLite) para
-consultas rápidas tipo "todos os alertas RGPD entre março e maio" — os
-ficheiros JSONL têm de ser lidos/filtrados manualmente por agora — nem
-um endpoint REST novo para consultar este histórico. Fica como trabalho
-futuro (ver [Próximos passos](#-próximos-passos)).
+### 🔎 Índice SQLite do histórico (`scripts/history_index.py`)
+
+> ✅ **Adicionado em 2026-09-14** — fecha a limitação de "sem camada de
+> índice/consulta rápida" apontada acima e na lista de [Próximos
+> passos](#-próximos-passos): consultas tipo "todos os alertas RGPD
+> aplicável entre março e maio" deixam de exigir percorrer pastas/
+> ficheiros JSONL à mão.
+
+**Motivação:** a estrutura de pastas `scripts/historico/AAAA/MM-mês/`
+resolve arquivo de longo prazo e leitura humana, mas fica lenta a
+percorrer quando o histórico cresce e a pergunta é do tipo "todos os
+alertas X entre a data Y e a data Z". O índice SQLite resolve só esse
+caso — não substitui os JSONL, que continuam a ser a fonte de verdade
+de cada registo completo.
+
+**Ficheiro único** `scripts/historico/index.sqlite3` (mesma pasta e
+mesma política de `.gitignore` de `scripts/historico/` — dado gerado em
+runtime, não código-fonte). Uma tabela `history_index`, uma linha por
+alerta, com as colunas filtráveis mais um "ponteiro" para o registo
+completo no JSONL correspondente:
+
+| Coluna | Descrição |
+|---|---|
+| `date`, `time` | Data/hora efetivamente gravadas no `alerts.jsonl` (lidas de volta do ficheiro, não recalculadas — ver nota abaixo) |
+| `event_id`, `severity` | Do alerta original |
+| `rgpd_estado`, `nis2_estado`, `ai_act_estado` | Veredito de cada norma (`aplicavel` / `verificado_e_nao_aplicavel`) |
+| `alerts_file`, `alerts_offset` | Caminho do `...-alerts.jsonl` do dia + offset em bytes exato da linha, para ler o registo completo sem reler o ficheiro inteiro |
+| `compliance_file`, `compliance_offset` | O mesmo, para o `...-compliance.jsonl` correspondente |
+
+**Índices SQL criados** (`CREATE INDEX`, um por coluna filtrável) em
+`date`, `severity`, `rgpd_estado`, `nis2_estado` e `ai_act_estado`.
+
+**Escrita — reaproveita o mesmo callback, não é um terceiro poller:**
+`index_alert(...)` é chamado dentro de `_persist_new_alerts()` em
+`scripts/main.py`, o mesmo callback do `alert_poll_loop` (Fase 8) que já
+gravava `alerts.jsonl` (Fase 9) e `compliance.jsonl` (camada de
+conformidade) — indexa logo a seguir a escrever os dois JSONL, usando o
+`(ficheiro, offset)` que essa escrita acabou de devolver. `date`/`time`
+gravados no índice são lidos de volta do `alerts.jsonl` (via
+`read_jsonl_at_offset`) em vez de recalculados a partir do alerta
+original, para nunca divergir do que ficou realmente escrito em disco
+(o `history_store` tem um *fallback* interno de timestamp para quando o
+alerta vem sem `timestamp` válido).
+
+**Endpoint:** `GET /api/history/query` — ver entrada na [documentação
+da API](#get-apihistoryquery) para parâmetros e exemplo.
+
+**Limitações conhecidas:**
+- **Sem paginação** além de `limit` — não há `offset`/cursor na query
+  da API; os resultados são sempre os N mais recentes que batem com os
+  filtros (mais antigos que isso, sem outro filtro mais apertado, não
+  são alcançáveis por este endpoint).
+- **Sem endpoint de escrita/gestão do índice** — é só consulta; a
+  escrita acontece exclusivamente via `_persist_new_alerts` a cada
+  alerta novo detetado, nunca por pedido direto à API.
+- **Sem reconstrução automática** — se `index.sqlite3` for apagado (ou
+  perdido), o próximo alerta novo recria o ficheiro e o schema do zero,
+  mas **vazio**: não há um script que reconstrua o índice a partir dos
+  ficheiros JSONL já existentes em `scripts/historico/`. Histórico
+  anterior à recriação do índice continua a existir nos JSONL, só deixa
+  de ser alcançável via `GET /api/history/query` até (e se) alguém
+  escrever esse script de reindexação.
 
 ### 📄 Exportar relatório HTML (`GET /api/export/report`)
 
@@ -953,6 +1017,58 @@ a seguir à exportação de relatório na documentação da API.
 
 Erro → `502` `{"detail": "Erro ao contactar Wazuh Indexer: ..."}`.
 
+### `GET /api/history/query`
+Consulta o histórico persistido em `scripts/historico/` através do
+[índice SQLite](#-índice-sqlite-do-histórico-scriptshistory_indexpy),
+para além dos 90 dias que o Wazuh Indexer guarda por retenção —
+filtrável por data, severidade e vereditos de conformidade sem
+percorrer pastas por dia.
+
+| Parâmetro | Tipo | Default | Descrição |
+|---|---|---|---|
+| `date_from` | string `AAAA-MM-DD` | — (opcional) | Data inicial, inclusive |
+| `date_to` | string `AAAA-MM-DD` | — (opcional) | Data final, inclusive |
+| `severity` | string | — (opcional) | `critical` / `high` / `medium` / `low` / `info` |
+| `rgpd_estado` | string | — (opcional) | `aplicavel` / `verificado_e_nao_aplicavel` |
+| `nis2_estado` | string | — (opcional) | `aplicavel` / `verificado_e_nao_aplicavel` |
+| `ai_act_estado` | string | — (opcional) | `aplicavel` / `verificado_e_nao_aplicavel` |
+| `limit` | int (1–1000) | 200 | Máximo de resultados devolvidos (sem `offset`/cursor — ver limitações na [secção do índice](#-índice-sqlite-do-histórico-scriptshistory_indexpy)) |
+
+Todos os filtros são combinados em AND; nenhum filtro aplicado devolve
+os `limit` registos mais recentes de todo o histórico. Exemplo — o caso
+de uso original que motivou o índice, "todos os alertas RGPD aplicável
+entre março e maio":
+
+```
+GET /api/history/query?date_from=2026-03-01&date_to=2026-05-31&rgpd_estado=aplicavel
+```
+
+Resposta:
+
+```json
+{
+  "total": 2,
+  "results": [
+    {
+      "date": "2026-05-20", "time": "09:12:44", "event_id": 4625,
+      "severity": "high", "rgpd_estado": "aplicavel",
+      "nis2_estado": "verificado_e_nao_aplicavel",
+      "ai_act_estado": "verificado_e_nao_aplicavel",
+      "alerts_file": "scripts/historico/2026/05-maio/2026-05-20-alerts.jsonl",
+      "alerts_offset": 1840,
+      "compliance_file": "scripts/historico/2026/05-maio/2026-05-20-compliance.jsonl",
+      "compliance_offset": 612,
+      "friendly_name": "Failed Logon", "agent_name": "WIN-PC01", "rule_id": "60122"
+    }
+  ]
+}
+```
+
+Cada resultado junta as colunas do índice com os campos extra lidos de
+volta do `alerts.jsonl` correspondente (`friendly_name`, `agent_name`,
+`rule_id`, etc.) via `alerts_file`/`alerts_offset` — não é preciso
+reler o ficheiro inteiro para reconstruir o registo completo.
+
 ### Endpoints de sistema (`system_monitor.py` — a máquina local, não o Wazuh)
 
 Não dependem do Wazuh; falham (500) só se algo correr mal a recolher
@@ -1263,8 +1379,15 @@ que vais usar para correr `uvicorn`
    em 2026-09-14** — `scripts/history_store.py` grava cada alerta novo
    detetado pelo WebSocket em JSONL, por ano/mês, em
    `scripts/historico/` (ver [secção dedicada](#-histórico-próprio-de-alertas-scriptshistorico)).
-   Falta ainda uma camada de índice/consulta rápida (ex: SQLite) sobre
-   esses ficheiros — isso continua por fazer.
+   ~~Falta ainda uma camada de índice/consulta rápida (ex: SQLite) sobre
+   esses ficheiros.~~ ✅ **Feito em 2026-09-14** —
+   `scripts/history_index.py` indexa cada alerta em SQLite
+   (`scripts/historico/index.sqlite3`) ao mesmo tempo que o JSONL é
+   escrito, e `GET /api/history/query` expõe consultas por data/
+   severidade/conformidade sem percorrer pastas (ver [secção
+   dedicada](#-índice-sqlite-do-histórico-scriptshistory_indexpy)). Sem
+   paginação além de `limit` e sem reconstrução automática do índice a
+   partir dos JSONL se for apagado — ver limitações na mesma secção.
 4. ~~**Exportar relatório** — botão para gerar um relatório HTML com
    dados ao vivo, no mesmo espírito do relatório da Fase 1
    (`log_analyzer.py`, já neste repo).~~ ✅ **Feito em 2026-09-14** —
