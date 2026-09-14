@@ -47,12 +47,17 @@ def _alert_datetime(alert: dict) -> datetime:
     return datetime.utcnow()
 
 
-def append_alert_history(alert: dict, base_dir: str) -> None:
+def append_alert_history(alert: dict, base_dir: str) -> tuple[str, int]:
     """
     Regista uma linha JSONL para este alerta (já enriquecido, mesma forma
     de um item de /api/alerts — ver _enrich_alert em main.py). "date" é
     sempre o primeiro campo do objeto (para o ficheiro ordenar bem
     cronologicamente mesmo aberto num editor de texto ou exportado).
+
+    Devolve (path, offset) — o ficheiro e o offset em bytes onde a linha
+    começa, usados por history_index.py para apontar o índice SQLite para
+    o registo completo sem re-parsear o ficheiro inteiro (ver
+    read_jsonl_at_offset).
     """
     dt = _alert_datetime(alert)
     date_str = dt.strftime("%Y-%m-%d")
@@ -70,7 +75,9 @@ def append_alert_history(alert: dict, base_dir: str) -> None:
 
     path = history_file_path(base_dir, date_str, "alerts")
     with open(path, "a", encoding="utf-8") as f:
+        offset = f.tell()
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return path, offset
 
 
 def append_alerts_history(alerts: list[dict], base_dir: str) -> None:
@@ -79,7 +86,7 @@ def append_alerts_history(alerts: list[dict], base_dir: str) -> None:
         append_alert_history(alert, base_dir)
 
 
-def append_compliance_history(alert: dict, compliance_result: dict, base_dir: str) -> None:
+def append_compliance_history(alert: dict, compliance_result: dict, base_dir: str) -> tuple[str, int]:
     """
     Regista uma linha JSONL em <base_dir>/AAAA/MM-mês/AAAA-MM-DD-compliance.jsonl
     com o veredito de conformidade deste alerta (ver
@@ -87,6 +94,8 @@ def append_compliance_history(alert: dict, compliance_result: dict, base_dir: st
     compliance_result) — registo de auditoria persistido mesmo quando o
     veredito é "verificado_e_nao_aplicavel" em todas as normas; a
     verificação em si nunca é omitida em silêncio.
+
+    Devolve (path, offset), mesmo propósito de append_alert_history.
     """
     dt = _alert_datetime(alert)
     date_str = dt.strftime("%Y-%m-%d")
@@ -103,4 +112,6 @@ def append_compliance_history(alert: dict, compliance_result: dict, base_dir: st
 
     path = history_file_path(base_dir, date_str, "compliance")
     with open(path, "a", encoding="utf-8") as f:
+        offset = f.tell()
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return path, offset
