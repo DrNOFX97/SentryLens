@@ -87,8 +87,8 @@ Wazuh Manager/Indexer, que já têm os alertas processados.
 
 - Dashboard web com 9 abas — ver tabela em [Servir o frontend](#3-servir-o-frontend).
 - Classificação de 23 Event IDs do Windows Security Log em nome
-  amigável + severidade + recomendação (ver [Catálogo de Event
-  IDs](#5-catálogo-de-event-ids-scriptsevent_catalogpy)).
+  amigável + severidade + recomendação — ver
+  [`docs/API.md`](docs/API.md#catálogo-de-event-ids-scriptsevent_catalogpy).
 - Atualização em tempo real por WebSocket (`/ws/alerts`), com fallback
   automático para polling a cada 30s se a ligação falhar.
 - Autenticação por API key em todos os endpoints `/api/*`.
@@ -149,7 +149,10 @@ Dashboard cybersec/
 │
 └── docs/
     ├── README.md                ← guia legado (estrutura antiga) — ver aviso no topo do ficheiro
-    └── LAB_WAZUH_HYPERV.md      ← guia passo-a-passo do laboratório (VirtualBox e Hyper-V)
+    ├── LAB_WAZUH_HYPERV.md      ← guia passo-a-passo do laboratório (VirtualBox e Hyper-V)
+    ├── API.md                   ← documentação completa da API
+    ├── ML.md                    ← deteção de anomalias por Machine Learning
+    └── TROUBLESHOOTING.md       ← lista completa de problemas conhecidos
 ```
 
 ---
@@ -345,337 +348,63 @@ instalados.
 
 ## 4. Endpoints da API
 
-Todos devolvem JSON, com uma exceção: `GET /api/export/report` devolve
-o relatório em HTML como ficheiro para download. CORS restringido a
-origens loopback (`localhost`/`127.0.0.1`, qualquer porta). Todos os
-endpoints `/api/*` (incluindo `/api/health`) exigem uma API key no
-header `X-API-Key`.
+Todos os endpoints `/api/*` exigem uma API key (`X-API-Key`) e devolvem
+JSON, exceto `GET /api/export/report` (devolve HTML para download).
+CORS restringido a origens loopback. Documentação completa —
+autenticação, WebSocket, histórico/SQLite, conformidade, NIS2 lookup,
+parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
+**[`docs/API.md`](docs/API.md)**.
 
-### 🔑 Autenticação por API key
-
-Mecanismo propositadamente simples — uma única key partilhada, sem
-sessões, sem múltiplos utilizadores, sem JWT — adequado a uma
-ferramenta de laboratório local, não a uma aplicação exposta à
-internet.
-
-1. **Gerar uma key forte:**
-   ```bash
-   openssl rand -hex 32                                    # Linux/macOS/Git Bash
-   -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })   # PowerShell
-   ```
-2. **Backend** — `SENTRYLENS_API_KEY=<key>` em `scripts/.env`.
-3. **Frontend** — mesma key na constante `API_KEY` em `app.js`.
-
-**Fail-closed:** sem `SENTRYLENS_API_KEY` definida, ou com `X-API-Key`
-em falta/errado, a API devolve sempre `401`
-(`{"detail": "API key inválida ou em falta"}`) — nunca fica aberta por
-omissão.
-
-> ⚠️ Como o frontend é JavaScript estático entregue tal-e-qual ao
-> browser, a key fica visível no código-fonte para quem aceder à
-> página. Aceitável só porque o CORS restringe a `localhost`/`127.0.0.1`
-> num dashboard de laboratório de um único utilizador — não é um
-> modelo de segurança válido para uma aplicação multi-utilizador ou
-> exposta à internet. Sem rotação nem múltiplas keys nesta fase.
-
-### 🔌 WebSocket em tempo real (`/ws/alerts`)
-
-O backend mantém um ciclo interno (`alert_poll_loop`) que consulta o
-Wazuh Indexer a cada **10s** à procura de alertas novos, identificados
-pelo `_id` do documento no OpenSearch. Quando um cliente está ligado a
-`/ws/alerts`, cada alerta novo é enviado (*pushed*) assim que aparece.
-
-```
-ws://localhost:8001/ws/alerts?api_key=<a mesma SENTRYLENS_API_KEY>
-```
-
-O handshake de WebSocket do browser não permite headers HTTP
-arbitrários, por isso a autenticação aqui é por **query param**, não
-por `X-API-Key`. Sem o parâmetro, ou com valor errado, o servidor fecha
-a ligação com o código `1008` antes de a aceitar.
-
-Mensagem enviada a cada alerta novo: `{"type": "new_alert", "alert": {...}}`
-— o objeto `alert` tem a mesma forma de um item de `GET /api/alerts`.
-
-Se a ligação cair, o frontend tenta reconectar com *backoff* de 1s, 2s,
-4s, 8s, 16s (5 tentativas); se todas falharem, mostra um aviso e passa
-a depender do polling de 30s, tentando recuperar a ligação a cada 30s.
-
-**Testes:** `scripts/test_websocket_alerts.py`.
-
-### 🗄️ Histórico próprio de alertas e índice SQLite
-
-O Wazuh Indexer apaga alertas com mais de 90 dias (retenção). O mesmo
-`alert_poll_loop` do WebSocket persiste cada alerta novo em paralelo,
-sem criar um segundo poller:
-
-- **JSONL** (`scripts/history_store.py`) — `scripts/historico/AAAA/MM-mês/AAAA-MM-DD-alerts.jsonl`
-  (e `-compliance.jsonl` para o veredito de conformidade), *append-only*.
-- **Índice SQLite** (`scripts/history_index.py`) —
-  `scripts/historico/index.sqlite3`, uma tabela `history_index` com as
-  colunas filtráveis (`date`, `severity`, vereditos RGPD/NIS2/AI Act) e
-  um ponteiro (ficheiro + offset em bytes) para o registo completo no
-  JSONL correspondente.
-
-Ambos configuráveis via `SENTRYLENS_HISTORY_DIR` (default:
-`scripts/historico`); pasta no `.gitignore`, é dado gerado em runtime.
-
-**Limitações conhecidas:** sem paginação além de `limit` na query
-(sempre os N mais recentes); sem endpoint de escrita — a indexação só
-acontece via `alert_poll_loop`; sem reconstrução automática do índice
-a partir dos JSONL se `index.sqlite3` for apagado.
-
-**Endpoint:** `GET /api/history/query` (ver tabela abaixo).
-
-### 📄 Exportar relatório HTML (`GET /api/export/report`)
-
-Gera um ficheiro HTML autónomo (CSS embutido, sem pedidos a recursos
-externos) com o estado atual do dashboard (KPIs, alertas, agentes,
-sistema), pronto para guardar offline ou anexar a um relatório. Cada
-uma das 4 fontes de dados internas pode falhar independentemente sem
-derrubar o relatório — a secção correspondente fica marcada como
-"indisponível". Todo o texto dinâmico é escapado com `html.escape()`
-contra XSS. Botão "📄 Exportar relatório" no header do dashboard.
-
-### 🛡️ Conformidade regulatória (RGPD, NIS2, AI Act)
-
-Cada alerta recente é avaliado contra 3 normas, com veredito explícito
-("aplicável" ou "verificado e não aplicável", nunca omitido em
-silêncio):
-
-- **RGPD** — depende da categoria do alerta (autenticação, grupos,
-  ciclo de vida de contas e atividade privilegiada envolvem dados
-  pessoais → aplicável).
-- **NIS2** — depende do perfil da organização **e** da severidade
-  (`critical`/`high`) do alerta.
-- **AI Act** — aplicável se a organização tiver um componente de IA
-  ativo (aqui, a deteção de anomalias por Isolation Forest).
-
-O perfil da organização (`scripts/org_profile.py`) é fixo por agora —
-o CET não é uma empresa real (`estatuto_nis2_aplicavel=False`,
-`processa_dados_pessoais=True`, `tem_componentes_ia_ativos=True`). As
-regras e textos de justificação vivem em
-[`scripts/compliance_rules.yaml`](scripts/compliance_rules.yaml). Cada
-veredito é também registado em `compliance.jsonl` (auditoria), mesmo
-quando "não aplicável" em todas as normas. Visível no relatório HTML
-exportável e na aba **🛡️ Conformidade** do dashboard.
-
-**Endpoint:** `GET /api/compliance?hours=24`:
-
-```json
-{
-  "total": 42,
-  "org_profile": {"nome": "SentryLens (laboratório CET)", "estatuto_nis2_aplicavel": false},
-  "summary": {"rgpd": {"aplicavel": 30, "verificado_e_nao_aplicavel": 12}},
-  "alerts": [{"friendly_name": "Failed Logon", "compliance": {"rgpd": {"estado": "aplicavel", "justificacao": "..."}}}]
-}
-```
-
-### 🔎 Classificação NIS2 sugerida (`GET /api/nis2-lookup`)
-
-Dado um CAE (e opcionalmente colaboradores/faturação/exceções já
-conhecidas), sugere se uma empresa provavelmente cai no âmbito da NIS2
-— **sem consultar nada online**. `lookup_nis2_classification()` é uma
-função pura, sem I/O; ir buscar os dados reais de uma empresa continua
-a ser um passo manual do utilizador (decisão de escopo, para não
-construir um *scraper* frágil contra sites de terceiros).
-
-Critério de dimensão: mais de 50 colaboradores **ou** mais de
-10.000.000 EUR de faturação. Exceções que aplicam a NIS2
-independentemente da dimensão: `fornecedor_confianca_qualificado`,
-`registo_dominio`, `telecomunicacoes`, `administracao_publica`.
-
-O mapeamento CAE→setor usa as categorias da Diretiva (UE) 2022/2555
-cruzadas com a CAE-Rev.3 portuguesa, como aproximação de boa-fé — não é
-uma transcrição do Decreto-Lei n.º 125/2025 (transposição nacional,
-posterior ao conhecimento treinado do modelo que escreveu este código).
-Por isso a função nunca devolve um veredito definitivo, só indícios com
-grau de confiança, terminando sempre com:
-
-> "Classificação sugerida, a confirmar junto do CNCS — não é
-> aconselhamento jurídico."
-
-Não está ligado a `org_profile.py` — é *standalone*; chamá-lo não altera
-o perfil fixo usado pela camada de conformidade.
-
-**Testes:** `scripts/test_nis2_lookup.py`.
-
-### Tabela de endpoints
-
-| Method | Endpoint | Parâmetros principais | Descrição |
-|---|---|---|---|
-| GET | `/api/health` | — | Confirma que o backend está de pé |
-| GET | `/api/agents` | — | Lista de agentes Wazuh e estado atual |
-| GET | `/api/alerts` | `hours`, `min_level`, `agent_name`, `severity` | Alertas recentes, classificados |
-| GET | `/api/stats` | `hours` | KPIs agregados |
-| GET | `/api/brute-force` | `hours`, `threshold` | Agrupa Event ID 4625 por utilizador-alvo |
-| GET | `/api/ml-anomalies` | `hours` (máx. 168) | Deteção por Isolation Forest vs. regras |
-| GET | `/api/export/report` | `hours` | Relatório HTML autónomo (download) |
-| GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
-| GET | `/api/nis2-lookup` | `cae_principal` (obrig.), `cae_secundarios`, `nipc`, `colaboradores`, `faturacao_eur`, `excecao_conhecida` | Classificação NIS2 sugerida |
-| GET | `/api/history/query` | `date_from`, `date_to`, `severity`, `rgpd_estado`, `nis2_estado`, `ai_act_estado`, `limit` (máx. 1000) | Consulta o histórico via índice SQLite |
-| GET | `/api/lifecycle` | — | Ciclo de vida de contas |
-| GET | `/api/privileges` | — | Desvios RBAC |
-| GET | `/api/admin-activity` | — | Atividade de contas administrativas |
-| GET | `/api/system/specs` | — | Snapshot de CPU/RAM/disco/rede da máquina local |
-| GET | `/api/system/alerts` | — | Violações de threshold ativas |
-| GET | `/api/system/history` | — | Violações já resolvidas |
-| GET | `/api/system/usage-history` | — | Buffer ~1h de uso (gráfico) |
-| GET | `/api/system/thresholds` | — | Dict de thresholds (`cpu`/`ram`/`disk`/`network`) |
-| POST | `/api/system/speedtest` | — | Força medição de velocidade de rede |
-
-Erros seguem `502 {"detail": "Erro ao contactar Wazuh Manager/Indexer: ..."}`
-quando a falha vem do Wazuh, ou `503` em `/api/ml-anomalies` se o
-modelo ainda não foi treinado. Os endpoints de sistema (não dependem do
-Wazuh) falham com `500` só se a recolha de specs desta máquina falhar.
-
-Thresholds atuais (`system_monitor.THRESHOLDS`): CPU 80%/95%, RAM
-85%/95%, disco 80%/90%, rede (download/upload) aviso abaixo de 700
-Mbps / crítico abaixo de 500 Mbps (lógica invertida — dispara quando a
-velocidade desce).
-
----
-
-## 5. Catálogo de Event IDs (`scripts/event_catalog.py`)
-
-23 Event IDs do Windows Security Log — mapa central `CRITICAL_EVENTS`
-(nome + severidade) e `RECOMMENDATIONS` (ação sugerida):
-
-| Event ID | Nome | Severidade |
+| Method | Endpoint | Descrição |
 |---|---|---|
-| 4625 | Failed Logon | high |
-| 4672 | Special Privileges Assigned | high |
-| 4698 | Scheduled Task Created | high |
-| 4699 | Scheduled Task Deleted | medium |
-| 4700 | Scheduled Task Disabled | low |
-| 4701 | Scheduled Task Updated | medium |
-| 4702 | Scheduled Task Renamed | low |
-| 4703 | Scheduled Task Enabled | low |
-| 4704 | User Right Assigned | high |
-| 4713 | Kerberos Policy Changed | high |
-| 4719 | Security Policy Changed | high |
-| 4720 | User Account Created | medium |
-| 4722 | User Account Enabled | low |
-| 4723 | Password Change Attempt | low |
-| 4724 | Password Reset Attempt | medium |
-| 4726 | User Account Deleted | high |
-| 4728 | Member Added to Global Group | high |
-| 4732 | Member Added to Local Group | medium |
-| 4738 | User Account Changed | medium |
-| 4756 | Member Added to Universal Group | high |
-| 4797 | Blank Password Query Attempt | medium |
-| 5140 | Network Share Accessed | low |
-| 5145 | Network Share Permission Checked | low |
-
-Um Event ID fora desta lista (ou `None`) recebe uma classificação por
-defeito segura (`severity: "info"`) — nunca rebenta o backend. Para
-adicionar um Event ID novo: acrescentar uma entrada a `CRITICAL_EVENTS`
-em `scripts/event_catalog.py`; não é preciso tocar em `main.py`.
+| GET | `/api/health` | Confirma que o backend está de pé |
+| GET | `/api/agents` | Lista de agentes Wazuh e estado atual |
+| GET | `/api/alerts` | Alertas recentes, classificados |
+| GET | `/api/stats` | KPIs agregados |
+| GET | `/api/brute-force` | Deteção de força bruta (Event ID 4625) |
+| GET | `/api/ml-anomalies` | Deteção por Isolation Forest vs. regras — ver [docs/ML.md](docs/ML.md) |
+| GET | `/api/export/report` | Relatório HTML autónomo (download) |
+| GET | `/api/compliance` | Veredito RGPD/NIS2/AI Act por alerta |
+| GET | `/api/nis2-lookup` | Classificação NIS2 sugerida (CAE/colaboradores/faturação) |
+| GET | `/api/history/query` | Consulta o histórico via índice SQLite |
+| GET | `/api/lifecycle` \| `/api/privileges` \| `/api/admin-activity` | Ciclo de vida de contas, desvios RBAC, atividade admin |
+| WS | `/ws/alerts` | Push de alertas novos em tempo real (auth por query param) |
+| GET | `/api/system/*` | Specs, alertas, histórico e thresholds do sistema local |
+| POST | `/api/system/speedtest` | Força medição de velocidade de rede |
 
 ---
 
-## 6. Deteção de anomalias por Machine Learning
-
-> ⚠️ **Nada disto foi treinado ou validado com dados reais do
-> laboratório.** O modelo é treinado sobre um fixture sintético; os
-> números abaixo provam que o *pipeline* funciona de ponta a ponta —
-> não são uma estimativa de taxa de deteção em produção. Validação real
-> requer correr `attack_scenarios.py` contra o laboratório, exportar
-> com `export_snapshot.py`, e retreinar. Ainda não aconteceu.
+## 5. Deteção de anomalias por Machine Learning
 
 O painel **🧠 ML Anomalias** usa um `IsolationForest` (scikit-learn)
-lado a lado com a classificação por regras já existente — um segundo
-ponto de vista, nunca um substituto de `event_catalog.py`.
+lado a lado com a classificação por regras, como segundo ponto de
+vista sobre os mesmos alertas.
 
-**Features** (`scripts/feature_extractor.py`, módulo partilhado entre
-treino e inferência): `hour_of_day`, `day_of_week`, `event_id_encoded`,
-`failed_attempts_last_hour`, `has_special_privileges`,
-`is_new_source_ip`, `severity_encoded`.
+> ⚠️ **Nada disto foi treinado ou validado com dados reais do
+> laboratório** — o modelo é treinado sobre um fixture sintético.
 
-**Retreinar:**
-
-```bash
-cd scripts
-python train_anomaly_model.py
-```
-
-Lê `sample_events_real.json` + `sample_attack_log.jsonl` por default
-(aceita `--events`/`--attack-log`), escreve
-`scripts/models/isolation_forest.pkl` + `scaler.pkl` (não versionados —
-o endpoint devolve `503` até existirem) e
-`scripts/ml_training_report.json` (este é committed).
-
-**Resultados no fixture sintético** (36 eventos, 5 ataques rotulados):
-
-| | Precisão | Recall | F1 |
-|---|---|---|---|
-| ML (Isolation Forest) | 0,4286 | 0,6 | 0,5 |
-| Regras (`event_catalog.py`) | 0,625 | 1,0 | 0,7692 |
-
-3 alertas sinalizados por ambas as abordagens, 4 só pelo ML, 5 só pelas
-regras — uma divergência genuína, é esse contraste que é o ponto do
-exercício.
-
-`scripts/attack_scenarios.py` corre-se manualmente na VM Kali contra o
-agente Windows, e regista cada cenário em `attack_log.jsonl` para
-rotular os eventos correspondentes do Wazuh.
-`scripts/export_snapshot.py` exporta alertas + stats + esse log para
-`scripts/snapshots/`, fechando o ciclo para quando houver laboratório
-real disponível.
-
-> O seletor de período partilhado do dashboard (7/30/90 dias) fica
-> limitado a 168h (7 dias) só neste painel — escolher "30" ou "90 dias"
-> continua a mostrar só os últimos 7 dias de análise de ML.
+Retreinar: `cd scripts && python train_anomaly_model.py`. Metodologia,
+features, resultados (precisão/recall/F1) e o ciclo de validação com
+dados reais (`attack_scenarios.py` + `export_snapshot.py`) em
+**[`docs/ML.md`](docs/ML.md)**.
 
 ---
 
 ## 🐛 Troubleshooting
 
-**Frontend mostra "● sem ligação"**
-→ Confirma que o backend está a correr (`uvicorn main:app --port 8001`) e vê a consola do browser (F12) para o erro exato.
+Os 3 problemas mais comuns:
 
-**Erro 502 "Erro ao contactar Wazuh Manager/Indexer"**
-→ Confirma IP e passwords em `scripts/.env`, que a VM está a correr
-(`VBoxManage list runningvms`), e testa a autenticação diretamente:
-```bash
-curl -k -u wazuh-wui:PASSWORD -X POST "https://IP_DA_VM:55000/security/user/authenticate?raw=true"
-```
+- **"● sem ligação" no frontend / erro 502** → confirma que o backend
+  está a correr (`uvicorn main:app --port 8001`) e que a VM Wazuh está
+  ativa (`VBoxManage list runningvms`).
+- **401 Unauthorized** → `SENTRYLENS_API_KEY` não definida em
+  `scripts/.env`, ou diferente da constante `API_KEY` em `app.js`.
+- **`uvicorn` falha na porta 8000** → usa `--port 8001` (ver [Nota
+  sobre a porta 8000](#nota-sobre-a-porta-8000)).
 
-**VM `Running` mas não responde à rede**
-→ Causa observada: soft lockups do kernel por I/O do OpenSearch quando
-o disco `C:\` está quase cheio (o dashboard já assinala isto na aba
-Sistema). Remédio imediato: `VBoxManage controlvm "Wazuh-Manager" poweroff`
-seguido de `startvm ... --type headless`. Remédio de fundo: libertar
-espaço em `C:\` ou mover o armazenamento da VM para outro disco.
-
-**Erro 401 Unauthorized**
-→ `SENTRYLENS_API_KEY` não definida em `scripts/.env`, ou a constante
-`API_KEY` em `app.js` não é exatamente igual — reinicia o `uvicorn`
-depois de editar `.env` (variáveis só são lidas no arranque).
-
-**Dashboard nunca atualiza em tempo real**
-→ Handshake de WebSocket com `api_key` errado/em falta falha
-silenciosamente (código `1008`) — confirma na consola (F12 → Network →
-"WS"). Não é bloqueante: o dashboard continua a funcionar via polling
-de 30s.
-
-**`uvicorn` falha com `WinError 10013` na porta 8000**
-→ Ver [Nota sobre a porta 8000](#nota-sobre-a-porta-8000) — usa `--port 8001`.
-
-**CORS bloqueado no browser**
-→ Acede via `localhost`/`127.0.0.1`, nunca `file://` diretamente.
-Acesso a partir de outro dispositivo na rede exige alargar o CORS e
-repensar autenticação, não é só reverter a restrição.
-
-**Nenhum alerta aparece mesmo com o agente `Active`**
-→ Gera um evento de teste (ex: `runas` com password errada → Event ID
-4625) e confirma no próprio Wazuh Dashboard se aparece lá; se sim e
-aqui não, o índice `wazuh-alerts-*` pode ter um nome diferente
-consoante a versão.
-
-**`ModuleNotFoundError: No module named 'fastapi'`**
-→ `pip install -r scripts/requirements.txt` no mesmo ambiente Python
-usado para correr `uvicorn`.
+Lista completa (CORS, WebSocket, VM sem resposta na rede, nenhum
+alerta a aparecer, etc.) em
+**[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)**.
 
 ---
 
@@ -696,6 +425,9 @@ usado para correr `uvicorn`.
 
 ## 📚 Referências
 
+- [`docs/API.md`](docs/API.md) — documentação completa da API (autenticação, WebSocket, histórico, conformidade, NIS2, catálogo de Event IDs).
+- [`docs/ML.md`](docs/ML.md) — deteção de anomalias por Machine Learning (metodologia, resultados, retreino).
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — lista completa de problemas conhecidos.
 - [`docs/LAB_WAZUH_HYPERV.md`](docs/LAB_WAZUH_HYPERV.md) — guia completo do laboratório (VirtualBox e Hyper-V).
 - [`docs/README.md`](docs/README.md) — guia legado de setup, com aviso de estrutura desatualizada no topo.
 - [`scripts/README.md`](scripts/README.md) — detalhe dos 3 scripts de automação do laboratório.
