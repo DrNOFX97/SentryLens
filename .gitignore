@@ -20,3 +20,4 @@ scripts/historico/
 
 # Estado local do Claude Code (não é conteúdo do projeto)
 .claude/
+CLAUDE.md
