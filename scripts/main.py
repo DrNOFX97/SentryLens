@@ -37,7 +37,8 @@ import ml_anomalies
 from admin_activity import build_admin_activity_report
 from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
 from event_catalog import classify_alert
-from history_store import append_alerts_history, append_compliance_history
+from history_index import index_alert, query_history_index, read_jsonl_at_offset
+from history_store import append_alert_history, append_compliance_history
 from lifecycle import build_lifecycle_report
 from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
@@ -251,13 +252,33 @@ async def _system_monitor_loop() -> None:
 
 
 def _persist_new_alerts(alerts: list[dict]) -> None:
-    """Callback do alert_poll_loop (Fase 8): persiste histórico bruto (Fase 9) e o veredito de conformidade (Fase 7) de cada alerta novo."""
-    append_alerts_history(alerts, SENTRYLENS_HISTORY_DIR)
+    """Callback do alert_poll_loop (Fase 8): persiste histórico bruto (Fase 9), o veredito de conformidade (Fase 7), e indexa ambos em SQLite (Fase 9 - índice) para consultas rápidas por data/severidade/conformidade."""
     org_profile = get_org_profile()
     rules = load_compliance_rules()
     for alert in alerts:
+        alerts_path, alerts_offset = append_alert_history(alert, SENTRYLENS_HISTORY_DIR)
         result = evaluate_alert_compliance(alert, org_profile, rules)
-        append_compliance_history(alert, result, SENTRYLENS_HISTORY_DIR)
+        compliance_path, compliance_offset = append_compliance_history(alert, result, SENTRYLENS_HISTORY_DIR)
+        # A data/hora efetivamente gravada pode divergir de alert.get("timestamp")
+        # (fallback interno de history_store._alert_datetime para datetime.utcnow()
+        # quando o timestamp vem em falta/inválido), por isso lemos o registo de
+        # volta em vez de reprocessar o timestamp aqui — o índice nunca diverge
+        # do que ficou realmente escrito no JSONL.
+        written_record = read_jsonl_at_offset(alerts_path, alerts_offset) or {}
+        index_alert(
+            SENTRYLENS_HISTORY_DIR,
+            date=written_record.get("date"),
+            time=written_record.get("time"),
+            event_id=alert.get("windows_event_id"),
+            severity=alert.get("severity"),
+            rgpd_estado=result["rgpd"]["estado"],
+            nis2_estado=result["nis2"]["estado"],
+            ai_act_estado=result["ai_act"]["estado"],
+            alerts_file=alerts_path,
+            alerts_offset=alerts_offset,
+            compliance_file=compliance_path,
+            compliance_offset=compliance_offset,
+        )
 
 
 @app.on_event("startup")
@@ -512,6 +533,39 @@ async def get_admin_activity(days: int = Query(30, ge=1, le=90, description="Jan
         return build_admin_activity_report(raw_alerts, admin_prefix=os.getenv("ADMIN_ACCOUNT_PREFIX", "adm."))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/history/query", dependencies=_REQUIRE_API_KEY)
+async def query_history(
+    date_from: str | None = Query(None, description="Data inicial AAAA-MM-DD (inclusive)"),
+    date_to: str | None = Query(None, description="Data final AAAA-MM-DD (inclusive)"),
+    severity: str | None = Query(None, description="Filtrar por severidade (critical/high/medium/low/info)"),
+    rgpd_estado: str | None = Query(None, description="aplicavel | verificado_e_nao_aplicavel"),
+    nis2_estado: str | None = Query(None, description="aplicavel | verificado_e_nao_aplicavel"),
+    ai_act_estado: str | None = Query(None, description="aplicavel | verificado_e_nao_aplicavel"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """
+    Consulta o histórico persistido (Fase 9) via o índice SQLite, para
+    além dos 90 dias que o Wazuh Indexer guarda — filtrável por data,
+    severidade e vereditos de conformidade sem percorrer todas as pastas
+    por dia. Exemplo: /api/history/query?date_from=2026-03-01&date_to=2026-05-31&rgpd_estado=aplicavel
+    """
+    rows = query_history_index(
+        SENTRYLENS_HISTORY_DIR,
+        date_from=date_from,
+        date_to=date_to,
+        severity=severity,
+        rgpd_estado=rgpd_estado,
+        nis2_estado=nis2_estado,
+        ai_act_estado=ai_act_estado,
+        limit=limit,
+    )
+    results = []
+    for row in rows:
+        full_record = read_jsonl_at_offset(row["alerts_file"], row["alerts_offset"]) or {}
+        results.append({**row, **full_record})
+    return {"total": len(results), "results": results}
 
 
 @app.get("/api/compliance", dependencies=_REQUIRE_API_KEY)
