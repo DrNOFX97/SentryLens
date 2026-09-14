@@ -1148,10 +1148,65 @@ async function loadMlAnomaliesPanel(hours) {
   }
 }
 
+// --- Painel: Conformidade (tab-compliance) ---
+
+function renderComplianceTable(alerts) {
+  const tbody = document.getElementById("compliance-body");
+  tbody.innerHTML = "";
+
+  if (!alerts || alerts.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Sem alertas neste período</td></tr>';
+    return;
+  }
+
+  const estadoLabel = (estado) => (estado === "aplicavel" ? "✅ Aplicável" : "➖ N/A");
+
+  alerts.forEach((a) => {
+    const tr = document.createElement("tr");
+    const c = a.compliance || {};
+    tr.innerHTML = `
+      <td class="mono">${escapeHtml(formatTimestamp(a.timestamp))}</td>
+      <td>${escapeHtml(a.agent_name)}</td>
+      <td>${escapeHtml(a.friendly_name)}</td>
+      <td>${severityBadge(a.severity)}</td>
+      <td>${escapeHtml(estadoLabel(c.rgpd && c.rgpd.estado))}</td>
+      <td>${escapeHtml(estadoLabel(c.nis2 && c.nis2.estado))}</td>
+      <td>${escapeHtml(estadoLabel(c.ai_act && c.ai_act.estado))}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadCompliancePanel(hours) {
+  try {
+    const data = await fetchJSON(`/api/compliance?hours=${hours}`);
+    renderPanelError("#compliance-panel", null);
+
+    document.getElementById("kpi-compliance-total").textContent = data.total ?? 0;
+    document.getElementById("kpi-compliance-rgpd").textContent = (data.summary && data.summary.rgpd && data.summary.rgpd.aplicavel) ?? 0;
+    document.getElementById("kpi-compliance-nis2").textContent = (data.summary && data.summary.nis2 && data.summary.nis2.aplicavel) ?? 0;
+    document.getElementById("kpi-compliance-ai-act").textContent = (data.summary && data.summary.ai_act && data.summary.ai_act.aplicavel) ?? 0;
+
+    const profile = data.org_profile || {};
+    const orgNote = document.getElementById("compliance-org-note");
+    if (orgNote) {
+      orgNote.textContent =
+        `Perfil da organização: ${profile.nome || "-"} — ` +
+        `sujeita a NIS2: ${profile.estatuto_nis2_aplicavel ? "sim" : "não"}, ` +
+        `componentes de IA ativos: ${profile.tem_componentes_ia_ativos ? "sim" : "não"}.`;
+    }
+
+    renderComplianceTable(data.alerts || []);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#compliance-panel", err.message || "Erro ao carregar o painel de conformidade.");
+  }
+}
+
 // Ponto de entrada dos painéis novos (ciclo de vida, privilégios, contas
-// admin, ML anomalias) — independente de refreshDashboard() (painéis Wazuh
-// antigos) e do window-select (horas); usa sempre period-select (dias) no
-// momento da chamada, nunca reatribui esse .value.
+// admin, ML anomalias, conformidade) — independente de refreshDashboard()
+// (painéis Wazuh antigos) e do window-select (horas); usa sempre
+// period-select (dias) no momento da chamada, nunca reatribui esse .value.
 async function refreshNewPanels() {
   const days = periodSelect.value;
   await Promise.allSettled([
@@ -1163,6 +1218,9 @@ async function refreshNewPanels() {
     // endpoint (168h = 7 dias), para "30 dias"/"90 dias" mostrarem sempre os
     // últimos 7 dias em vez de serem lidos como 30/90 HORAS.
     loadMlAnomaliesPanel(Math.min(Number(days) * 24, 168)),
+    // /api/compliance tem a mesma assinatura de /api/ml-anomalies
+    // (Query(24, ge=1, le=168)) — mesma conversão dias->horas.
+    loadCompliancePanel(Math.min(Number(days) * 24, 168)),
   ]);
 }
 
