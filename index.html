@@ -48,6 +48,7 @@
     <button class="tab-btn" data-tab="privileges">🔑 Privilégios</button>
     <button class="tab-btn" data-tab="admin-activity">👤 Contas Admin</button>
     <button class="tab-btn" data-tab="ml-anomalies">🧠 ML Anomalias</button>
+    <button class="tab-btn" data-tab="compliance">🛡️ Conformidade</button>
   </nav>
 
   <main class="container">
@@ -482,6 +483,54 @@
             </thead>
             <tbody id="ml-anomalies-body">
               <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Conformidade ===== -->
+    <div class="tab-content" id="tab-compliance">
+      <section class="panel" id="compliance-panel">
+        <h2>🛡️ Conformidade Regulatória</h2>
+        <p class="panel-note" id="compliance-org-note">
+          A carregar perfil da organização...
+        </p>
+
+        <section class="kpi-grid" id="compliance-kpi-grid">
+          <div class="card">
+            <h3>Alertas Avaliados</h3>
+            <div class="value" id="kpi-compliance-total">—</div>
+          </div>
+          <div class="card">
+            <h3>RGPD Aplicável</h3>
+            <div class="value" id="kpi-compliance-rgpd">—</div>
+          </div>
+          <div class="card">
+            <h3>NIS2 Aplicável</h3>
+            <div class="value" id="kpi-compliance-nis2">—</div>
+          </div>
+          <div class="card">
+            <h3>AI Act Aplicável</h3>
+            <div class="value" id="kpi-compliance-ai-act">—</div>
+          </div>
+        </section>
+
+        <div class="table-scroll">
+          <table id="compliance-table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Agente</th>
+                <th>Evento</th>
+                <th>Severidade</th>
+                <th>RGPD</th>
+                <th>NIS2</th>
+                <th>AI Act</th>
+              </tr>
+            </thead>
+            <tbody id="compliance-body">
+              <tr><td colspan="7" class="empty-state">A carregar...</td></tr>
             </tbody>
           </table>
         </div>
