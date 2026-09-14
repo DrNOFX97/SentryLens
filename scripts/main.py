@@ -40,6 +40,7 @@ from event_catalog import classify_alert
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
 from history_store import append_alert_history, append_compliance_history
 from lifecycle import build_lifecycle_report
+from nis2_lookup import lookup_nis2_classification
 from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
 from report_generator import generate_html_report, render_compliance_section
@@ -600,6 +601,31 @@ async def get_compliance(hours: int = Query(24, ge=1, le=168, description="Janel
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/nis2-lookup", dependencies=_REQUIRE_API_KEY)
+async def nis2_lookup(
+    cae_principal: str = Query(..., description="CAE principal (ex: '6201' ou '62')"),
+    cae_secundarios: str | None = Query(None, description="CAEs secundários separados por vírgula"),
+    nipc: str | None = Query(None),
+    colaboradores: int | None = Query(None, ge=0),
+    faturacao_eur: float | None = Query(None, ge=0),
+    excecao_conhecida: str | None = Query(None, description="fornecedor_confianca_qualificado | registo_dominio | telecomunicacoes | administracao_publica"),
+):
+    """
+    Classificação NIS2 sugerida a partir de dados já conhecidos de uma
+    empresa (não pesquisa nada online) — ver scripts/nis2_lookup.py para
+    a limitação de conhecimento e a natureza não-definitiva do resultado.
+    """
+    secundarios = [c.strip() for c in cae_secundarios.split(",")] if cae_secundarios else None
+    return lookup_nis2_classification(
+        nipc=nipc,
+        cae_principal=cae_principal,
+        cae_secundarios=secundarios,
+        colaboradores=colaboradores,
+        faturacao_eur=faturacao_eur,
+        excecao_conhecida=excecao_conhecida,
+    )
 
 
 @app.get("/api/ml-anomalies", dependencies=_REQUIRE_API_KEY)
