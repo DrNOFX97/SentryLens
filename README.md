@@ -544,12 +544,12 @@ dashboard —
 
 > ⚠️ Ligação em tempo real indisponível — a atualizar a cada 30s
 
-— e passa a depender só do polling fixo de 30s como *fallback*
-definitivo. **Decisão consciente de simplicidade:** nesta versão não
-há nenhum retry automático depois de esgotadas as 5 tentativas (evita
-um loop de reconexão a correr para sempre em segundo plano) — o aviso
-só desaparece se a página for recarregada e a ligação WebSocket voltar
-a funcionar.
+— e passa a depender do polling fixo de 30s como *fallback*. Não fica
+preso nesse estado: enquanto em fallback, tenta recuperar a ligação
+WebSocket a cada 30s (uma tentativa por ciclo, sem voltar a encadear o
+*backoff* exponencial já esgotado) — se conseguir, o aviso desaparece e
+o polling para sozinho, sem precisar de recarregar a página. Se falhar,
+o próprio ciclo seguinte tenta outra vez.
 
 **Testes:** `scripts/test_websocket_alerts.py` (mesmo padrão standalone
 dos outros scripts de teste do backend — sem framework, imprime
@@ -1255,9 +1255,9 @@ que vais usar para correr `uvicorn`
    push de alertas novos ao frontend (ver [secção
    dedicada](#-websocket-em-tempo-real-wsalerts)). O polling de 30s
    mantém-se só como *fallback* se a ligação WebSocket falhar (5
-   tentativas de reconexão com backoff exponencial); não há retry
-   automático depois disso nesta versão — decisão consciente de
-   simplicidade, só recarregar a página tenta de novo.
+   tentativas de reconexão com backoff exponencial); depois disso,
+   tenta recuperar sozinho a cada 30s — **✅ Feito em 2026-09-14**, não
+   precisa mais de recarregar a página.
 3. ~~**Persistência própria** — guardar histórico de alertas numa base
    de dados própria (o Wazuh só guarda 90 dias por default).~~ ✅ **Feito
    em 2026-09-14** — `scripts/history_store.py` grava cada alerta novo
