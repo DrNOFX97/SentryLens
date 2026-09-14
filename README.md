@@ -759,7 +759,14 @@ sistemas de IA). Em vez de deixar essa análise implícita, o SentryLens
 regista explicitamente, por alerta, se cada norma se aplica ou não — e
 porquê.
 
-**Arquitetura em 5 camadas:**
+> ✅ **Painel no dashboard ao vivo** — a conformidade regulatória não vive
+> só no endpoint `GET /api/compliance` e no relatório HTML exportável
+> (ambos já existiam): há agora também uma 9ª aba **"🛡️ Conformidade"**
+> no próprio dashboard (`index.html`/`app.js`), que consome
+> `GET /api/compliance` diretamente e mostra o mesmo veredito por alerta
+> sem precisar de exportar nada — ver camada 5 abaixo.
+
+**Arquitetura em 6 camadas:**
 
 1. **Catálogo de regras** — [`scripts/compliance_rules.yaml`](scripts/compliance_rules.yaml)
    (YAML, não Python, porque as regras/textos de justificação mudam com
@@ -800,7 +807,19 @@ porquê.
    (não importa `compliance_evaluator` — recebe os pares
    alerta/veredito já calculados), com o mesmo escaping HTML do resto do
    relatório.
-5. **Registo de auditoria** — `history_store.append_compliance_history(...)`
+5. **Painel no dashboard ao vivo** — nova aba **"🛡️ Conformidade"**
+   (`data-tab="compliance"` / `id="tab-compliance"` em `index.html`;
+   lógica de *fetch*/render em `app.js`), consumindo `GET /api/compliance`
+   diretamente (sem passar pelo relatório exportável): uma nota com o
+   perfil da organização em uso (nome, sujeita a NIS2 sim/não,
+   componentes de IA ativos sim/não), 4 KPIs (alertas avaliados, RGPD
+   aplicável, NIS2 aplicável, AI Act aplicável) e uma tabela por alerta
+   (data, agente, evento, severidade, RGPD, NIS2, AI Act). Segue o mesmo
+   padrão visual/estrutural das outras abas já existentes (ex: 🧠 ML
+   Anomalias), reaproveitando classes já existentes de `style.css`
+   (`panel`, `panel-note`, `kpi-grid`, `card`, `table-scroll`) — não
+   precisou de CSS novo.
+6. **Registo de auditoria** — `history_store.append_compliance_history(...)`
    persiste o veredito de cada alerta novo em
    `scripts/historico/AAAA/MM-mês/AAAA-MM-DD-compliance.jsonl` (mesma
    pasta/dia do `alerts.jsonl` já existente da [Fase 9](#-histórico-próprio-de-alertas-scriptshistorico)),
@@ -850,14 +869,126 @@ Cada item de `alerts` tem exatamente os mesmos campos de um item de
 `502` `{"detail": "Erro ao contactar Wazuh Indexer: ..."}`, mesmo padrão
 dos outros endpoints que dependem do Indexer.
 
-> ⚠️ **Trabalho futuro, não implementado nesta fase:** o `org_profile.py`
-> atual é fixo (hardcoded) — não há pesquisa automática de enquadramento
-> NIS2 para uma empresa real a partir do seu NIPC/CAE. Está previsto (mas
-> **fora de escopo** desta fase) um módulo `nis2_lookup.py`, assíncrono,
-> que devolveria uma classificação sugerida com grau de confiança e
-> fontes — nunca um veredito jurídico definitivo, sempre "a confirmar
-> junto do CNCS". Esta fase entrega uma base funcional de conformidade
-> com um perfil fixo, não uma pesquisa automática por empresa real.
+> ✅ **Classificação NIS2 sugerida implementada** — `scripts/nis2_lookup.py`
+> + `GET /api/nis2-lookup` já existem e devolvem uma classificação
+> sugerida (com grau de confiança e fontes, nunca um veredito jurídico
+> definitivo) a partir de CAE/colaboradores/faturação **já conhecidos**.
+> Ver a subsecção dedicada [🔎 Classificação NIS2 sugerida
+> (`GET /api/nis2-lookup`)](#-classificação-nis2-sugerida-getapinis2-lookup)
+> logo a seguir.
+>
+> ⚠️ **Continua por fazer:** (1) `org_profile.py` continua fixo
+> (hardcoded) — `get_org_profile()` **não** chama `nis2_lookup.py`; ligar
+> os dois fica para quando o perfil da organização deixar de ser fixo (o
+> CET não é uma empresa real), sem tocar no motor de avaliação. (2) A
+> **pesquisa automática** desses dados (CAE, colaboradores, faturação) em
+> sites externos como o Racius ou o informacaoempresarial.pt — hoje são
+> sempre fornecidos como input pelo utilizador; `nis2_lookup.py` nunca vai
+> buscá-los sozinho (decisão de escopo consciente, ver subsecção seguinte).
+> Esta fase entrega a **lógica de decisão** a partir de dados conhecidos,
+> não uma pesquisa automática por empresa real.
+
+### 🔎 Classificação NIS2 sugerida (`GET /api/nis2-lookup`)
+
+> ✅ **Adicionado em 2026-09-14** — primeira parte do item "pesquisa NIS2
+> por empresa" da lista de [Próximos passos](#-próximos-passos): dado um
+> CAE (e opcionalmente colaboradores/faturação/exceções já conhecidas), o
+> SentryLens sugere se uma empresa provavelmente cai no âmbito da NIS2 —
+> sem consultar nada online.
+
+**Motivação:** a [camada de conformidade](#-conformidade-regulatória-rgpd-nis2-ai-act)
+acima usa hoje um perfil de organização fixo (`org_profile.py`,
+`estatuto_nis2_aplicavel=False`, porque o CET não é uma empresa real).
+`scripts/nis2_lookup.py` é o primeiro passo para, no futuro, substituir
+esse valor fixo por uma classificação calculada a partir dos dados reais
+de uma empresa — CAE principal/secundários, número de colaboradores,
+faturação, exceções sectoriais conhecidas.
+
+**Decisão de escopo — sem pesquisa automática:** `lookup_nis2_classification()`
+é uma função **pura**, sem I/O — recebe CAE/colaboradores/faturação **já
+conhecidos** como parâmetros, e nunca vai buscá-los sozinha a sites
+externos (Racius, informacaoempresarial.pt, Portal da Empresa, etc.). Ir
+buscar esses dados a partir de um NIPC continua a ser um **passo manual
+do utilizador** — decisão consciente para não construir um *scraper*
+frágil, não-verificável e dependente da estrutura HTML de sites de
+terceiros contra os quais este projeto não tem nenhum acordo de uso.
+
+**Limitação de conhecimento (não é jurídica, é de dados de treino):** o
+Decreto-Lei n.º 125/2025 (transposição nacional da NIS2 em Portugal, em
+vigor desde 2026-04-03) entrou em vigor **depois** do conhecimento
+treinado do modelo que escreveu este código. O mapeamento CAE→setor em
+`_CAE_SETOR_NIS2` usa as categorias de setor da **Diretiva (UE)
+2022/2555** (NIS2 — conhecimento estável, anterior a essa data), cruzadas
+com prefixos de 2 dígitos (divisão) da **CAE-Rev.3** portuguesa, como
+aproximação de boa-fé — **não** é uma transcrição do diploma nacional.
+Por isso a função **nunca** devolve um veredito definitivo, só indícios
+com grau de confiança (`"alta"` / `"media"` / `"baixa"` / `"nenhuma"`),
+terminando sempre com a mesma nota fixa:
+
+> "Classificação sugerida, a confirmar junto do CNCS — não é
+> aconselhamento jurídico."
+
+**Critério de dimensão:** mais de 50 colaboradores **ou** mais de
+10 000 000 EUR de faturação (`LIMIAR_COLABORADORES` /
+`LIMIAR_FATURACAO_EUR` em `scripts/nis2_lookup.py`). Sem nenhum dado de
+dimensão (nem colaboradores nem faturação), `cumpre_criterio_dimensao`
+fica `null` — a função nunca assume dimensão na ausência de dados.
+
+**Exceções conhecidas** que aplicam a NIS2 independentemente da
+dimensão: `fornecedor_confianca_qualificado`, `registo_dominio`,
+`telecomunicacoes`, `administracao_publica`. Um valor de
+`excecao_conhecida` fora destas quatro é ignorado (fica `null` no
+resultado, com nota na justificação), em vez de gerar erro.
+
+**Endpoint:** `GET /api/nis2-lookup` — protegido pela mesma `X-API-Key`
+de todos os outros endpoints REST (ver [Autenticação por API
+key](#-autenticação-por-api-key)).
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `cae_principal` | string | Sim | CAE principal (ex: `"6201"` ou `"62"`) |
+| `cae_secundarios` | string | Não | CAEs secundários, separados por vírgula |
+| `nipc` | string | Não | Só devolvido de volta na resposta — não validado nem consultado |
+| `colaboradores` | int (≥0) | Não | Número de colaboradores |
+| `faturacao_eur` | float (≥0) | Não | Faturação anual em EUR |
+| `excecao_conhecida` | string | Não | Uma das 4 exceções conhecidas listadas acima |
+
+**Não *wired* em `org_profile.py`:** este endpoint é *standalone* —
+chamá-lo não altera o perfil fixo que `get_org_profile()` continua a
+devolver para a camada de conformidade (Fase 7). Ligar os dois
+(substituir os campos fixos de `org_profile.py` por uma chamada a
+`lookup_nis2_classification()`) fica documentado como trabalho futuro,
+para quando o perfil da organização deixar de ser fixo.
+
+**Exemplo** — empresa de programação informática (CAE `6201`) com 80
+colaboradores e 3 milhões de EUR de faturação:
+
+```
+GET /api/nis2-lookup?cae_principal=6201&colaboradores=80&faturacao_eur=3000000
+```
+
+```json
+{
+  "nipc": null,
+  "cae_consultado": "6201",
+  "setor_sugerido": "Infraestrutura digital / prestador de serviços digitais (programação/consultoria informática)",
+  "categoria_sugerida": "essencial",
+  "confianca_setor": "media",
+  "cumpre_criterio_dimensao": true,
+  "excecao_aplicada": null,
+  "aplicavel_sugerido": true,
+  "justificacao": "CAE indica setor 'Infraestrutura digital / prestador de serviços digitais (programação/consultoria informática)' (categoria essencial, confiança media). Critério de dimensão cumprido (> 50 colaboradores ou > 10,000,000 EUR de faturação).",
+  "fontes": [
+    "Diretiva (UE) 2022/2555 (NIS2) — categorias de setor, Anexos I e II",
+    "CAE-Rev.3 (Classificação Portuguesa de Atividades Económicas)"
+  ],
+  "nota_final": "Classificação sugerida, a confirmar junto do CNCS — não é aconselhamento jurídico."
+}
+```
+
+**Testes:** `scripts/test_nis2_lookup.py` (mesmo padrão *standalone* dos
+outros scripts de teste do backend — sem framework, imprime
+`[OK]`/`[FALHOU]` por caso).
 
 ### `GET /api/health`
 Confirma que o backend está de pé (não testa ligação ao Wazuh).
@@ -1016,6 +1147,21 @@ a seguir à exportação de relatório na documentação da API.
 | `hours` | int (1–168) | 24 | Janela temporal |
 
 Erro → `502` `{"detail": "Erro ao contactar Wazuh Indexer: ..."}`.
+
+### `GET /api/nis2-lookup`
+Classificação NIS2 sugerida a partir de CAE/colaboradores/faturação **já
+conhecidos** (sem pesquisa automática online) — ver detalhe completo na
+secção [🔎 Classificação NIS2 sugerida](#-classificação-nis2-sugerida-getapinis2-lookup),
+logo a seguir à conformidade regulatória na documentação da API.
+
+| Parâmetro | Tipo | Default | Descrição |
+|---|---|---|---|
+| `cae_principal` | string | — (obrigatório) | CAE principal |
+| `cae_secundarios` | string | — (opcional) | CAEs secundários separados por vírgula |
+| `nipc` | string | — (opcional) | Devolvido na resposta, não validado |
+| `colaboradores` | int (≥0) | — (opcional) | Número de colaboradores |
+| `faturacao_eur` | float (≥0) | — (opcional) | Faturação anual em EUR |
+| `excecao_conhecida` | string | — (opcional) | Uma das 4 exceções conhecidas (ver secção dedicada) |
 
 ### `GET /api/history/query`
 Consulta o histórico persistido em `scripts/historico/` através do
@@ -1406,6 +1552,21 @@ que vais usar para correr `uvicorn`
    completo como fonte única de verdade; o frontend deixou de duplicar
    os valores (`cpuLevel()` removida de `app.js`) — ver a tabela de
    [Endpoints de sistema](#4-endpoints-da-api) na documentação da API.
+6. ~~**Painel de conformidade no frontend** — mostrar os vereditos
+   RGPD/NIS2/AI Act também no dashboard ao vivo, não só no relatório HTML
+   exportável.~~ ✅ **Feito em 2026-09-14** — nova aba **"🛡️ Conformidade"**
+   (`index.html`/`app.js`) consome `GET /api/compliance` diretamente (ver
+   camada 5 da [arquitetura de conformidade](#-conformidade-regulatória-rgpd-nis2-ai-act)).
+7. **Pesquisa NIS2 por empresa** — dado um NIPC/CAE, sugerir se uma
+   empresa cai no âmbito da NIS2. A **lógica de decisão a partir de dados
+   já conhecidos está feita**: ✅ `scripts/nis2_lookup.py` +
+   `GET /api/nis2-lookup` (ver [secção
+   dedicada](#-classificação-nis2-sugerida-getapinis2-lookup) na
+   documentação da API). **Continua por fazer:** a pesquisa automática
+   desses dados (CAE, colaboradores, faturação) em sites externos como o
+   Racius ou o informacaoempresarial.pt — hoje são sempre fornecidos como
+   input pelo utilizador — e ligar o resultado a `org_profile.py` (para
+   substituir o perfil fixo da organização) também continua por fazer.
 
 ---
 
