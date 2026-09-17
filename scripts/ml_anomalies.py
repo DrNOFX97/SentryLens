@@ -84,6 +84,7 @@ def build_ml_anomalies_report(alerts: list[dict], model, scaler) -> dict:
         results.append({
             "timestamp": row["timestamp"],
             "agent_name": row["agent_name"],
+            "agent_ip": row["agent_ip"],
             "target_user": row["target_user"],
             "windows_event_id": row["windows_event_id"],
             "severity": row["severity"],

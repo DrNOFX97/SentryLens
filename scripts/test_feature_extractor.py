@@ -38,6 +38,12 @@ def run() -> None:
     check("hour_of_day extraído corretamente (14h)", feats[0]["hour_of_day"] == 14)
     check("day_of_week extraído corretamente (Thursday = 3)", feats[0]["day_of_week"] == 3)
 
+    # --- agent_ip (Fase 11: usado pelo redblue_correlator para casar
+    # alerta com o alvo do ataque, distinto de source_ip que é o IP de
+    # origem da ligação/logon) ---
+    feats_ip = extract_features([alert(4624, "2026-09-10T14:05:00Z", agent_ip="192.168.1.99")])
+    check("agent_ip extraído de agent.ip", feats_ip[0]["agent_ip"] == "192.168.1.99")
+
     # --- event_id_encoded é determinístico e vem do event_catalog partilhado ---
     known_order = sorted(CRITICAL_EVENTS.keys())
     feats_4625 = extract_features([alert(4625, "2026-09-10T14:05:00Z")])
