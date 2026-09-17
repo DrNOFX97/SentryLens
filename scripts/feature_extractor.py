@@ -136,6 +136,7 @@ def extract_features(alerts: list[dict]) -> list[dict]:
             "target_user": user,
             "source_ip": ip,
             "agent_name": alert.get("agent", {}).get("name", "Unknown"),
+            "agent_ip": alert.get("agent", {}).get("ip", "-"),
             "severity": classification["severity"],
             "rule_flagged": classification["severity"] == "high",
             "hour_of_day": ts.hour,

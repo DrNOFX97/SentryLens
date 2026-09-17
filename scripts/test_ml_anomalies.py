@@ -67,6 +67,7 @@ def run() -> None:
     check("total bate com o nº de alertas mockados", body["total"] == len(MOCK_ALERTS))
     check("cada resultado tem ml_score e ml_is_anomaly", all("ml_score" in r and "ml_is_anomaly" in r for r in body["results"]))
     check("cada resultado tem rule_flagged e agreement", all("rule_flagged" in r and r["agreement"] in ("agree", "diverge") for r in body["results"]))
+    check("cada resultado tem agent_ip", all(r.get("agent_ip") == "192.168.1.5" for r in body["results"]))
     check("agree_count + diverge_count == total", body["agree_count"] + body["diverge_count"] == body["total"])
     check("window_hours default é 24", body["window_hours"] == 24)
 
