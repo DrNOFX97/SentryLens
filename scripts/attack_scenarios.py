@@ -58,6 +58,8 @@ class Scenario:
     description: str
     tool: str
     event_ids: list[int]  # Event IDs do event_catalog.py que este cenário tipicamente gera
+    mitre_tactic: str  # Tactic MITRE ATT&CK (ex: "Credential Access") — ver redblue_correlator.py (Fase 11)
+    mitre_technique: str  # Technique/sub-technique (ex: "T1110" ou "T1110.003")
     build_command: Callable[[argparse.Namespace], list[str] | None]
     # build_command devolve None (em vez de lançar) quando faltam argumentos
     # obrigatórios (ex: credenciais) — o cenário fica "skipped", não crasha.
@@ -96,6 +98,8 @@ SCENARIOS: dict[str, Scenario] = {
         description="Força bruta de RDP contra o agente alvo (gera 4625 repetidos).",
         tool="hydra",
         event_ids=[4625, 4740],
+        mitre_tactic="Credential Access",
+        mitre_technique="T1110",
         build_command=_brute_force_rdp_command,
     ),
     "smb_enum": Scenario(
@@ -103,6 +107,8 @@ SCENARIOS: dict[str, Scenario] = {
         description="Enumeração de partilhas SMB (gera 5140/5145).",
         tool="crackmapexec",
         event_ids=[5140, 5145],
+        mitre_tactic="Discovery",
+        mitre_technique="T1135",
         build_command=_smb_enum_command,
     ),
     "blank_password_check": Scenario(
@@ -110,6 +116,8 @@ SCENARIOS: dict[str, Scenario] = {
         description="Verificação de sessão nula / password em branco (gera 4797).",
         tool="crackmapexec",
         event_ids=[4797],
+        mitre_tactic="Credential Access",
+        mitre_technique="T1110",
         build_command=_blank_password_check_command,
     ),
     "lateral_movement_schtasks": Scenario(
@@ -117,6 +125,8 @@ SCENARIOS: dict[str, Scenario] = {
         description="Pós-comprometimento: cria tarefa agendada via SMB (gera 4672 + 4698).",
         tool="crackmapexec",
         event_ids=[4672, 4698],
+        mitre_tactic="Lateral Movement",
+        mitre_technique="T1053",
         build_command=_lateral_movement_schtasks_command,
     ),
     "account_lockout_spray": Scenario(
@@ -124,6 +134,8 @@ SCENARIOS: dict[str, Scenario] = {
         description="Password spraying com password errada para forçar bloqueio (gera 4625/4740).",
         tool="crackmapexec",
         event_ids=[4625, 4740],
+        mitre_tactic="Credential Access",
+        mitre_technique="T1110.003",
         build_command=_account_lockout_spray_command,
     ),
 }
@@ -186,13 +198,19 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = 
 
 
 def _self_check() -> None:
-    """Verificação rápida e determinística do formato de log (sem lançar nada)."""
+    """Verificação rápida e determinística do formato de log e do
+    mapeamento MITRE (sem lançar nada)."""
     fixed_time = datetime(2026, 9, 12, 14, 30, 0, tzinfo=timezone.utc)
     entry = format_log_entry("brute_force_rdp", "192.168.1.20", "hydra", "launched", {"returncode": 0}, now=fixed_time)
     assert entry["timestamp"] == "2026-09-12T14:30:00+00:00", entry["timestamp"]
     assert entry["scenario"] == "brute_force_rdp"
     assert set(entry.keys()) == {"timestamp", "scenario", "target", "tool", "status", "details"}
     print("[OK   ] format_log_entry produz o formato JSONL esperado")
+
+    for name, scenario in SCENARIOS.items():
+        assert scenario.mitre_tactic, f"{name} sem mitre_tactic"
+        assert scenario.mitre_technique, f"{name} sem mitre_technique"
+    print(f"[OK   ] todos os {len(SCENARIOS)} cenários têm mitre_tactic/mitre_technique preenchidos")
 
 
 def main() -> None:
