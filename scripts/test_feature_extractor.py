@@ -126,6 +126,16 @@ def run() -> None:
     os.unlink(tmp_path)
     check("load_attack_log lê uma entrada por linha", len(loaded) == 1 and loaded[0]["scenario"] == "x")
 
+    # --- load_attack_log ignora linha JSON malformada (ficheiro truncado) em vez de crashar ---
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8") as tmp:
+        tmp.write('{"timestamp": "2026-09-10T10:00:00+00:00", "scenario": "boa", "status": "launched"}\n')
+        tmp.write('{"timestamp": "2026-09-10T10:01:00+00:00", "scenario": "trun')  # linha truncada
+        tmp_path2 = tmp.name
+    loaded2 = load_attack_log(tmp_path2)
+    os.unlink(tmp_path2)
+    check("load_attack_log ignora linha malformada e mantém as válidas",
+          len(loaded2) == 1 and loaded2[0]["scenario"] == "boa")
+
     print()
     if failures:
         print(f"[FALHOU] {len(failures)} teste(s) falharam: {failures}")

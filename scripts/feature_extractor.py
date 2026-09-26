@@ -154,14 +154,21 @@ def extract_features(alerts: list[dict]) -> list[dict]:
 def load_attack_log(path: str) -> list[dict]:
     """Lê o log JSONL do attack_scenarios.py. Ficheiro ausente/vazio
     devolve lista vazia em vez de lançar exceção (nem sempre há um
-    ataque registado ao correr o pipeline)."""
+    ataque registado ao correr o pipeline). Uma linha JSON malformada
+    (ex: ficheiro truncado a meio de um append) é ignorada em vez de
+    crashar o pipeline — mesma convenção de 'nunca crashar com input
+    malformado' do resto do projeto."""
     entries: list[dict] = []
     try:
         with open(path, encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
     except FileNotFoundError:
         return []
     return entries

@@ -681,6 +681,11 @@ async def get_redblue_metrics(
     attack_log = load_attack_log(ATTACK_LOG_PATH)
     report = build_redblue_report(attack_log, ml_report["results"], SCENARIOS, window_seconds=window_seconds)
     report["window_hours"] = hours
+    # O fetch de alertas está limitado a 1000 (newest-first): sinaliza-se se
+    # esse teto foi atingido, para que uma cobertura subestimada por
+    # truncagem não passe silenciosamente por deteção falhada.
+    report["alerts_fetched"] = len(raw_alerts)
+    report["alerts_truncated"] = len(raw_alerts) >= 1000
     return report
 
 
