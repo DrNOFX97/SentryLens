@@ -58,14 +58,18 @@ def build_redblue_report(
             seguinte no log (o que vier primeiro).
 
     Returns:
-        dict com attempts/by_scenario/overall/not_executed/unknown_scenario.
-        Nunca lança exceção; entradas malformadas são ignoradas.
+        dict com attempts/by_scenario/overall/not_executed/unknown_scenario/
+        invalid_entries. Nunca lança exceção; entradas malformadas (não-dict
+        ou timestamp impossível de parsear) são desviadas para invalid_entries,
+        nunca descartadas em silêncio.
     """
     parsed_attacks: list[tuple[datetime, dict]] = []
     not_executed: list[dict] = []
     unknown_scenario: list[dict] = []
+    invalid_entries: list[dict] = []
     for entry in attack_log or []:
         if not isinstance(entry, dict):
+            invalid_entries.append(entry)
             continue
         if entry.get("status") != "launched":
             not_executed.append(entry)
@@ -76,6 +80,7 @@ def build_redblue_report(
             continue
         ts = _parse_timestamp(entry.get("timestamp"))
         if ts is None:
+            invalid_entries.append(entry)
             continue
         parsed_attacks.append((ts, entry))
 
@@ -141,6 +146,7 @@ def build_redblue_report(
         bucket = by_scenario.setdefault(name, {
             "attempts": 0, "detected": 0,
             "detected_by_rule": 0, "detected_by_ml": 0, "detected_by_both": 0,
+            "detected_by_none": 0,
             "_mttd_values": [],
         })
         bucket["attempts"] += 1
@@ -153,6 +159,8 @@ def build_redblue_report(
             bucket["detected_by_ml"] += 1
         elif att["detected_by"] == "both":
             bucket["detected_by_both"] += 1
+        else:
+            bucket["detected_by_none"] += 1
 
     for bucket in by_scenario.values():
         mttd_values = bucket.pop("_mttd_values")
@@ -175,4 +183,5 @@ def build_redblue_report(
         "overall": overall,
         "not_executed": not_executed,
         "unknown_scenario": unknown_scenario,
+        "invalid_entries": invalid_entries,
     }

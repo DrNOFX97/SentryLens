@@ -104,8 +104,32 @@ def run() -> None:
     # --- Agregação por cenário ---
     check("by_scenario['brute_force_rdp'] agrega o caso 1 corretamente", report["by_scenario"]["brute_force_rdp"] == {
         "attempts": 1, "detected": 1, "detected_by_rule": 1, "detected_by_ml": 0, "detected_by_both": 0,
-        "coverage_rate": 1.0, "avg_mttd_seconds": 10.0,
+        "detected_by_none": 0, "coverage_rate": 1.0, "avg_mttd_seconds": 10.0,
     })
+
+    # --- Caso 9: entrada não-dict no attack_log -> invalid_entries, nunca em attempts ---
+    report9 = build_redblue_report(["isto-nao-e-um-dict", 42, None], [], SCENARIOS)
+    check("caso 9: entradas não-dict vão para invalid_entries", len(report9["invalid_entries"]) == 3)
+    check("caso 9: entradas não-dict não entram em attempts", report9["attempts"] == [])
+    check("caso 9: entradas não-dict não contam em overall.total_attempts",
+          report9["overall"]["total_attempts"] == 0)
+
+    # --- Caso 10: entrada launched com timestamp impossível de parsear -> invalid_entries ---
+    attacks10 = [attack("brute_force_rdp", "192.168.1.27", "isto-nao-e-um-timestamp")]
+    report10 = build_redblue_report(attacks10, [], SCENARIOS)
+    check("caso 10: timestamp inválido vai para invalid_entries", len(report10["invalid_entries"]) == 1)
+    check("caso 10: timestamp inválido não entra em attempts", report10["attempts"] == [])
+    check("caso 10: timestamp inválido não conta em overall.total_attempts",
+          report10["overall"]["total_attempts"] == 0)
+
+    # --- Caso 11: detected_by_none conta a tentativa não detetada (item 6b) ---
+    report11 = build_redblue_report(
+        [attack("smb_enum", "192.168.1.28", "2026-09-14T17:00:00+00:00")], [], SCENARIOS)
+    b11 = report11["by_scenario"]["smb_enum"]
+    check("caso 11: detected_by_none=1 para tentativa não detetada", b11["detected_by_none"] == 1)
+    check("caso 11: soma dos detected_by_* == attempts",
+          b11["detected_by_rule"] + b11["detected_by_ml"] + b11["detected_by_both"]
+          + b11["detected_by_none"] == b11["attempts"])
 
     # =========================================================================
     # Parte 2: endpoint GET /api/redblue/metrics via HTTP (TestClient)
@@ -153,22 +177,29 @@ def run() -> None:
         }) + "\n")
         attack_log_path = tmp.name
     original_attack_log_path = main.ATTACK_LOG_PATH
-    main.ATTACK_LOG_PATH = attack_log_path
+    try:
+        main.ATTACK_LOG_PATH = attack_log_path
 
-    resp = client.get("/api/redblue/metrics")
-    check("GET /api/redblue/metrics devolve 200", resp.status_code == 200)
-    body = resp.json()
-    check("overall.total_attempts == 1", body["overall"]["total_attempts"] == 1)
-    check("overall.detected == 1 (alerta 4625 bate com brute_force_rdp)", body["overall"]["detected"] == 1)
-    check("window_hours default é 168", body["window_hours"] == 168)
+        resp = client.get("/api/redblue/metrics")
+        check("GET /api/redblue/metrics devolve 200", resp.status_code == 200)
+        body = resp.json()
+        check("overall.total_attempts == 1", body["overall"]["total_attempts"] == 1)
+        check("overall.detected == 1 (alerta 4625 bate com brute_force_rdp)", body["overall"]["detected"] == 1)
+        check("window_hours default é 168", body["window_hours"] == 168)
+        # item 5: sinalização de truncagem do fetch de alertas
+        check("resposta inclui alerts_fetched", body["alerts_fetched"] == len(mock_alerts))
+        check("alerts_truncated é False para o fixture pequeno", body["alerts_truncated"] is False)
 
-    # --- attack_log.jsonl ausente -> 200 com relatório vazio, nunca 404/500 ---
-    main.ATTACK_LOG_PATH = os.path.join(tempfile.gettempdir(), "ficheiro-que-nao-existe-redblue.jsonl")
-    resp_missing_log = client.get("/api/redblue/metrics")
-    check("attack_log ausente -> 200", resp_missing_log.status_code == 200)
-    check("attack_log ausente -> overall.total_attempts == 0", resp_missing_log.json()["overall"]["total_attempts"] == 0)
-    main.ATTACK_LOG_PATH = original_attack_log_path
-    os.unlink(attack_log_path)
+        # --- attack_log.jsonl ausente -> 200 com relatório vazio, nunca 404/500 ---
+        main.ATTACK_LOG_PATH = os.path.join(tempfile.gettempdir(), "ficheiro-que-nao-existe-redblue.jsonl")
+        resp_missing_log = client.get("/api/redblue/metrics")
+        check("attack_log ausente -> 200", resp_missing_log.status_code == 200)
+        check("attack_log ausente -> overall.total_attempts == 0",
+              resp_missing_log.json()["overall"]["total_attempts"] == 0)
+    finally:
+        main.ATTACK_LOG_PATH = original_attack_log_path
+        if os.path.exists(attack_log_path):
+            os.unlink(attack_log_path)
 
     # --- modelo ML ausente -> 503 ---
     ml_anomalies._model = None
