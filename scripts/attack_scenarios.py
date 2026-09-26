@@ -25,7 +25,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -180,18 +180,36 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = 
         append_attack_log(entry, log_path)
         return entry
 
+    # O timestamp registado é o de LANÇAMENTO (não o de conclusão): captura-se
+    # started ANTES do subprocess para alinhar a janela de correlação do
+    # redblue_correlator ([timestamp, timestamp+window]) com o momento real do
+    # ataque. duration_seconds é acrescentado para observabilidade.
+    started = datetime.now(timezone.utc)
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=args.timeout)
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         entry = format_log_entry(
             scenario.name, args.target, scenario.tool, "launched",
-            {"returncode": result.returncode, "command": _redact_command_for_log(command)},
+            {"returncode": result.returncode, "command": _redact_command_for_log(command),
+             "duration_seconds": round(elapsed, 2)},
+            now=started,
         )
     except subprocess.TimeoutExpired:
-        entry = format_log_entry(scenario.name, args.target, scenario.tool, "failed",
-                                  {"reason": "timeout", "command": _redact_command_for_log(command)})
+        # A ferramenta correu de facto (gerou tráfego real) até esgotar o
+        # timeout — regista-se como "launched" para o correlator a contar como
+        # tentativa executada, não como falha/não-executada.
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        entry = format_log_entry(scenario.name, args.target, scenario.tool, "launched",
+                                  {"reason": "timeout", "timed_out": True,
+                                   "command": _redact_command_for_log(command),
+                                   "duration_seconds": round(elapsed, 2)},
+                                  now=started)
     except Exception as exc:
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         entry = format_log_entry(scenario.name, args.target, scenario.tool, "failed",
-                                  {"reason": str(exc), "command": _redact_command_for_log(command)})
+                                  {"reason": str(exc), "command": _redact_command_for_log(command),
+                                   "duration_seconds": round(elapsed, 2)},
+                                  now=started)
 
     append_attack_log(entry, log_path)
     return entry
@@ -211,6 +229,49 @@ def _self_check() -> None:
         assert scenario.mitre_tactic, f"{name} sem mitre_tactic"
         assert scenario.mitre_technique, f"{name} sem mitre_technique"
     print(f"[OK   ] todos os {len(SCENARIOS)} cenários têm mitre_tactic/mitre_technique preenchidos")
+
+    # --- run_scenario usa o timestamp de LANÇAMENTO (pré-subprocess), não o de
+    # conclusão, e regista duration_seconds (itens 1 e 2 da revisão) ---
+    import tempfile
+    import time as _time
+    from types import SimpleNamespace
+    from unittest import mock
+
+    tmp_log = Path(tempfile.gettempdir()) / "attack_scenarios_selfcheck.jsonl"
+    if tmp_log.exists():
+        tmp_log.unlink()
+    fake_args = SimpleNamespace(target="192.168.1.20", user="administrator", password=None,
+                               wordlist=None, timeout=60)
+    scenario = SCENARIOS["smb_enum"]
+
+    def _fake_run_ok(*a, **k):
+        _time.sleep(0.2)
+        return subprocess.CompletedProcess(a[0] if a else k.get("args"), 0, "", "")
+
+    before = datetime.now(timezone.utc)
+    with mock.patch("shutil.which", return_value="/usr/bin/crackmapexec"), \
+         mock.patch("subprocess.run", _fake_run_ok):
+        entry = run_scenario(scenario, fake_args, tmp_log)
+    logged_ts = datetime.fromisoformat(entry["timestamp"])
+    # timestamp de lançamento é anterior ao fim do sleep falso (momento de conclusão)
+    assert logged_ts <= before + timedelta(seconds=0.15), (logged_ts, before)
+    assert entry["status"] == "launched", entry["status"]
+    assert entry["details"].get("duration_seconds", 0) >= 0.15, entry["details"]
+    print("[OK   ] run_scenario usa timing pré-subprocess e regista duration_seconds")
+
+    def _fake_run_timeout(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=a[0] if a else k.get("args"), timeout=60)
+
+    with mock.patch("shutil.which", return_value="/usr/bin/crackmapexec"), \
+         mock.patch("subprocess.run", _fake_run_timeout):
+        entry_to = run_scenario(scenario, fake_args, tmp_log)
+    assert entry_to["status"] == "launched", entry_to["status"]
+    assert entry_to["details"].get("timed_out") is True, entry_to["details"]
+    assert "duration_seconds" in entry_to["details"], entry_to["details"]
+    print("[OK   ] timeout regista status='launched' com details.timed_out=True")
+
+    if tmp_log.exists():
+        tmp_log.unlink()
 
 
 def main() -> None:
