@@ -452,6 +452,7 @@ cd scripts
 python test_with_mock.py         # classificação, /api/stats, /api/brute-force
 python test_new_panels.py        # /api/lifecycle, /api/privileges, /api/admin-activity
 python test_ml_anomalies.py      # /api/ml-anomalies
+python test_redblue.py           # correlação Red vs Blue + /api/redblue/metrics
 python test_auth.py              # autenticação por API key (401/200, /docs desligado)
 python test_websocket_alerts.py  # /ws/alerts — auth por query param, _poll_once
 python test_history_store.py     # persistência JSONL de histórico
@@ -1189,6 +1190,50 @@ ao catálogo de Event IDs.
 Erro → `503` se o modelo ainda não foi treinado (`{"detail": "Modelo de
 ML não encontrado em '...'. Corre 'python train_anomaly_model.py'
 primeiro para o gerar."}`) ou `502` se falhar o pedido ao Wazuh Indexer.
+
+### `GET /api/redblue/metrics`
+Fase 11 (Onda 1): cruza o log de ataques da VM Kali
+(`scripts/attack_log.jsonl`) com os alertas já classificados por regra +
+ML, por cenário de ataque — cobertura, MTTD (tempo até à primeira
+deteção) e se foi apanhado por regra, por ML, por ambos ou por nenhum.
+Frontend ainda não tem painel dedicado (Onda 2).
+
+| Parâmetro | Tipo | Default | Descrição |
+|---|---|---|---|
+| `hours` | int (1–168) | 168 | Janela temporal para buscar alertas ao Indexer |
+| `window_seconds` | int (30–3600) | 300 | Janela de correlação por tentativa de ataque, cortada pela tentativa seguinte no log |
+
+```json
+{
+  "attempts": [
+    {
+      "scenario": "brute_force_rdp",
+      "target": "192.168.1.169",
+      "timestamp": "2026-09-14T15:34:27.258872+00:00",
+      "mitre_tactic": "Credential Access",
+      "mitre_technique": "T1110",
+      "detected": true,
+      "detected_by": "rule",
+      "mttd_seconds": 8.4,
+      "matched_event_ids": [4625]
+    }
+  ],
+  "by_scenario": {
+    "brute_force_rdp": {
+      "attempts": 1, "detected": 1, "detected_by_rule": 1, "detected_by_ml": 0,
+      "detected_by_both": 0, "coverage_rate": 1.0, "avg_mttd_seconds": 8.4
+    }
+  },
+  "overall": {"total_attempts": 5, "detected": 4, "coverage_rate": 0.8, "avg_mttd_seconds": 12.1},
+  "not_executed": [],
+  "unknown_scenario": [],
+  "window_hours": 168
+}
+```
+Erro → `503` se o modelo ML ainda não foi treinado, `502` se o Wazuh
+Indexer não responder. Ataques com `status` diferente de `launched`
+(skipped/failed) entram em `not_executed`, nunca contam para as
+métricas de cobertura.
 
 ### `GET /api/export/report`
 Gera e devolve um relatório HTML autónomo com o estado atual do
