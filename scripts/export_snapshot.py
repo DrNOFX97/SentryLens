@@ -13,6 +13,7 @@ Uso:
 
 import argparse
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -22,8 +23,9 @@ DEFAULT_ATTACK_LOG_PATH = Path(__file__).parent / "attack_log.jsonl"
 DEFAULT_OUTPUT_DIR = Path(__file__).parent / "snapshots"
 
 
-def fetch_json(url: str, params: dict | None = None, timeout: float = 15.0) -> dict:
-    response = httpx.get(url, params=params, timeout=timeout)
+def fetch_json(url: str, params: dict | None = None, api_key: str = "", timeout: float = 15.0) -> dict:
+    headers = {"X-API-Key": api_key} if api_key else {}
+    response = httpx.get(url, params=params, headers=headers, timeout=timeout)
     response.raise_for_status()
     return response.json()
 
@@ -76,10 +78,12 @@ def main() -> None:
     parser.add_argument("--hours", type=int, default=24)
     parser.add_argument("--attack-log", default=str(DEFAULT_ATTACK_LOG_PATH))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--api-key", default=os.getenv("SENTRYLENS_API_KEY", ""),
+                         help="Default: variável de ambiente SENTRYLENS_API_KEY")
     args = parser.parse_args()
 
-    alerts_data = fetch_json(f"{args.api_base}/api/alerts", params={"hours": args.hours})
-    stats_data = fetch_json(f"{args.api_base}/api/stats", params={"hours": args.hours})
+    alerts_data = fetch_json(f"{args.api_base}/api/alerts", params={"hours": args.hours}, api_key=args.api_key)
+    stats_data = fetch_json(f"{args.api_base}/api/stats", params={"hours": args.hours}, api_key=args.api_key)
     attack_log = load_attack_log(Path(args.attack_log))
 
     snapshot = build_snapshot(alerts_data, stats_data, attack_log)

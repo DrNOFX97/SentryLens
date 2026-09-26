@@ -71,25 +71,25 @@ def _brute_force_rdp_command(args: argparse.Namespace) -> list[str] | None:
 
 
 def _smb_enum_command(args: argparse.Namespace) -> list[str] | None:
-    return ["crackmapexec", "smb", args.target, "--shares"]
+    return ["netexec", "smb", args.target, "--shares"]
 
 
 def _blank_password_check_command(args: argparse.Namespace) -> list[str] | None:
-    return ["crackmapexec", "smb", args.target, "-u", "", "-p", ""]
+    return ["netexec", "smb", args.target, "-u", "", "-p", ""]
 
 
 def _lateral_movement_schtasks_command(args: argparse.Namespace) -> list[str] | None:
     if not args.user or not args.password:
         return None  # requer credenciais válidas (simula pós-comprometimento)
     return [
-        "crackmapexec", "smb", args.target,
+        "netexec", "smb", args.target,
         "-u", args.user, "-p", args.password,
         "-X", "schtasks /create /tn SentryLensLab /tr calc.exe /sc once /st 03:14",
     ]
 
 
 def _account_lockout_spray_command(args: argparse.Namespace) -> list[str] | None:
-    return ["crackmapexec", "smb", args.target, "-u", "convidado", "-p", "wrong-password-1234"]
+    return ["netexec", "smb", args.target, "-u", "convidado", "-p", "wrong-password-1234"]
 
 
 SCENARIOS: dict[str, Scenario] = {
@@ -105,7 +105,7 @@ SCENARIOS: dict[str, Scenario] = {
     "smb_enum": Scenario(
         name="smb_enum",
         description="Enumeração de partilhas SMB (gera 5140/5145).",
-        tool="crackmapexec",
+        tool="netexec",
         event_ids=[5140, 5145],
         mitre_tactic="Discovery",
         mitre_technique="T1135",
@@ -114,7 +114,7 @@ SCENARIOS: dict[str, Scenario] = {
     "blank_password_check": Scenario(
         name="blank_password_check",
         description="Verificação de sessão nula / password em branco (gera 4797).",
-        tool="crackmapexec",
+        tool="netexec",
         event_ids=[4797],
         mitre_tactic="Credential Access",
         mitre_technique="T1110",
@@ -123,7 +123,7 @@ SCENARIOS: dict[str, Scenario] = {
     "lateral_movement_schtasks": Scenario(
         name="lateral_movement_schtasks",
         description="Pós-comprometimento: cria tarefa agendada via SMB (gera 4672 + 4698).",
-        tool="crackmapexec",
+        tool="netexec",
         event_ids=[4672, 4698],
         mitre_tactic="Lateral Movement",
         mitre_technique="T1053",
@@ -132,7 +132,7 @@ SCENARIOS: dict[str, Scenario] = {
     "account_lockout_spray": Scenario(
         name="account_lockout_spray",
         description="Password spraying com password errada para forçar bloqueio (gera 4625/4740).",
-        tool="crackmapexec",
+        tool="netexec",
         event_ids=[4625, 4740],
         mitre_tactic="Credential Access",
         mitre_technique="T1110.003",

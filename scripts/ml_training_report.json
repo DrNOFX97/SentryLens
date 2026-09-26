@@ -1,21 +1,21 @@
 {
-  "total_events": 36,
-  "attacks_in_dataset": 5,
+  "total_events": 35,
+  "attacks_in_dataset": 20,
   "ml": {
-    "precision": 0.4286,
-    "recall": 0.6,
-    "f1": 0.5
+    "precision": 0.8571,
+    "recall": 0.3,
+    "f1": 0.4444
   },
   "rules": {
-    "precision": 0.625,
-    "recall": 1.0,
-    "f1": 0.7692
+    "precision": 0.875,
+    "recall": 0.35,
+    "f1": 0.5
   },
   "comparison": {
-    "both_flagged": 3,
-    "ml_only": 4,
-    "rules_only": 5,
-    "neither": 24
+    "both_flagged": 5,
+    "ml_only": 2,
+    "rules_only": 3,
+    "neither": 25
   },
-  "caveat": "Métricas calculadas sobre dados sintéticos (sample_events_real.json), não validadas contra o laboratório Wazuh real."
+  "caveat": "Métricas calculadas sobre dados reais exportados do laboratório Wazuh (real_events_2026-09-14.json) — ainda assim, dataset pequeno (35 eventos), não é uma estimativa robusta de taxa de deteção em produção."
 }
