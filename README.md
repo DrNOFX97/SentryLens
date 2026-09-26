@@ -42,7 +42,7 @@ língua".
 | Persistência | JSONL (histórico bruto/conformidade) + SQLite (`history_index.py`) |
 | Machine Learning | scikit-learn 1.5.2 (Isolation Forest) |
 | Frontend | HTML/CSS/JavaScript puro (sem framework nem build step), Chart.js |
-| Testes | 11 scripts standalone (`scripts/test_*.py`) — sem pytest, ver [Testes](#-testes) |
+| Testes | 13 scripts standalone (`scripts/test_*.py`) — sem pytest, ver [Testes](#-testes) |
 | SO alvo | Windows 10/11 (WMI/PowerShell para specs do sistema) |
 
 ---
@@ -231,7 +231,7 @@ Dashboard cybersec/
 │   ├── lifecycle.py / rbac.py / admin_activity.py ← painéis de ciclo de vida/RBAC/admin
 │   ├── ml_anomalies.py / feature_extractor.py / train_anomaly_model.py ← Fase 6 (ML)
 │   ├── system_monitor.py        ← specs/saúde da máquina local (CPU/RAM/disco/rede)
-│   ├── test_*.py                ← 11 scripts de teste standalone (ver Testes)
+│   ├── test_*.py                ← 13 scripts de teste standalone (ver Testes)
 │   ├── requirements.txt         ← dependências Python do backend
 │   ├── .env / .env.example      ← credenciais reais (não versionar) / template
 │   ├── README.md                ← guia dos scripts de automação do laboratório
@@ -444,8 +444,9 @@ A interface está organizada em 9 abas:
 
 Sem laboratório Wazuh ligado — tudo mockado (`AsyncMock` sobre
 `WazuhIndexerClient`/`WazuhManagerClient`). Sem framework (nem pytest):
-11 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
-por caso e sai com `sys.exit(1)` se algo falhar.
+13 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
+por caso e sai com `sys.exit(1)` se algo falhar (os 12 abaixo mais o
+`test_feature_extractor.py` referido no fim desta secção).
 
 ```bash
 cd scripts
@@ -1221,19 +1222,38 @@ Frontend ainda não tem painel dedicado (Onda 2).
   "by_scenario": {
     "brute_force_rdp": {
       "attempts": 1, "detected": 1, "detected_by_rule": 1, "detected_by_ml": 0,
-      "detected_by_both": 0, "coverage_rate": 1.0, "avg_mttd_seconds": 8.4
+      "detected_by_both": 0, "detected_by_none": 0, "coverage_rate": 1.0, "avg_mttd_seconds": 8.4
     }
   },
   "overall": {"total_attempts": 5, "detected": 4, "coverage_rate": 0.8, "avg_mttd_seconds": 12.1},
   "not_executed": [],
   "unknown_scenario": [],
-  "window_hours": 168
+  "invalid_entries": [],
+  "window_hours": 168,
+  "alerts_fetched": 372,
+  "alerts_truncated": false
 }
 ```
 Erro → `503` se o modelo ML ainda não foi treinado, `502` se o Wazuh
 Indexer não responder. Ataques com `status` diferente de `launched`
 (skipped/failed) entram em `not_executed`, nunca contam para as
-métricas de cobertura.
+métricas de cobertura. Entradas malformadas do log (não-dict ou
+timestamp impossível de parsear) são desviadas para `invalid_entries`
+— nunca descartadas em silêncio nem contadas como tentativa. Em cada
+cenário, `detected_by_rule + detected_by_ml + detected_by_both +
+detected_by_none == attempts`.
+
+O fetch de alertas ao Indexer está limitado a 1000 (mais recentes
+primeiro): `alerts_fetched` diz quantos vieram e `alerts_truncated`
+fica `true` quando esse teto é atingido — nessa situação tentativas
+antigas podem cair fora da janela e aparecer como não detetadas por
+truncagem, não por falha real de deteção.
+
+> **Nota sobre `--target` / correspondência:** a correlação faz um
+> *exact string compare* contra o `agent.ip` do Wazuh, por isso o
+> `--target` dos cenários de ataque tem de ser o **IP do agente** (não
+> um hostname). Um hostname como alvo produz silenciosamente 0% de
+> cobertura.
 
 ### `GET /api/export/report`
 Gera e devolve um relatório HTML autónomo com o estado atual do
