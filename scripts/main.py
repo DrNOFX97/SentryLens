@@ -35,14 +35,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import ml_anomalies
 from admin_activity import build_admin_activity_report
+from attack_scenarios import SCENARIOS
 from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
 from event_catalog import classify_alert
+from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
 from history_store import append_alert_history, append_compliance_history
 from lifecycle import build_lifecycle_report
 from nis2_lookup import lookup_nis2_classification
 from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
+from redblue_correlator import build_redblue_report
 from report_generator import generate_html_report, render_compliance_section
 from system_monitor import (
     THRESHOLDS,
@@ -88,6 +91,10 @@ RBAC_BASELINE_PATH = os.getenv(
 # Diretório com isolation_forest.pkl + scaler.pkl (ver train_anomaly_model.py),
 # usado pelo endpoint /api/ml-anomalies.
 ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", os.path.join(os.path.dirname(__file__), "models"))
+
+# Caminho do log de ataques da VM Kali (ver attack_scenarios.py), usado
+# pelo endpoint /api/redblue/metrics (Fase 11).
+ATTACK_LOG_PATH = os.getenv("ATTACK_LOG_PATH", os.path.join(os.path.dirname(__file__), "attack_log.jsonl"))
 
 # Diretório onde o histórico de alertas é persistido para além dos 90 dias
 # de retenção do Wazuh Indexer (ver scripts/history_store.py).
@@ -647,6 +654,34 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/redblue/metrics", dependencies=_REQUIRE_API_KEY)
+async def get_redblue_metrics(
+    hours: int = Query(168, ge=1, le=168, description="Janela temporal em horas"),
+    window_seconds: int = Query(300, ge=30, le=3600, description="Janela de correlação por ataque, em segundos"),
+):
+    """
+    Motor de correlação Red vs Blue (Fase 11): cruza o log de ataques da
+    VM Kali com os alertas já classificados por regra + ML, por cenário
+    de ataque — cobertura, MTTD, e se foi detetado por regra, ML, ambos
+    ou nenhum.
+    """
+    try:
+        model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+    ml_report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
+    attack_log = load_attack_log(ATTACK_LOG_PATH)
+    report = build_redblue_report(attack_log, ml_report["results"], SCENARIOS, window_seconds=window_seconds)
+    report["window_hours"] = hours
+    return report
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
