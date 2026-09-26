@@ -48,7 +48,7 @@ def train_model(vectors: list[list[float]], contamination: float = 0.2, random_s
     return model, scaler
 
 
-def evaluate(feature_rows: list[dict], model, scaler) -> dict:
+def evaluate(feature_rows: list[dict], model, scaler, events_path: Path = DEFAULT_EVENTS_PATH) -> dict:
     vectors = vectorize(feature_rows)
     scaled = scaler.transform(vectors)
     predictions = model.predict(scaled)  # -1 = anómalo, 1 = normal
@@ -69,14 +69,24 @@ def evaluate(feature_rows: list[dict], model, scaler) -> dict:
     rule_only = sum(1 for m, r in zip(ml_flags, rule_flags) if r and not m)
     neither = sum(1 for m, r in zip(ml_flags, rule_flags) if not m and not r)
 
+    is_synthetic = Path(events_path).resolve() == DEFAULT_EVENTS_PATH.resolve()
+    caveat = (
+        "Métricas calculadas sobre dados sintéticos (sample_events_real.json), "
+        "não validadas contra o laboratório Wazuh real."
+        if is_synthetic else
+        f"Métricas calculadas sobre dados reais exportados do laboratório Wazuh "
+        f"({Path(events_path).name}) — ainda assim, dataset pequeno "
+        f"({len(feature_rows)} eventos), não é uma estimativa robusta de taxa de "
+        f"deteção em produção."
+    )
+
     return {
         "total_events": len(feature_rows),
         "attacks_in_dataset": sum(truth),
         "ml": prf(ml_flags),
         "rules": prf(rule_flags),
         "comparison": {"both_flagged": both, "ml_only": ml_only, "rules_only": rule_only, "neither": neither},
-        "caveat": "Métricas calculadas sobre dados sintéticos (sample_events_real.json), "
-                  "não validadas contra o laboratório Wazuh real.",
+        "caveat": caveat,
     }
 
 
@@ -101,7 +111,7 @@ def main() -> None:
     model, scaler = train_model(vectors, contamination=args.contamination)
     save_model(model, scaler, Path(args.model_dir))
 
-    report = evaluate(feature_rows, model, scaler)
+    report = evaluate(feature_rows, model, scaler, events_path=Path(args.events))
     with open(args.report, "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)
 
