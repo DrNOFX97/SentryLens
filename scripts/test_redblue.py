@@ -107,6 +107,95 @@ def run() -> None:
         "coverage_rate": 1.0, "avg_mttd_seconds": 10.0,
     })
 
+    # =========================================================================
+    # Parte 2: endpoint GET /api/redblue/metrics via HTTP (TestClient)
+    # =========================================================================
+    import json
+    import os
+    import tempfile
+    from unittest.mock import AsyncMock
+
+    from fastapi.testclient import TestClient
+
+    os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
+
+    import main
+    import ml_anomalies
+    from feature_extractor import extract_features, vectorize
+    from train_anomaly_model import train_model
+
+    main.app.router.on_startup.clear()
+
+    def alert(event_id: int, ts: str, agent_ip: str = "192.168.1.30") -> dict:
+        return {
+            "@timestamp": ts,
+            "agent": {"name": "WIN-PC01", "ip": agent_ip},
+            "rule": {"id": "1", "description": "x", "level": 5},
+            "data": {"win": {"system": {"eventID": str(event_id)}, "eventdata": {"targetUserName": "convidado"}}},
+            "full_log": "x",
+        }
+
+    mock_alerts = [alert(4625, f"2026-09-14T10:0{i}:00Z") for i in range(4)]
+    feature_rows = extract_features(mock_alerts)
+    vectors = vectorize(feature_rows)
+    fake_model, fake_scaler = train_model(vectors, contamination=0.3, random_state=1)
+    ml_anomalies._model = fake_model
+    ml_anomalies._scaler = fake_scaler
+
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=mock_alerts)
+    client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+
+    # --- attack_log.jsonl com uma entrada que bate com os alertas mock ---
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8") as tmp:
+        tmp.write(json.dumps({
+            "timestamp": "2026-09-14T10:00:00+00:00", "scenario": "brute_force_rdp",
+            "target": "192.168.1.30", "tool": "hydra", "status": "launched", "details": {},
+        }) + "\n")
+        attack_log_path = tmp.name
+    original_attack_log_path = main.ATTACK_LOG_PATH
+    main.ATTACK_LOG_PATH = attack_log_path
+
+    resp = client.get("/api/redblue/metrics")
+    check("GET /api/redblue/metrics devolve 200", resp.status_code == 200)
+    body = resp.json()
+    check("overall.total_attempts == 1", body["overall"]["total_attempts"] == 1)
+    check("overall.detected == 1 (alerta 4625 bate com brute_force_rdp)", body["overall"]["detected"] == 1)
+    check("window_hours default é 168", body["window_hours"] == 168)
+
+    # --- attack_log.jsonl ausente -> 200 com relatório vazio, nunca 404/500 ---
+    main.ATTACK_LOG_PATH = os.path.join(tempfile.gettempdir(), "ficheiro-que-nao-existe-redblue.jsonl")
+    resp_missing_log = client.get("/api/redblue/metrics")
+    check("attack_log ausente -> 200", resp_missing_log.status_code == 200)
+    check("attack_log ausente -> overall.total_attempts == 0", resp_missing_log.json()["overall"]["total_attempts"] == 0)
+    main.ATTACK_LOG_PATH = original_attack_log_path
+    os.unlink(attack_log_path)
+
+    # --- modelo ML ausente -> 503 ---
+    ml_anomalies._model = None
+    ml_anomalies._scaler = None
+
+    def _raise_not_found(model_dir=None):
+        raise FileNotFoundError("modelo não encontrado (simulado)")
+
+    original_load_model = ml_anomalies.load_model
+    ml_anomalies.load_model = _raise_not_found
+    resp_no_model = client.get("/api/redblue/metrics")
+    check("sem modelo treinado devolve 503", resp_no_model.status_code == 503)
+    ml_anomalies.load_model = original_load_model
+    ml_anomalies._model = fake_model
+    ml_anomalies._scaler = fake_scaler
+
+    # --- erro no Indexer -> 502 ---
+    main.indexer_client.get_recent_alerts = AsyncMock(side_effect=RuntimeError("Indexer em baixo (simulado)"))
+    resp_indexer_error = client.get("/api/redblue/metrics")
+    check("erro no Indexer devolve 502", resp_indexer_error.status_code == 502)
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=mock_alerts)
+
+    # --- sem X-API-Key -> 401 ---
+    client_no_key = TestClient(main.app)
+    resp_no_key = client_no_key.get("/api/redblue/metrics")
+    check("sem X-API-Key devolve 401", resp_no_key.status_code == 401)
+
     print()
     if failures:
         print(f"[FALHOU] {len(failures)} teste(s) falharam: {failures}")
