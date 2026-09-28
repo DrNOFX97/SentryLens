@@ -284,6 +284,42 @@ def run() -> None:
         report13["attempts"][0]["detected_by_network"] is False,
     )
 
+    # =========================================================================
+    # Parte 4: endpoints de rede (Fase 11, Onda 2)
+    # =========================================================================
+    from unittest.mock import MagicMock
+
+    # --- VM_SSH_HOST não configurado (default nos testes) -> "não configurado", nunca 500 ---
+    resp_net_unconf = client.get("/api/redblue/network")
+    check("GET /api/redblue/network sem VM_SSH_HOST -> 200", resp_net_unconf.status_code == 200)
+    check(
+        "GET /api/redblue/network sem VM_SSH_HOST -> configured=False",
+        resp_net_unconf.json()["configured"] is False,
+    )
+
+    resp_metrics_unconf = client.get("/api/redblue/metrics")
+    check(
+        "GET /api/redblue/metrics sem VM_SSH_HOST -> network_capture_configured=False",
+        resp_metrics_unconf.json()["network_capture_configured"] is False,
+    )
+
+    # --- Com vm_ssh_client simulado e buffer com pacotes -> devolve pacotes/deteções ---
+    main.vm_ssh_client = MagicMock()  # só precisa de não ser None para "configured"=True
+    main.packet_buffer.append({
+        "timestamp": "2026-09-14T21:00:00+00:00", "src_ip": "192.168.1.170", "dst_ip": "192.168.1.44",
+        "src_port": 50000, "dst_port": 3389, "protocol": "TCP", "length": 66,
+    })
+    resp_net_conf = client.get("/api/redblue/network")
+    check("GET /api/redblue/network configurado -> configured=True", resp_net_conf.json()["configured"] is True)
+    check("GET /api/redblue/network devolve o pacote do buffer", len(resp_net_conf.json()["packets"]) == 1)
+
+    # --- sem X-API-Key -> 401, igual às outras rotas /api/* ---
+    resp_net_no_key = client_no_key.get("/api/redblue/network")
+    check("GET /api/redblue/network sem X-API-Key devolve 401", resp_net_no_key.status_code == 401)
+
+    main.vm_ssh_client = None
+    main.packet_buffer.clear()
+
     print()
     if failures:
         print(f"[FALHOU] {len(failures)} teste(s) falharam: {failures}")

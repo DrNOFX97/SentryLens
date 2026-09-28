@@ -162,6 +162,17 @@ def run_connection_tests() -> None:
         r4["connected"] and not r4["hung"],
     )
 
+    # --- /ws/network (Fase 11, Onda 2): mesma autenticação de /ws/alerts ---
+    r5 = _attempt_connect("/ws/network")
+    check("Ligação a /ws/network sem api_key não fica aceite", not r5["connected"])
+
+    r6 = _attempt_connect(f"/ws/network?api_key={api_key}")
+    check(
+        "Ligação a /ws/network com api_key correta é aceite"
+        + (" -- FALHA REAL: bloqueia indefinidamente" if r6["hung"] else ""),
+        r6["connected"] and not r6["hung"],
+    )
+
 
 def run_poll_once_tests() -> None:
     async def _run() -> None:
