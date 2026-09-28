@@ -1,0 +1,8 @@
+/var/log/sentrylens/network.csv {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

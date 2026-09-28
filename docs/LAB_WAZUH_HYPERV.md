@@ -259,3 +259,44 @@ runas /user:administrador cmd
 ## 🚀 Próximo Passo
 
 Depois do checklist completo, o laboratório está pronto para o backend FastAPI (Fase 2, `wazuh-dashboard/`) consultar dados reais em vez de mocks.
+
+---
+
+## Fase 11 (Onda 2) — Captura de rede em tempo real
+
+Passo manual, feito uma vez, depois do setup base do laboratório (SSH já
+a funcionar — ver secção acima). Como os outros scripts desta pasta, não
+é automatizado.
+
+1. Instalar o `tshark` na VM (se ainda não estiver): `sudo apt install tshark`
+   (aceitar "non-root users can capture packets" quando perguntado, ou
+   correr o serviço como root — ver `sudo dpkg-reconfigure wireshark-common`).
+2. Descobrir a interface ligada ao switch "Lab-Wazuh": `ip addr` (procurar
+   a interface com o IP da VM usado pelo Manager/Indexer).
+3. Copiar `scripts/deploy/sentrylens-tshark.service` para a VM, editar
+   `<IFACE>` e a lista de IPs do filtro (Kali + alvos Windows reais deste
+   laboratório):
+   ```bash
+   scp scripts/deploy/sentrylens-tshark.service fernando@<IP_DA_VM>:/tmp/
+   ssh fernando@<IP_DA_VM>
+   sudo mkdir -p /var/log/sentrylens
+   sudo mv /tmp/sentrylens-tshark.service /etc/systemd/system/
+   sudo nano /etc/systemd/system/sentrylens-tshark.service  # editar <IFACE>/IPs
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now sentrylens-tshark.service
+   ```
+4. Copiar `scripts/deploy/sentrylens-network.logrotate`:
+   ```bash
+   scp scripts/deploy/sentrylens-network.logrotate fernando@<IP_DA_VM>:/tmp/
+   ssh fernando@<IP_DA_VM> "sudo mv /tmp/sentrylens-network.logrotate /etc/logrotate.d/sentrylens-network"
+   ```
+5. Verificar que está a escrever:
+   ```bash
+   ssh fernando@<IP_DA_VM> "sudo systemctl status sentrylens-tshark.service"
+   ssh fernando@<IP_DA_VM> "sudo tail -f /var/log/sentrylens/network.csv"
+   ```
+   Deve mostrar linhas novas a aparecer enquanto houver tráfego entre os
+   IPs do filtro (ex: um `ping` do Kali a um alvo do laboratório).
+6. No `.env` do backend, definir `VM_SSH_HOST`/`VM_SSH_USER`/
+   `VM_SSH_KEY_PATH` (ver `scripts/.env.example`) para o backend conseguir
+   ligar-se por SSH e começar a fazer polling deste ficheiro.
