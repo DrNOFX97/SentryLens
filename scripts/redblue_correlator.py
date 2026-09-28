@@ -40,6 +40,7 @@ def build_redblue_report(
     ml_results: list[dict],
     scenarios: dict,
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
+    network_detections: list[dict] | None = None,
 ) -> dict:
     """Constrói o relatório de correlação Red vs Blue.
 
@@ -93,6 +94,13 @@ def build_redblue_report(
             continue
         parsed_alerts.append((ts, result))
 
+    parsed_network: list[tuple[datetime, dict]] = []
+    for det in network_detections or []:
+        ts = _parse_timestamp(det.get("timestamp"))
+        if ts is None:
+            continue
+        parsed_network.append((ts, det))
+
     attempts: list[dict] = []
     for i, (ts, entry) in enumerate(parsed_attacks):
         scenario_name = entry["scenario"]
@@ -128,6 +136,17 @@ def build_redblue_report(
 
         mttd_seconds = round((matches[0][0] - ts).total_seconds(), 2) if matches else None
 
+        network_matches = [
+            (net_ts, det)
+            for net_ts, det in parsed_network
+            if ts <= net_ts <= window_end and target in (det.get("src_ip"), det.get("dst_ip"))
+        ]
+        network_matches.sort(key=lambda item: item[0])
+        detected_by_network = len(network_matches) > 0
+        mttd_network_seconds = (
+            round((network_matches[0][0] - ts).total_seconds(), 2) if network_matches else None
+        )
+
         attempts.append({
             "scenario": scenario_name,
             "target": target,
@@ -138,6 +157,10 @@ def build_redblue_report(
             "detected_by": detected_by,
             "mttd_seconds": mttd_seconds,
             "matched_event_ids": sorted({result.get("windows_event_id") for _, result in matches}),
+            "detected_by_network": detected_by_network,
+            "network_detection_types": sorted({det.get("type") for _, det in network_matches}),
+            "mttd_network_seconds": mttd_network_seconds,
+            "coverage_gap": detected_by_network and detected_by == "none",
         })
 
     by_scenario: dict[str, dict] = {}
@@ -147,6 +170,8 @@ def build_redblue_report(
             "attempts": 0, "detected": 0,
             "detected_by_rule": 0, "detected_by_ml": 0, "detected_by_both": 0,
             "detected_by_none": 0,
+            "detected_by_network_only": 0, "detected_by_windows_only": 0,
+            "detected_by_both_sources": 0, "detected_by_neither": 0,
             "_mttd_values": [],
         })
         bucket["attempts"] += 1
@@ -162,6 +187,17 @@ def build_redblue_report(
         else:
             bucket["detected_by_none"] += 1
 
+        windows_detected = att["detected_by"] != "none"
+        network_detected = att["detected_by_network"]
+        if windows_detected and network_detected:
+            bucket["detected_by_both_sources"] += 1
+        elif windows_detected:
+            bucket["detected_by_windows_only"] += 1
+        elif network_detected:
+            bucket["detected_by_network_only"] += 1
+        else:
+            bucket["detected_by_neither"] += 1
+
     for bucket in by_scenario.values():
         mttd_values = bucket.pop("_mttd_values")
         bucket["coverage_rate"] = round(bucket["detected"] / bucket["attempts"], 4) if bucket["attempts"] else 0.0
@@ -175,6 +211,16 @@ def build_redblue_report(
         "detected": total_detected,
         "coverage_rate": round(total_detected / total_attempts, 4) if total_attempts else 0.0,
         "avg_mttd_seconds": round(sum(all_mttd) / len(all_mttd), 2) if all_mttd else None,
+        "detected_by_network_only": sum(1 for a in attempts if a["coverage_gap"]),
+        "detected_by_windows_only": sum(
+            1 for a in attempts if a["detected_by"] != "none" and not a["detected_by_network"]
+        ),
+        "detected_by_both_sources": sum(
+            1 for a in attempts if a["detected_by"] != "none" and a["detected_by_network"]
+        ),
+        "detected_by_neither": sum(
+            1 for a in attempts if a["detected_by"] == "none" and not a["detected_by_network"]
+        ),
     }
 
     return {
