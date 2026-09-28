@@ -67,6 +67,31 @@ a depender do polling de 30s, tentando recuperar a ligação a cada 30s.
 
 **Testes:** `scripts/test_websocket_alerts.py`.
 
+## 🔌 WebSocket de rede em tempo real (`/ws/network`)
+
+Fase 11 (Onda 2). O backend mantém um ciclo interno
+(`network_poll_loop`) que lê por SSH o ficheiro de captura de metadados
+de rede que o `tshark` escreve na VM Wazuh, a cada **5s**. Funcionalidade
+opcional: só arranca se `VM_SSH_HOST` estiver definido no `.env`.
+
+```
+ws://localhost:8001/ws/network?api_key=<a mesma SENTRYLENS_API_KEY>
+```
+
+Mesma autenticação de `/ws/alerts` — query param `api_key`, fecha com
+`1008` sem parâmetro ou com valor errado.
+
+Duas mensagens possíveis:
+- `{"type": "packet", "packet": {...}}` — um pacote novo (metadados só:
+  `timestamp`/`src_ip`/`dst_ip`/`src_port`/`dst_port`/`protocol`/`length`,
+  nunca payload).
+- `{"type": "network_detection", "detection": {...}}` — uma deteção nova
+  de `network_detections.py` (port scan/brute force/pico de volume),
+  deduplicada por minuto enquanto o padrão persiste.
+
+**Testes:** `scripts/test_network_monitor.py`, mais o caso de autenticação
+em `scripts/test_websocket_alerts.py`.
+
 ## 🗄️ Histórico próprio de alertas e índice SQLite
 
 O Wazuh Indexer apaga alertas com mais de 90 dias (retenção). O mesmo
