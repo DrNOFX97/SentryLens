@@ -1,11 +1,19 @@
 """
-Motor de correlação Red Team / Blue Team (Fase 11, Onda 1).
+Motor de correlação Red Team / Blue Team (Fase 11, Onda 1 + Onda 2).
 
 Cruza o log de ataques lançados pela VM Kali (attack_scenarios.py,
 scripts/attack_log.jsonl) com os alertas Wazuh já classificados por
 ml_anomalies.build_ml_anomalies_report() (regra + ML lado a lado), para
 responder, por tentativa de ataque: foi detetado? por regra, por ML, por
 ambos, ou por nenhum? em quanto tempo (MTTD)?
+
+Onda 2 acrescenta a rede (network_detections.py, via network_monitor.py)
+como um 3º método de deteção independente do Wazuh — cada tentativa de
+ataque ganha detected_by_network/network_detection_types/
+mttd_network_seconds/coverage_gap, e cada bucket de by_scenario/overall
+ganha detected_by_network_only/detected_by_windows_only/
+detected_by_both_sources/detected_by_neither, para expor tentativas que só
+a rede viu (pontos cegos do lado Windows/Wazuh).
 
 Módulo puro (como lifecycle.py/rbac.py/admin_activity.py/ml_anomalies.py):
 não faz I/O nem chamadas de rede, só processa listas já obtidas. Nunca
@@ -57,12 +65,34 @@ def build_redblue_report(
         window_seconds: duração máxima da janela de correlação por
             tentativa de ataque, cortada também pelo início da tentativa
             seguinte no log (o que vier primeiro).
+        network_detections: deteções de rede já produzidas por
+            network_detections.detect_network_anomalies (ou, em produção,
+            acumuladas em tempo real por network_monitor._poll_once — ver
+            main.network_detection_buffer), cada uma com pelo menos
+            type/src_ip/dst_ip/timestamp. Opcional (None = retrocompatível,
+            sem dimensão de rede) — quando presente, um match exige o mesmo
+            target do ataque em src_ip OU dst_ip da deteção (um target
+            vazio/None nunca corresponde, mesmo a uma deteção com
+            dst_ip=None, como volume_spike) e o timestamp dentro da mesma
+            janela usada para os alertas Wazuh.
 
     Returns:
         dict com attempts/by_scenario/overall/not_executed/unknown_scenario/
         invalid_entries. Nunca lança exceção; entradas malformadas (não-dict
         ou timestamp impossível de parsear) são desviadas para invalid_entries,
         nunca descartadas em silêncio.
+
+        Cada attempt ganha (Onda 2) detected_by_network (bool),
+        network_detection_types (lista ordenada dos tipos de deteção que
+        corresponderam), mttd_network_seconds (None se nenhuma), e
+        coverage_gap (True quando a rede detetou mas o Wazuh — regra/ML —
+        não, ou seja, um ponto cego do lado Windows exposto só pela rede).
+
+        Cada bucket de by_scenario e o overall ganham quatro contadores
+        cruzando as duas dimensões de deteção: detected_by_network_only
+        (só rede, nunca Windows — mesmo universo de coverage_gap),
+        detected_by_windows_only (só Windows, sem rede),
+        detected_by_both_sources (as duas) e detected_by_neither (nenhuma).
     """
     parsed_attacks: list[tuple[datetime, dict]] = []
     not_executed: list[dict] = []
@@ -139,7 +169,7 @@ def build_redblue_report(
         network_matches = [
             (net_ts, det)
             for net_ts, det in parsed_network
-            if ts <= net_ts <= window_end and target in (det.get("src_ip"), det.get("dst_ip"))
+            if ts <= net_ts <= window_end and target and target in (det.get("src_ip"), det.get("dst_ip"))
         ]
         network_matches.sort(key=lambda item: item[0])
         detected_by_network = len(network_matches) > 0

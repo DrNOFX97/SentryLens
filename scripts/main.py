@@ -191,6 +191,12 @@ indexer_client = WazuhIndexerClient(
 ws_manager = ConnectionManager()
 network_ws_manager = NetworkConnectionManager()
 packet_buffer: deque = deque(maxlen=PACKET_BUFFER_MAX)
+# Deteções de rede acumuladas à medida que o polling as encontra (timestamp
+# original preservado), em vez de recomputadas a pedido sobre packet_buffer
+# — ver network_monitor._poll_once. Só assim /api/redblue/metrics consegue
+# atribuir uma deteção de rede a um ataque histórico depois de o buffer de
+# pacotes (janela curta) já ter avançado para além dele.
+network_detection_buffer: deque = deque(maxlen=5000)
 vm_ssh_client = VMSSHClient(VM_SSH_HOST, VM_SSH_USER, VM_SSH_KEY_PATH) if VM_SSH_HOST else None
 
 
@@ -319,7 +325,10 @@ async def _start_system_monitor() -> None:
     )
     if vm_ssh_client is not None:
         app.state.network_ws_poll_task = asyncio.create_task(
-            network_poll_loop(vm_ssh_client, network_ws_manager, packet_buffer, NETWORK_CAPTURE_REMOTE_PATH)
+            network_poll_loop(
+                vm_ssh_client, network_ws_manager, packet_buffer, NETWORK_CAPTURE_REMOTE_PATH,
+                network_detection_buffer,
+            )
         )
 
 
@@ -699,7 +708,12 @@ async def get_redblue_metrics(
 
     ml_report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
     attack_log = load_attack_log(ATTACK_LOG_PATH)
-    network_dets = detect_network_anomalies(list(packet_buffer)) if vm_ssh_client is not None else None
+    # Lê as deteções já acumuladas em tempo real (timestamp original
+    # preservado) em vez de recomputar detect_network_anomalies sobre o
+    # packet_buffer agora — esse recompute só veria a janela curta (<=30s)
+    # mais recente, perdendo qualquer ataque histórico assim que o buffer de
+    # pacotes avança. Ver network_monitor._poll_once/network_detection_buffer.
+    network_dets = list(network_detection_buffer) if vm_ssh_client is not None else None
     report = build_redblue_report(
         attack_log, ml_report["results"], SCENARIOS, window_seconds=window_seconds, network_detections=network_dets,
     )
@@ -717,18 +731,26 @@ async def get_redblue_metrics(
 async def get_redblue_network():
     """
     Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — últimos pacotes
-    capturados na VM + deteções de padrões suspeitos na janela mais
-    recente. Devolve 200 com listas vazias e "configured": false se
-    VM_SSH_HOST não estiver definido — nunca 500 por causa disso; continua
-    a exigir X-API-Key como qualquer outra rota /api/*.
+    capturados na VM + deteções de padrões suspeitos. Devolve 200 com
+    listas vazias e "configured": false se VM_SSH_HOST não estiver
+    definido — nunca 500 por causa disso; continua a exigir X-API-Key como
+    qualquer outra rota /api/*.
+
+    "detections" é a vista ao vivo/atual — recomputada sobre a janela
+    curta mais recente de packet_buffer, "o que se passa agora". Já
+    "detection_history" é o conteúdo acumulado de network_detection_buffer
+    — todas as deteções encontradas desde o arranque do backend, com o
+    timestamp original em que foram vistas, não recomputadas — é a mesma
+    fonte que /api/redblue/metrics usa para correlação histórica.
     """
     if vm_ssh_client is None:
-        return {"configured": False, "packets": [], "detections": []}
+        return {"configured": False, "packets": [], "detections": [], "detection_history": []}
     packets = list(packet_buffer)
     return {
         "configured": True,
         "packets": packets,
         "detections": detect_network_anomalies(packets),
+        "detection_history": list(network_detection_buffer),
     }
 
 

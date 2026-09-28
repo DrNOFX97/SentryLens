@@ -284,6 +284,38 @@ def run() -> None:
         report13["attempts"][0]["detected_by_network"] is False,
     )
 
+    # --- Caso 14 (C - Review Focus): target nulo/vazio nunca pode corresponder a uma
+    # deteção com dst_ip=None (ex: volume_spike, que tem sempre dst_ip=None por
+    # desenho) — `None in (src_ip, None)` seria True em Python, o que atribuiria
+    # cobertura de rede a um ataque sem target de forma incorreta. ---
+    attacks14 = [attack("smb_enum", None, "2026-09-14T22:00:00+00:00")]
+    dets14 = [net_det("volume_spike", "192.168.1.170", None, "2026-09-14T22:00:02+00:00")]
+    report14 = build_redblue_report(attacks14, [], SCENARIOS, network_detections=dets14)
+    check(
+        "caso 14: target=None + deteção com dst_ip=None não conta como cobertura de rede",
+        report14["attempts"][0]["detected_by_network"] is False,
+    )
+
+    attacks14b = [attack("smb_enum", "", "2026-09-14T22:10:00+00:00")]
+    dets14b = [net_det("volume_spike", "192.168.1.170", None, "2026-09-14T22:10:02+00:00")]
+    report14b = build_redblue_report(attacks14b, [], SCENARIOS, network_detections=dets14b)
+    check(
+        "caso 14b: target='' (vazio) + deteção com dst_ip=None não conta como cobertura de rede",
+        report14b["attempts"][0]["detected_by_network"] is False,
+    )
+
+    # --- Caso 15 (item 6 - Review Focus): contadores de rede também têm de estar
+    # corretos ao nível de by_scenario, não só overall (reaproveita o cenário do
+    # caso 10: deteção só de rede, Windows não viu nada). ---
+    check(
+        "caso 15: by_scenario['smb_enum'].detected_by_network_only == 1 (reaproveitando o caso 10)",
+        report10["by_scenario"]["smb_enum"]["detected_by_network_only"] == 1,
+    )
+    check(
+        "caso 15: by_scenario['smb_enum'].detected_by_windows_only == 0 (reaproveitando o caso 10)",
+        report10["by_scenario"]["smb_enum"]["detected_by_windows_only"] == 0,
+    )
+
     # =========================================================================
     # Parte 4: endpoints de rede (Fase 11, Onda 2)
     # =========================================================================
