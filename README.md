@@ -85,7 +85,7 @@ Wazuh Manager/Indexer, que já têm os alertas processados.
 
 ## Funcionalidades
 
-- Dashboard web com 9 abas — ver tabela em [Servir o frontend](#3-servir-o-frontend).
+- Dashboard web com 10 abas — ver tabela em [Servir o frontend](#3-servir-o-frontend).
 - Classificação de 23 Event IDs do Windows Security Log em nome
   amigável + severidade + recomendação — ver
   [`docs/API.md`](docs/API.md#catálogo-de-event-ids-scriptsevent_catalogpy).
@@ -303,7 +303,7 @@ continua a existir só como *fallback*. O indicador no canto superior
 direito mostra **● ligado ao Wazuh** (verde) ou **● sem ligação**
 (vermelho, consultar a consola do browser para o erro exato).
 
-A interface está organizada em 9 abas:
+A interface está organizada em 10 abas:
 
 | Aba | Conteúdo |
 |---|---|
@@ -316,6 +316,38 @@ A interface está organizada em 9 abas:
 | 👤 **Contas Admin** | Atividade de contas administrativas — privilégios especiais, tarefas agendadas |
 | 🧠 **ML Anomalias** | Deteção por Isolation Forest lado a lado com a classificação por regras |
 | 🛡️ **Conformidade** | Veredito RGPD/NIS2/AI Act por alerta, resumo agregado, perfil da organização |
+| ⚔️ **Red vs Blue** | Correlação entre o log de ataques e os alertas (Fase 11, Onda 3) — 4 painéis, ver abaixo |
+
+A aba **⚔️ Red vs Blue** vive em `redblue.js` (não edita `app.js`; reutiliza
+os seus globais) e usa uma janela fixa de 7 dias (168 h, o máximo de
+`/api/redblue/metrics`). Tem um resumo de KPIs e 4 painéis:
+
+- **Red Team** — o log de ataques (`GET /api/redblue/attack-log`): data,
+  cenário, alvo, ferramenta, estado e técnica/tática MITRE. O log só tem os
+  estados `launched`, `failed` e `skipped`.
+- **Blue Team** — deteção por cenário e MTTD por técnica MITRE
+  (`GET /api/redblue/metrics`). Declara que a aplicação não regista ações de
+  resposta, por isso não mostra nenhuma.
+- **Rede em tempo real** — snapshot de `GET /api/redblue/network` e push por
+  `/ws/network`.
+- **Manager/Auditor** — estado do backend (`/api/health`) e agentes
+  (`/api/agents`).
+
+Em vez de números, a aba mostra estado vazio ou um aviso em três situações:
+
+1. **Sem ataques na janela** — sem tentativas nos últimos 7 dias, cobertura e
+   MTTD não se aplicam. As tentativas são construídas a partir de *todo* o
+   log, mas os alertas só são pesquisados nos últimos 7 dias; uma tentativa
+   mais antiga não pode ter correspondência, pelo que a interface mostra um
+   aviso e "—" (não 0%) para ela.
+2. **Captura de rede não configurada** — com `VM_SSH_HOST` vazio, o painel de
+   rede mostra "captura não configurada".
+3. **Modelo de ML por treinar** — aviso para correr
+   `scripts/train_anomaly_model.py`.
+
+O `serve_frontend.py` tem uma whitelist fixa de ficheiros que inclui
+`/redblue.js`; é preciso reiniciar o servidor de frontend dedicado para o
+passar a servir.
 
 ---
 
@@ -372,6 +404,7 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | GET | `/api/brute-force` | Deteção de força bruta (Event ID 4625) |
 | GET | `/api/ml-anomalies` | Deteção por Isolation Forest vs. regras — ver [docs/ML.md](docs/ML.md) |
 | GET | `/api/redblue/metrics` | Correlação Red vs Blue (Fase 11) — cobertura/MTTD por cenário de ataque — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/redblue/attack-log` | Log de ataques real (`attack_log.jsonl`) + mapeamento MITRE dos cenários (Fase 11, Onda 3) — resposta: `entries`, `total`, `scenarios`; exige `X-API-Key` |
 | GET | `/api/redblue/network` | Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — pacotes + deteções — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/export/report` | Relatório HTML autónomo (download) |
 | GET | `/api/compliance` | Veredito RGPD/NIS2/AI Act por alerta |
