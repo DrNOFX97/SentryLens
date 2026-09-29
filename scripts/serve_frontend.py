@@ -23,6 +23,7 @@ ALLOWED_FILES = {
     "/": "index.html",
     "/index.html": "index.html",
     "/app.js": "app.js",
+    "/redblue.js": "redblue.js",
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",
