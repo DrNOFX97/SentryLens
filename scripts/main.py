@@ -19,7 +19,7 @@ import logging
 import os
 import secrets
 import sys
-from collections import Counter
+from collections import Counter, deque
 from datetime import datetime, timezone
 
 # Windows redirects stdout/stderr para o codepage da consola por omissão,
@@ -42,11 +42,14 @@ from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
 from history_store import append_alert_history, append_compliance_history
 from lifecycle import build_lifecycle_report
+from network_detections import detect_network_anomalies
+from network_monitor import NetworkConnectionManager, PACKET_BUFFER_MAX, network_poll_loop
 from nis2_lookup import lookup_nis2_classification
 from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
 from redblue_correlator import build_redblue_report
 from report_generator import generate_html_report, render_compliance_section
+from ssh_client import VMSSHClient
 from system_monitor import (
     THRESHOLDS,
     check_thresholds,
@@ -95,6 +98,16 @@ ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", os.path.join(os.path.dirname(__file__),
 # Caminho do log de ataques da VM Kali (ver attack_scenarios.py), usado
 # pelo endpoint /api/redblue/metrics (Fase 11).
 ATTACK_LOG_PATH = os.getenv("ATTACK_LOG_PATH", os.path.join(os.path.dirname(__file__), "attack_log.jsonl"))
+
+# SSH para a VM Wazuh (Fase 11, Onda 2) — só usado pela captura de rede via
+# tshark. Funcionalidade opcional: sem VM_SSH_HOST definido,
+# /api/redblue/network e /ws/network ficam "não configurados" em vez de
+# derrubarem o backend — ao contrário de SENTRYLENS_API_KEY, que é
+# fail-closed para tudo.
+VM_SSH_HOST = os.getenv("VM_SSH_HOST", "")
+VM_SSH_USER = os.getenv("VM_SSH_USER", "")
+VM_SSH_KEY_PATH = os.getenv("VM_SSH_KEY_PATH", "") or None
+NETWORK_CAPTURE_REMOTE_PATH = os.getenv("NETWORK_CAPTURE_REMOTE_PATH", "/var/log/sentrylens/network.csv")
 
 # Diretório onde o histórico de alertas é persistido para além dos 90 dias
 # de retenção do Wazuh Indexer (ver scripts/history_store.py).
@@ -176,6 +189,15 @@ indexer_client = WazuhIndexerClient(
 )
 
 ws_manager = ConnectionManager()
+network_ws_manager = NetworkConnectionManager()
+packet_buffer: deque = deque(maxlen=PACKET_BUFFER_MAX)
+# Deteções de rede acumuladas à medida que o polling as encontra (timestamp
+# original preservado), em vez de recomputadas a pedido sobre packet_buffer
+# — ver network_monitor._poll_once. Só assim /api/redblue/metrics consegue
+# atribuir uma deteção de rede a um ataque histórico depois de o buffer de
+# pacotes (janela curta) já ter avançado para além dele.
+network_detection_buffer: deque = deque(maxlen=5000)
+vm_ssh_client = VMSSHClient(VM_SSH_HOST, VM_SSH_USER, VM_SSH_KEY_PATH) if VM_SSH_HOST else None
 
 
 def _extract_windows_event_id(alert: dict) -> int | None:
@@ -301,6 +323,13 @@ async def _start_system_monitor() -> None:
             on_new_alerts=_persist_new_alerts,
         )
     )
+    if vm_ssh_client is not None:
+        app.state.network_ws_poll_task = asyncio.create_task(
+            network_poll_loop(
+                vm_ssh_client, network_ws_manager, packet_buffer, NETWORK_CAPTURE_REMOTE_PATH,
+                network_detection_buffer,
+            )
+        )
 
 
 @app.get("/api/health", dependencies=_REQUIRE_API_KEY)
@@ -663,9 +692,9 @@ async def get_redblue_metrics(
 ):
     """
     Motor de correlação Red vs Blue (Fase 11): cruza o log de ataques da
-    VM Kali com os alertas já classificados por regra + ML, por cenário
-    de ataque — cobertura, MTTD, e se foi detetado por regra, ML, ambos
-    ou nenhum.
+    VM Kali com os alertas já classificados por regra + ML, e (Onda 2) com
+    as deteções de rede — por cenário de ataque: cobertura, MTTD, e se foi
+    detetado por regra/ML/rede/combinação/nenhum.
     """
     try:
         model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
@@ -679,14 +708,50 @@ async def get_redblue_metrics(
 
     ml_report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
     attack_log = load_attack_log(ATTACK_LOG_PATH)
-    report = build_redblue_report(attack_log, ml_report["results"], SCENARIOS, window_seconds=window_seconds)
+    # Lê as deteções já acumuladas em tempo real (timestamp original
+    # preservado) em vez de recomputar detect_network_anomalies sobre o
+    # packet_buffer agora — esse recompute só veria a janela curta (<=30s)
+    # mais recente, perdendo qualquer ataque histórico assim que o buffer de
+    # pacotes avança. Ver network_monitor._poll_once/network_detection_buffer.
+    network_dets = list(network_detection_buffer) if vm_ssh_client is not None else None
+    report = build_redblue_report(
+        attack_log, ml_report["results"], SCENARIOS, window_seconds=window_seconds, network_detections=network_dets,
+    )
     report["window_hours"] = hours
     # O fetch de alertas está limitado a 1000 (newest-first): sinaliza-se se
     # esse teto foi atingido, para que uma cobertura subestimada por
     # truncagem não passe silenciosamente por deteção falhada.
     report["alerts_fetched"] = len(raw_alerts)
     report["alerts_truncated"] = len(raw_alerts) >= 1000
+    report["network_capture_configured"] = vm_ssh_client is not None
     return report
+
+
+@app.get("/api/redblue/network", dependencies=_REQUIRE_API_KEY)
+async def get_redblue_network():
+    """
+    Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — últimos pacotes
+    capturados na VM + deteções de padrões suspeitos. Devolve 200 com
+    listas vazias e "configured": false se VM_SSH_HOST não estiver
+    definido — nunca 500 por causa disso; continua a exigir X-API-Key como
+    qualquer outra rota /api/*.
+
+    "detections" é a vista ao vivo/atual — recomputada sobre a janela
+    curta mais recente de packet_buffer, "o que se passa agora". Já
+    "detection_history" é o conteúdo acumulado de network_detection_buffer
+    — todas as deteções encontradas desde o arranque do backend, com o
+    timestamp original em que foram vistas, não recomputadas — é a mesma
+    fonte que /api/redblue/metrics usa para correlação histórica.
+    """
+    if vm_ssh_client is None:
+        return {"configured": False, "packets": [], "detections": [], "detection_history": []}
+    packets = list(packet_buffer)
+    return {
+        "configured": True,
+        "packets": packets,
+        "detections": detect_network_anomalies(packets),
+        "detection_history": list(network_detection_buffer),
+    }
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
@@ -770,3 +835,24 @@ async def websocket_alerts_endpoint(websocket: WebSocket) -> None:
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/network")
+async def websocket_network_endpoint(websocket: WebSocket) -> None:
+    """
+    Push de pacotes e deteções de rede novos (Fase 11, Onda 2). Mesma
+    autenticação de /ws/alerts: query param api_key, secrets.compare_digest
+    — ver o comentário junto a /ws/alerts para o porquê de não poder usar
+    dependencies=[Depends(...)] aqui.
+    """
+    api_key = websocket.query_params.get("api_key", "")
+    if not SENTRYLENS_API_KEY or not secrets.compare_digest(api_key, SENTRYLENS_API_KEY):
+        await websocket.close(code=1008)
+        return
+
+    await network_ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        network_ws_manager.disconnect(websocket)

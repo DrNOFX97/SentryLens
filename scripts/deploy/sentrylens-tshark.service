@@ -1,0 +1,20 @@
+[Unit]
+Description=SentryLens - captura de metadados de rede (Fase 11, Onda 2)
+After=network.target
+
+[Service]
+# Substituir <IFACE> pela interface ligada ao switch "Lab-Wazuh" (ver
+# `ip addr` na VM) e a lista de IPs do filtro BPF pelos IPs reais do
+# laboratório (Kali + alvos Windows) — específico de cada instalação,
+# editado à mão, não passado dinamicamente pelo backend.
+ExecStart=/usr/bin/tshark -i <IFACE> -l \
+    -f "host <IP_KALI> or host <IP_ALVO1> or host <IP_ALVO2>" \
+    -T fields -E separator=, -E quote=n -E occurrence=f \
+    -e frame.time_epoch -e ip.src -e ip.dst -e ip.proto -e frame.len \
+    -e tcp.srcport -e tcp.dstport -e udp.srcport -e udp.dstport
+StandardOutput=append:/var/log/sentrylens/network.csv
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

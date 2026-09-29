@@ -99,12 +99,16 @@ def run() -> None:
     check("caso 8: by_scenario={} com input vazio", empty_report["by_scenario"] == {})
     check("caso 8: overall com zeros e mttd None", empty_report["overall"] == {
         "total_attempts": 0, "detected": 0, "coverage_rate": 0.0, "avg_mttd_seconds": None,
+        "detected_by_network_only": 0, "detected_by_windows_only": 0,
+        "detected_by_both_sources": 0, "detected_by_neither": 0,
     })
 
     # --- Agregação por cenário ---
     check("by_scenario['brute_force_rdp'] agrega o caso 1 corretamente", report["by_scenario"]["brute_force_rdp"] == {
         "attempts": 1, "detected": 1, "detected_by_rule": 1, "detected_by_ml": 0, "detected_by_both": 0,
-        "detected_by_none": 0, "coverage_rate": 1.0, "avg_mttd_seconds": 10.0,
+        "detected_by_none": 0, "detected_by_network_only": 0, "detected_by_windows_only": 1,
+        "detected_by_both_sources": 0, "detected_by_neither": 0,
+        "coverage_rate": 1.0, "avg_mttd_seconds": 10.0,
     })
 
     # --- Caso 9: entrada não-dict no attack_log -> invalid_entries, nunca em attempts ---
@@ -226,6 +230,127 @@ def run() -> None:
     client_no_key = TestClient(main.app)
     resp_no_key = client_no_key.get("/api/redblue/metrics")
     check("sem X-API-Key devolve 401", resp_no_key.status_code == 401)
+
+    # =========================================================================
+    # Parte 3: dimensão de rede em build_redblue_report (Fase 11, Onda 2)
+    # =========================================================================
+    def net_det(det_type: str, src_ip: str, dst_ip: str | None, timestamp: str) -> dict:
+        return {"type": det_type, "src_ip": src_ip, "dst_ip": dst_ip, "timestamp": timestamp, "detail": {}}
+
+    # --- Caso 9: sem network_detections (None) -> retrocompatível ---
+    attacks9 = [attack("smb_enum", "192.168.1.40", "2026-09-14T17:00:00+00:00")]
+    report9 = build_redblue_report(attacks9, [], SCENARIOS)
+    a9 = report9["attempts"][0]
+    check("caso 9: sem network_detections -> detected_by_network=False", a9["detected_by_network"] is False)
+    check("caso 9: sem network_detections -> coverage_gap=False", a9["coverage_gap"] is False)
+    check("caso 9: overall.detected_by_network_only=0 por omissão", report9["overall"]["detected_by_network_only"] == 0)
+
+    # --- Caso 10: deteção só de rede (Windows não viu nada) -> coverage_gap=True ---
+    attacks10 = [attack("smb_enum", "192.168.1.41", "2026-09-14T18:00:00+00:00")]
+    dets10 = [net_det("port_scan", "192.168.1.170", "192.168.1.41", "2026-09-14T18:00:05+00:00")]
+    report10 = build_redblue_report(attacks10, [], SCENARIOS, network_detections=dets10)
+    a10 = report10["attempts"][0]
+    check("caso 10: detected_by_network=True", a10["detected_by_network"] is True)
+    check("caso 10: detected_by (Windows) continua 'none'", a10["detected_by"] == "none")
+    check("caso 10: coverage_gap=True (ponto cego exposto)", a10["coverage_gap"] is True)
+    check("caso 10: mttd_network_seconds=5.0", a10["mttd_network_seconds"] == 5.0)
+    check("caso 10: overall.detected_by_network_only == 1", report10["overall"]["detected_by_network_only"] == 1)
+
+    # --- Caso 11: deteção por Windows e por rede -> both_sources, não coverage_gap ---
+    attacks11 = [attack("brute_force_rdp", "192.168.1.42", "2026-09-14T19:00:00+00:00")]
+    results11 = [ml_result("2026-09-14T19:00:03+00:00", "192.168.1.42", 4625, rule_flagged=True)]
+    dets11 = [net_det("brute_force", "192.168.1.170", "192.168.1.42", "2026-09-14T19:00:04+00:00")]
+    report11 = build_redblue_report(attacks11, results11, SCENARIOS, network_detections=dets11)
+    a11 = report11["attempts"][0]
+    check(
+        "caso 11: detected_by_network=True e detected_by='rule'",
+        a11["detected_by_network"] is True and a11["detected_by"] == "rule",
+    )
+    check("caso 11: coverage_gap=False (já detetado pelo Windows)", a11["coverage_gap"] is False)
+    check("caso 11: overall.detected_by_both_sources == 1", report11["overall"]["detected_by_both_sources"] == 1)
+
+    # --- Caso 12: alvo como src_ip da deteção (não só dst_ip) também conta ---
+    attacks12 = [attack("smb_enum", "192.168.1.43", "2026-09-14T20:00:00+00:00")]
+    dets12 = [net_det("volume_spike", "192.168.1.43", None, "2026-09-14T20:00:02+00:00")]
+    report12 = build_redblue_report(attacks12, [], SCENARIOS, network_detections=dets12)
+    check("caso 12: alvo como src_ip da deteção também conta", report12["attempts"][0]["detected_by_network"] is True)
+
+    # --- Caso 13: deteção de rede para um IP diferente do alvo não conta (Review Focus) ---
+    attacks13 = [attack("smb_enum", "192.168.1.44", "2026-09-14T21:00:00+00:00")]
+    dets13 = [net_det("port_scan", "192.168.1.170", "10.0.0.99", "2026-09-14T21:00:05+00:00")]  # IP não relacionado
+    report13 = build_redblue_report(attacks13, [], SCENARIOS, network_detections=dets13)
+    check(
+        "caso 13: deteção de rede para IP não relacionado não conta como cobertura",
+        report13["attempts"][0]["detected_by_network"] is False,
+    )
+
+    # --- Caso 14 (C - Review Focus): target nulo/vazio nunca pode corresponder a uma
+    # deteção com dst_ip=None (ex: volume_spike, que tem sempre dst_ip=None por
+    # desenho) — `None in (src_ip, None)` seria True em Python, o que atribuiria
+    # cobertura de rede a um ataque sem target de forma incorreta. ---
+    attacks14 = [attack("smb_enum", None, "2026-09-14T22:00:00+00:00")]
+    dets14 = [net_det("volume_spike", "192.168.1.170", None, "2026-09-14T22:00:02+00:00")]
+    report14 = build_redblue_report(attacks14, [], SCENARIOS, network_detections=dets14)
+    check(
+        "caso 14: target=None + deteção com dst_ip=None não conta como cobertura de rede",
+        report14["attempts"][0]["detected_by_network"] is False,
+    )
+
+    attacks14b = [attack("smb_enum", "", "2026-09-14T22:10:00+00:00")]
+    dets14b = [net_det("volume_spike", "192.168.1.170", None, "2026-09-14T22:10:02+00:00")]
+    report14b = build_redblue_report(attacks14b, [], SCENARIOS, network_detections=dets14b)
+    check(
+        "caso 14b: target='' (vazio) + deteção com dst_ip=None não conta como cobertura de rede",
+        report14b["attempts"][0]["detected_by_network"] is False,
+    )
+
+    # --- Caso 15 (item 6 - Review Focus): contadores de rede também têm de estar
+    # corretos ao nível de by_scenario, não só overall (reaproveita o cenário do
+    # caso 10: deteção só de rede, Windows não viu nada). ---
+    check(
+        "caso 15: by_scenario['smb_enum'].detected_by_network_only == 1 (reaproveitando o caso 10)",
+        report10["by_scenario"]["smb_enum"]["detected_by_network_only"] == 1,
+    )
+    check(
+        "caso 15: by_scenario['smb_enum'].detected_by_windows_only == 0 (reaproveitando o caso 10)",
+        report10["by_scenario"]["smb_enum"]["detected_by_windows_only"] == 0,
+    )
+
+    # =========================================================================
+    # Parte 4: endpoints de rede (Fase 11, Onda 2)
+    # =========================================================================
+    from unittest.mock import MagicMock
+
+    # --- VM_SSH_HOST não configurado (default nos testes) -> "não configurado", nunca 500 ---
+    resp_net_unconf = client.get("/api/redblue/network")
+    check("GET /api/redblue/network sem VM_SSH_HOST -> 200", resp_net_unconf.status_code == 200)
+    check(
+        "GET /api/redblue/network sem VM_SSH_HOST -> configured=False",
+        resp_net_unconf.json()["configured"] is False,
+    )
+
+    resp_metrics_unconf = client.get("/api/redblue/metrics")
+    check(
+        "GET /api/redblue/metrics sem VM_SSH_HOST -> network_capture_configured=False",
+        resp_metrics_unconf.json()["network_capture_configured"] is False,
+    )
+
+    # --- Com vm_ssh_client simulado e buffer com pacotes -> devolve pacotes/deteções ---
+    main.vm_ssh_client = MagicMock()  # só precisa de não ser None para "configured"=True
+    main.packet_buffer.append({
+        "timestamp": "2026-09-14T21:00:00+00:00", "src_ip": "192.168.1.170", "dst_ip": "192.168.1.44",
+        "src_port": 50000, "dst_port": 3389, "protocol": "TCP", "length": 66,
+    })
+    resp_net_conf = client.get("/api/redblue/network")
+    check("GET /api/redblue/network configurado -> configured=True", resp_net_conf.json()["configured"] is True)
+    check("GET /api/redblue/network devolve o pacote do buffer", len(resp_net_conf.json()["packets"]) == 1)
+
+    # --- sem X-API-Key -> 401, igual às outras rotas /api/* ---
+    resp_net_no_key = client_no_key.get("/api/redblue/network")
+    check("GET /api/redblue/network sem X-API-Key devolve 401", resp_net_no_key.status_code == 401)
+
+    main.vm_ssh_client = None
+    main.packet_buffer.clear()
 
     print()
     if failures:
