@@ -266,5 +266,125 @@ function renderBluePanel(metrics) {
   }
 }
 
+const rbNetwork = { configured: false, packets: [], detections: [], history: [] };
+let rbNetworkWs = null;
+let rbNetworkReconnectAttempts = 0;
+
+function rbDetectionDetail(detail) {
+  if (!detail || typeof detail !== "object") return "—";
+  return Object.entries(detail).map(([k, v]) => `${k}: ${v}`).join(", ");
+}
+
+function renderNetworkPanel() {
+  const note = document.getElementById("redblue-network-note");
+  const detBody = document.getElementById("redblue-detections-body");
+  const pktBody = document.getElementById("redblue-packets-body");
+
+  if (!rbNetwork.configured) {
+    note.textContent =
+      "Captura de rede não configurada: define VM_SSH_HOST, VM_SSH_USER e VM_SSH_KEY_PATH em scripts/.env e ativa a captura na VM (docs/LAB_WAZUH_HYPERV.md).";
+    rbSetText("kpi-rb-packets", "—");
+    rbSetText("kpi-rb-detections", "—");
+    rbSetText("kpi-rb-history", "—");
+    detBody.innerHTML = '<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>';
+    pktBody.innerHTML = '<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>';
+    return;
+  }
+
+  note.textContent = "Metadados de pacotes capturados na VM Wazuh (sem payload). Deteções por regras fixas: port scan, brute force e volume.";
+  rbSetText("kpi-rb-packets", rbNetwork.packets.length);
+  rbSetText("kpi-rb-detections", rbNetwork.detections.length);
+  rbSetText("kpi-rb-history", rbNetwork.history.length);
+
+  const dets = [...rbNetwork.history].reverse();
+  detBody.innerHTML = dets.length
+    ? dets
+        .map(
+          (d) => `
+      <tr>
+        <td class="mono">${escapeHtml(formatTimestamp(d.timestamp))}</td>
+        <td>${rbCell(d.type)}</td>
+        <td class="mono">${rbCell(d.src_ip)}</td>
+        <td class="mono">${rbCell(d.dst_ip)}</td>
+        <td>${escapeHtml(rbDetectionDetail(d.detail))}</td>
+      </tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="5" class="empty-state">Nenhuma deteção de rede até agora</td></tr>';
+
+  const pkts = rbNetwork.packets.slice(-RB_MAX_PACKET_ROWS).reverse();
+  pktBody.innerHTML = pkts.length
+    ? pkts
+        .map((p) => {
+          const src = p.src_port != null ? `${p.src_ip}:${p.src_port}` : p.src_ip;
+          const dst = p.dst_port != null ? `${p.dst_ip}:${p.dst_port}` : p.dst_ip;
+          return `
+      <tr>
+        <td class="mono">${escapeHtml(formatTimestamp(p.timestamp))}</td>
+        <td class="mono">${rbCell(src)}</td>
+        <td class="mono">${rbCell(dst)}</td>
+        <td>${rbCell(p.protocol)}</td>
+        <td>${rbCell(p.length)}</td>
+      </tr>`;
+        })
+        .join("")
+    : '<tr><td colspan="5" class="empty-state">Sem pacotes no buffer</td></tr>';
+}
+
+async function loadNetworkPanel() {
+  try {
+    const data = await fetchJSON("/api/redblue/network");
+    renderPanelError("#redblue-network-panel", null);
+    rbNetwork.configured = !!data.configured;
+    rbNetwork.packets = data.packets || [];
+    rbNetwork.detections = data.detections || [];
+    rbNetwork.history = data.detection_history || [];
+    renderNetworkPanel();
+    if (rbNetwork.configured && !rbNetworkWs) connectNetworkSocket();
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#redblue-network-panel", err.message || "Erro ao carregar a captura de rede.");
+  }
+}
+
+function connectNetworkSocket() {
+  rbNetworkWs = new WebSocket(RB_NETWORK_WS_URL);
+  rbNetworkWs.onopen = () => {
+    rbNetworkReconnectAttempts = 0;
+  };
+  rbNetworkWs.onmessage = (event) => {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch (err) {
+      console.error("Mensagem /ws/network inválida:", err);
+      return;
+    }
+    if (msg && msg.type === "packet" && msg.packet) {
+      rbNetwork.packets.push(msg.packet);
+      if (rbNetwork.packets.length > RB_MAX_PACKET_ROWS * 10) rbNetwork.packets.shift();
+    } else if (msg && msg.type === "network_detection" && msg.detection) {
+      rbNetwork.detections.push(msg.detection);
+      rbNetwork.history.push(msg.detection);
+    } else {
+      return;
+    }
+    renderNetworkPanel();
+  };
+  rbNetworkWs.onerror = () => rbNetworkWs.close();
+  rbNetworkWs.onclose = () => {
+    rbNetworkWs = null;
+    // Sem tempo real, o refresh de 30s (loadNetworkPanel) continua a atualizar
+    // o painel por snapshot — e volta a abrir o socket se a captura estiver ativa.
+    if (rbNetworkReconnectAttempts < WS_RECONNECT_DELAYS_MS.length) {
+      const delay = WS_RECONNECT_DELAYS_MS[rbNetworkReconnectAttempts];
+      rbNetworkReconnectAttempts += 1;
+      setTimeout(() => {
+        if (rbNetwork.configured && !rbNetworkWs) connectNetworkSocket();
+      }, delay);
+    }
+  };
+}
+
 refreshRedBlueTab();
 setInterval(refreshRedBlueTab, RB_REFRESH_MS);
