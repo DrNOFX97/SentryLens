@@ -656,3 +656,12 @@ footer {
   color: #999;
   font-size: 12px;
 }
+
+/* --- Aba Red vs Blue (Fase 11, Onda 3) --- */
+.rb-subtitle { margin: 20px 0 8px; font-size: 1rem; }
+.rb-notice { margin: 8px 0; padding: 8px 12px; border-radius: 6px; background: #fdebd0; color: #b9770e; font-size: 0.9rem; }
+.rb-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; font-weight: 600; color: #fff; }
+.rb-badge.launched { background: #27ae60; }
+.rb-badge.failed { background: #e74c3c; }
+.rb-badge.skipped { background: #7f8c8d; }
+tr.row-gap { background: #fdebd0; }
