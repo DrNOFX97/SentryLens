@@ -545,11 +545,13 @@
         <p class="panel-note">
           Cruza o log de ataques lançados a partir da VM Kali com o que o Wazuh
           (regras e ML) e a captura de rede detetaram. Todos os dados vêm dos
-          endpoints reais do backend; a correlação usa sempre a janela máxima
-          de 7 dias, independentemente do período escolhido acima.
+          endpoints reais do backend. As tentativas vêm de todo o log de
+          ataques, mas os alertas do Wazuh só são pesquisados nos últimos
+          7 dias (independentemente do período escolhido acima); tentativas
+          mais antigas não podem ter correspondência.
         </p>
         <section class="kpi-grid" id="redblue-kpi-grid">
-          <div class="card"><h3>Ataques na Janela (7 dias)</h3><div class="value" id="kpi-rb-attempts">—</div></div>
+          <div class="card"><h3>Ataques no Log</h3><div class="value" id="kpi-rb-attempts">—</div></div>
           <div class="card"><h3>Cobertura Global</h3><div class="value" id="kpi-rb-coverage">—</div></div>
           <div class="card"><h3>MTTD Médio</h3><div class="value" id="kpi-rb-mttd">—</div></div>
           <div class="card"><h3>Só a Rede Viu</h3><div class="value" id="kpi-rb-network-only">—</div></div>
