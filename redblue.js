@@ -32,20 +32,35 @@ function rbSetText(id, text) {
   if (el) el.textContent = text;
 }
 
+// Conta tentativas anteriores à janela de alertas consultada no Wazuh
+// (agora - hours). Timestamps inválidos não contam como antigos.
+function rbCountStaleAttempts(attempts, hours) {
+  const cutoff = Date.now() - hours * 3600 * 1000;
+  return (attempts || []).filter((a) => {
+    const t = Date.parse(a && a.timestamp);
+    return !Number.isNaN(t) && t < cutoff;
+  }).length;
+}
+
 function renderRedBlueKpis(data) {
   const overall = data.overall || {};
   const attempts = overall.total_attempts || 0;
+  const stale = rbCountStaleAttempts(data.attempts, RB_METRICS_HOURS);
+  const allStale = attempts > 0 && stale === attempts;
   rbSetText("kpi-rb-attempts", attempts);
-  rbSetText("kpi-rb-coverage", rbFormatPercent(overall.coverage_rate, attempts));
-  rbSetText("kpi-rb-mttd", rbFormatSeconds(overall.avg_mttd_seconds));
+  rbSetText("kpi-rb-coverage", allStale ? "—" : rbFormatPercent(overall.coverage_rate, attempts));
+  rbSetText("kpi-rb-mttd", allStale ? "—" : rbFormatSeconds(overall.avg_mttd_seconds));
   rbSetText("kpi-rb-network-only", data.network_capture_configured ? (overall.detected_by_network_only ?? 0) : "—");
-  rbSetText("kpi-rb-neither", overall.detected_by_neither ?? 0);
+  rbSetText("kpi-rb-neither", allStale ? "—" : (overall.detected_by_neither ?? 0));
   rbSetText("kpi-rb-alerts-fetched", data.alerts_fetched ?? "—");
   rbSetText("kpi-rb-capture", data.network_capture_configured ? "Configurada" : "Não configurada");
 
   const notices = [];
   if (attempts === 0) {
-    notices.push("Sem ataques na janela de 7 dias — não há nada para correlacionar (cobertura e MTTD não se aplicam). O painel Red Team lista o log completo.");
+    notices.push("Sem ataques no log — não há nada para correlacionar (cobertura e MTTD não se aplicam).");
+  }
+  if (stale > 0) {
+    notices.push(`${stale} tentativa(s) anterior(es) à janela de alertas (7 dias): o Wazuh não foi consultado para esse período, por isso não podem ter correspondência — a cobertura não é fiável para elas.`);
   }
   if (data.alerts_truncated) {
     notices.push(`Foram analisados ${data.alerts_fetched} alertas (teto de 1000): a cobertura pode estar subestimada.`);
