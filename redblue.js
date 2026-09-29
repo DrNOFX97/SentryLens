@@ -32,26 +32,51 @@ function rbSetText(id, text) {
   if (el) el.textContent = text;
 }
 
-// Conta tentativas anteriores à janela de alertas consultada no Wazuh
-// (agora - hours). Timestamps inválidos não contam como antigos.
+// Uma tentativa é "antiga" se for anterior à janela de alertas consultada no
+// Wazuh (agora - hours): nunca pode ter correspondência. Timestamps inválidos
+// não contam como antigos (contam como dentro da janela).
+function rbIsStaleAttempt(a, hours) {
+  const t = Date.parse(a && a.timestamp);
+  return !Number.isNaN(t) && t < Date.now() - hours * 3600 * 1000;
+}
+
 function rbCountStaleAttempts(attempts, hours) {
-  const cutoff = Date.now() - hours * 3600 * 1000;
-  return (attempts || []).filter((a) => {
-    const t = Date.parse(a && a.timestamp);
-    return !Number.isNaN(t) && t < cutoff;
-  }).length;
+  return (attempts || []).filter((a) => rbIsStaleAttempt(a, hours)).length;
+}
+
+function rbFreshAttempts(attempts, hours) {
+  return (attempts || []).filter((a) => !rbIsStaleAttempt(a, hours));
+}
+
+// Métricas derivadas só de tentativas dentro da janela (não usa agregados do backend).
+function rbSummarize(fresh) {
+  const mttds = fresh
+    .map((a) => a.mttd_seconds)
+    .filter((m) => m !== null && m !== undefined);
+  const by = (k) => fresh.filter((a) => a.detected_by === k).length;
+  return {
+    count: fresh.length,
+    detected: fresh.filter((a) => a.detected).length,
+    avgMttd: mttds.length ? mttds.reduce((x, y) => x + y, 0) / mttds.length : null,
+    rule: by("rule"),
+    ml: by("ml"),
+    both: by("both"),
+    neither: fresh.filter((a) => a.detected_by === "none" && !a.detected_by_network).length,
+    networkOnly: fresh.filter((a) => a.coverage_gap).length,
+  };
 }
 
 function renderRedBlueKpis(data) {
   const overall = data.overall || {};
   const attempts = overall.total_attempts || 0;
   const stale = rbCountStaleAttempts(data.attempts, RB_METRICS_HOURS);
-  const allStale = attempts > 0 && stale === attempts;
+  const sum = rbSummarize(rbFreshAttempts(data.attempts, RB_METRICS_HOURS));
+  const none = sum.count === 0;
   rbSetText("kpi-rb-attempts", attempts);
-  rbSetText("kpi-rb-coverage", allStale ? "—" : rbFormatPercent(overall.coverage_rate, attempts));
-  rbSetText("kpi-rb-mttd", allStale ? "—" : rbFormatSeconds(overall.avg_mttd_seconds));
-  rbSetText("kpi-rb-network-only", data.network_capture_configured ? (overall.detected_by_network_only ?? 0) : "—");
-  rbSetText("kpi-rb-neither", allStale ? "—" : (overall.detected_by_neither ?? 0));
+  rbSetText("kpi-rb-coverage", none ? "—" : rbFormatPercent(sum.detected / sum.count, sum.count));
+  rbSetText("kpi-rb-mttd", none ? "—" : rbFormatSeconds(sum.avgMttd));
+  rbSetText("kpi-rb-network-only", data.network_capture_configured && !none ? sum.networkOnly : "—");
+  rbSetText("kpi-rb-neither", none ? "—" : sum.neither);
   rbSetText("kpi-rb-alerts-fetched", data.alerts_fetched ?? "—");
   rbSetText("kpi-rb-capture", data.network_capture_configured ? "Configurada" : "Não configurada");
 
@@ -60,7 +85,7 @@ function renderRedBlueKpis(data) {
     notices.push("Sem ataques no log — não há nada para correlacionar (cobertura e MTTD não se aplicam).");
   }
   if (stale > 0) {
-    notices.push(`${stale} tentativa(s) anterior(es) à janela de alertas (7 dias): o Wazuh não foi consultado para esse período, por isso não podem ter correspondência — a cobertura não é fiável para elas.`);
+    notices.push(`${stale} tentativa(s) anterior(es) à janela de alertas (7 dias) estão excluídas dos números mostrados (cobertura, MTTD e deteções): o Wazuh não foi consultado para esse período, por isso não podem ter correspondência.`);
   }
   if (data.alerts_truncated) {
     notices.push(`Foram analisados ${data.alerts_fetched} alertas (teto de 1000): a cobertura pode estar subestimada.`);
@@ -87,6 +112,10 @@ async function loadRedBlueMetrics() {
   } catch (err) {
     console.error(err);
     rbMetrics = null;
+    ["kpi-rb-attempts", "kpi-rb-coverage", "kpi-rb-mttd", "kpi-rb-network-only", "kpi-rb-neither"]
+      .forEach((id) => rbSetText(id, "—"));
+    const noticesEl = document.getElementById("redblue-notices");
+    if (noticesEl) noticesEl.innerHTML = "";
     const message = err.status === 503
       ? "Modelo de ML ainda não foi treinado. Corre scripts/train_anomaly_model.py."
       : (err.message || "Erro ao carregar a correlação Red vs Blue.");
@@ -181,12 +210,15 @@ function rbMttdByTechnique(attempts) {
   const groups = new Map();
   (attempts || []).forEach((a) => {
     const g = groups.get(a.mitre_technique) || {
-      technique: a.mitre_technique, tactic: a.mitre_tactic, attempts: 0, detected: 0, mttds: [], items: [],
+      technique: a.mitre_technique, tactic: a.mitre_tactic, attempts: 0, fresh: 0, detected: 0, mttds: [], items: [],
     };
     g.attempts += 1;
     g.items.push(a);
-    if (a.detected) g.detected += 1;
-    if (a.mttd_seconds !== null && a.mttd_seconds !== undefined) g.mttds.push(a.mttd_seconds);
+    if (!rbIsStaleAttempt(a, RB_METRICS_HOURS)) {
+      g.fresh += 1;
+      if (a.detected) g.detected += 1;
+      if (a.mttd_seconds !== null && a.mttd_seconds !== undefined) g.mttds.push(a.mttd_seconds);
+    }
     groups.set(a.mitre_technique, g);
   });
   return [...groups.values()]
@@ -194,6 +226,7 @@ function rbMttdByTechnique(attempts) {
       technique: g.technique,
       tactic: g.tactic,
       attempts: g.attempts,
+      freshAttempts: g.fresh,
       detected: g.detected,
       avgMttd: g.mttds.length ? g.mttds.reduce((x, y) => x + y, 0) / g.mttds.length : null,
       staleAttempts: rbCountStaleAttempts(g.items, RB_METRICS_HOURS),
@@ -202,6 +235,10 @@ function rbMttdByTechnique(attempts) {
 }
 
 const RB_STALE_TITLE = "Todas as tentativas são anteriores à janela de alertas (7 dias): sem correspondência possível";
+
+function rbAttemptsLabel(total, fresh) {
+  return fresh < total ? `${total} (${fresh} na janela)` : String(total);
+}
 
 function renderBluePanel(metrics) {
   const body = document.getElementById("redblue-blue-body");
@@ -223,23 +260,23 @@ function renderBluePanel(metrics) {
   } else {
     body.innerHTML = names
       .map((name) => {
-        const b = metrics.by_scenario[name];
         const own = (metrics.attempts || []).filter((a) => a.scenario === name);
-        const stale = rbCountStaleAttempts(own, RB_METRICS_HOURS);
-        const allStale = b.attempts > 0 && own.length === b.attempts && stale === own.length;
+        const sum = rbSummarize(rbFreshAttempts(own, RB_METRICS_HOURS));
+        const total = own.length || (metrics.by_scenario[name] || {}).attempts || 0;
+        const allStale = sum.count === 0;
         const dash = "—";
         const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
         return `
         <tr${rowAttr}>
           <td>${rbCell(name)}</td>
-          <td>${b.attempts}</td>
-          <td>${allStale ? dash : rbFormatPercent(b.coverage_rate, b.attempts)}</td>
-          <td>${allStale ? dash : rbFormatSeconds(b.avg_mttd_seconds)}</td>
-          <td>${allStale ? dash : b.detected_by_rule}</td>
-          <td>${allStale ? dash : b.detected_by_ml}</td>
-          <td>${allStale ? dash : b.detected_by_both}</td>
-          <td>${allStale || !metrics.network_capture_configured ? dash : b.detected_by_network_only}</td>
-          <td>${allStale ? dash : b.detected_by_neither}</td>
+          <td>${escapeHtml(rbAttemptsLabel(total, sum.count))}</td>
+          <td>${allStale ? dash : rbFormatPercent(sum.detected / sum.count, sum.count)}</td>
+          <td>${allStale ? dash : rbFormatSeconds(sum.avgMttd)}</td>
+          <td>${allStale ? dash : sum.rule}</td>
+          <td>${allStale ? dash : sum.ml}</td>
+          <td>${allStale ? dash : sum.both}</td>
+          <td>${allStale || !metrics.network_capture_configured ? dash : sum.networkOnly}</td>
+          <td>${allStale ? dash : sum.neither}</td>
         </tr>`;
       })
       .join("");
@@ -251,13 +288,13 @@ function renderBluePanel(metrics) {
   } else {
     techBody.innerHTML = techniques
       .map((t) => {
-        const allStale = t.attempts > 0 && t.staleAttempts === t.attempts;
+        const allStale = t.freshAttempts === 0;
         const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
         return `
       <tr${rowAttr}>
         <td>${rbCell(t.technique)}</td>
         <td>${rbCell(t.tactic)}</td>
-        <td>${t.attempts}</td>
+        <td>${escapeHtml(rbAttemptsLabel(t.attempts, t.freshAttempts))}</td>
         <td>${allStale ? "—" : t.detected}</td>
         <td>${allStale ? "—" : rbFormatSeconds(t.avgMttd)}</td>
       </tr>`;
