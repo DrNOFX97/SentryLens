@@ -665,3 +665,6 @@ footer {
 .rb-badge.failed { background: #e74c3c; }
 .rb-badge.skipped { background: #7f8c8d; }
 tr.row-gap { background: #fdebd0; }
+
+tr.rb-stale { opacity: 0.6; }
+tr.rb-stale td { font-style: italic; }
