@@ -134,5 +134,48 @@ async function refreshRedBlueTab() {
   ]);
 }
 
+async function loadRedPanel() {
+  try {
+    rbAttackLog = await fetchJSON("/api/redblue/attack-log");
+    renderPanelError("#redblue-red-panel", null);
+  } catch (err) {
+    console.error(err);
+    rbAttackLog = null;
+    renderPanelError("#redblue-red-panel", err.message || "Erro ao carregar o log de ataques.");
+  }
+  renderRedPanel(rbAttackLog, rbMetrics);
+}
+
+function renderRedPanel(attackLog) {
+  const tbody = document.getElementById("redblue-attack-body");
+  if (!attackLog) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Log de ataques indisponível</td></tr>';
+    return;
+  }
+  const entries = attackLog.entries || [];
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum ataque registado em attack_log.jsonl</td></tr>';
+    return;
+  }
+  const scenarios = attackLog.scenarios || {};
+  const sorted = [...entries].sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  tbody.innerHTML = sorted
+    .map((e) => {
+      const s = scenarios[e.scenario];
+      const mitre = s ? `${s.mitre_technique} — ${s.mitre_tactic}` : null;
+      const status = String(e.status);
+      return `
+      <tr>
+        <td class="mono">${escapeHtml(formatTimestamp(e.timestamp))}</td>
+        <td>${rbCell(e.scenario)}</td>
+        <td class="mono">${rbCell(e.target)}</td>
+        <td>${rbCell(e.tool)}</td>
+        <td><span class="rb-badge ${escapeHtml(status)}">${escapeHtml(status)}</span></td>
+        <td>${rbCell(mitre)}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 refreshRedBlueTab();
 setInterval(refreshRedBlueTab, RB_REFRESH_MS);
