@@ -129,6 +129,9 @@ Dashboard cybersec/
 │   ├── wazuh_client.py          ← cliente para Manager API + Indexer API
 │   ├── event_catalog.py         ← classificação de Event IDs
 │   ├── websocket_alerts.py      ← ConnectionManager + alert_poll_loop (/ws/alerts, 10s)
+│   ├── network_detections.py    ← deteção de padrões suspeitos de rede (port scan/brute force/volume)
+│   ├── ssh_client.py            ← VMSSHClient, único ponto de SSH com a VM
+│   ├── network_monitor.py       ← parsing/buffer/poll loop de rede (/ws/network, 5s)
 │   ├── history_store.py         ← persistência JSONL (alerts.jsonl, compliance.jsonl)
 │   ├── history_index.py         ← índice SQLite sobre o histórico
 │   ├── compliance_evaluator.py / compliance_rules.yaml / org_profile.py ← motor RGPD/NIS2/AI Act
@@ -329,6 +332,9 @@ python test_with_mock.py         # classificação, /api/stats, /api/brute-force
 python test_new_panels.py        # /api/lifecycle, /api/privileges, /api/admin-activity
 python test_ml_anomalies.py      # /api/ml-anomalies
 python test_redblue.py           # correlação Red vs Blue + /api/redblue/metrics
+python test_network_detections.py # deteção de padrões suspeitos de rede
+python test_ssh_client.py         # VMSSHClient (SSH mockado)
+python test_network_monitor.py    # parsing/buffer/poll loop de rede + /ws/network
 python test_auth.py              # autenticação por API key (401/200, /docs desligado)
 python test_websocket_alerts.py  # /ws/alerts — auth por query param, _poll_once
 python test_history_store.py     # persistência JSONL de histórico
@@ -366,12 +372,14 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | GET | `/api/brute-force` | Deteção de força bruta (Event ID 4625) |
 | GET | `/api/ml-anomalies` | Deteção por Isolation Forest vs. regras — ver [docs/ML.md](docs/ML.md) |
 | GET | `/api/redblue/metrics` | Correlação Red vs Blue (Fase 11) — cobertura/MTTD por cenário de ataque — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/redblue/network` | Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — pacotes + deteções — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/export/report` | Relatório HTML autónomo (download) |
 | GET | `/api/compliance` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | Classificação NIS2 sugerida (CAE/colaboradores/faturação) |
 | GET | `/api/history/query` | Consulta o histórico via índice SQLite |
 | GET | `/api/lifecycle` \| `/api/privileges` \| `/api/admin-activity` | Ciclo de vida de contas, desvios RBAC, atividade admin |
 | WS | `/ws/alerts` | Push de alertas novos em tempo real (auth por query param) |
+| WS | `/ws/network` | Push de pacotes e deteções de rede em tempo real (Fase 11, Onda 2, auth por query param) — ver [docs/API.md](docs/API.md#-websocket-de-rede-em-tempo-real-wsnetwork) |
 | GET | `/api/system/*` | Specs, alertas, histórico e thresholds do sistema local |
 | POST | `/api/system/speedtest` | Força medição de velocidade de rede |
 

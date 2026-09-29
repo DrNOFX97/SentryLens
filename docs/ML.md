@@ -175,6 +175,60 @@ truncagem, não por falha real de deteção.
 
 **Testes:** `scripts/test_redblue.py`.
 
+### Rede como 3º método de deteção (Onda 2)
+
+`build_redblue_report()` aceita agora um parâmetro opcional
+`network_detections` (lista de deteções de
+`network_detections.detect_network_anomalies()` — port scan/brute
+force/pico de volume, a partir de metadados de pacotes capturados na VM
+Wazuh via `tshark`, ver `docs/LAB_WAZUH_HYPERV.md`). Omitido/`None`,
+`build_redblue_report()` comporta-se exatamente como na Onda 1.
+
+Cada tentativa em `attempts` ganha:
+
+```json
+{
+  "detected_by_network": true,
+  "network_detection_types": ["port_scan"],
+  "mttd_network_seconds": 4.8,
+  "coverage_gap": true
+}
+```
+
+`coverage_gap: true` significa: a rede detetou este ataque, mas o Wazuh
+(regra + ML sobre Windows Event Log) não — é a métrica principal desta
+onda. `by_scenario`/`overall` ganham `detected_by_network_only`,
+`detected_by_windows_only`, `detected_by_both_sources`,
+`detected_by_neither`.
+
+`GET /api/redblue/metrics` ganha `"network_capture_configured": bool` no
+topo da resposta.
+
+### `GET /api/redblue/network` (Fase 11, Onda 2)
+
+Snapshot do buffer de rede ao vivo (últimos ~2000 pacotes em memória, sem
+persistência no backend — a VM é a fonte de verdade, com `logrotate` a
+manter 7 dias):
+
+```json
+{
+  "configured": true,
+  "packets": [
+    {"timestamp": "2026-09-28T14:00:00+00:00", "src_ip": "192.168.1.170", "dst_ip": "192.168.1.20", "src_port": 54321, "dst_port": 3389, "protocol": "TCP", "length": 66}
+  ],
+  "detections": [
+    {"type": "port_scan", "src_ip": "192.168.1.170", "dst_ip": "192.168.1.20", "timestamp": "2026-09-28T14:00:30+00:00", "detail": {"distinct_ports": 16}}
+  ]
+}
+```
+
+`"configured": false` (com `packets`/`detections` vazios, sempre `200`)
+quando `VM_SSH_HOST` não está definido no `.env` — funcionalidade
+opcional, nunca fail-closed.
+
+**Testes:** `scripts/test_network_detections.py`, `scripts/test_ssh_client.py`,
+`scripts/test_network_monitor.py`, mais a Parte 3/4 de `scripts/test_redblue.py`.
+
 ## Nota sobre o seletor de período no painel ML
 
 O seletor de período partilhado do dashboard (7/30/90 dias) é
