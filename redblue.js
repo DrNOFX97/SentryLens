@@ -177,5 +177,94 @@ function renderRedPanel(attackLog) {
     .join("");
 }
 
+function rbMttdByTechnique(attempts) {
+  const groups = new Map();
+  (attempts || []).forEach((a) => {
+    const g = groups.get(a.mitre_technique) || {
+      technique: a.mitre_technique, tactic: a.mitre_tactic, attempts: 0, detected: 0, mttds: [], items: [],
+    };
+    g.attempts += 1;
+    g.items.push(a);
+    if (a.detected) g.detected += 1;
+    if (a.mttd_seconds !== null && a.mttd_seconds !== undefined) g.mttds.push(a.mttd_seconds);
+    groups.set(a.mitre_technique, g);
+  });
+  return [...groups.values()]
+    .map((g) => ({
+      technique: g.technique,
+      tactic: g.tactic,
+      attempts: g.attempts,
+      detected: g.detected,
+      avgMttd: g.mttds.length ? g.mttds.reduce((x, y) => x + y, 0) / g.mttds.length : null,
+      staleAttempts: rbCountStaleAttempts(g.items, RB_METRICS_HOURS),
+    }))
+    .sort((x, y) => String(x.technique).localeCompare(String(y.technique)));
+}
+
+const RB_STALE_TITLE = "Todas as tentativas são anteriores à janela de alertas (7 dias): sem correspondência possível";
+
+function renderBluePanel(metrics) {
+  const body = document.getElementById("redblue-blue-body");
+  const techBody = document.getElementById("redblue-technique-body");
+  const note = document.getElementById("redblue-blue-note");
+  note.textContent =
+    "Ações de resposta: a aplicação não regista ações de resposta (nem manuais), por isso não há nada para mostrar aqui. " +
+    "Este painel mostra apenas o que foi detetado, por que método e ao fim de quanto tempo.";
+
+  if (!metrics) {
+    body.innerHTML = '<tr><td colspan="9" class="empty-state">Correlação indisponível</td></tr>';
+    techBody.innerHTML = '<tr><td colspan="5" class="empty-state">Correlação indisponível</td></tr>';
+    return;
+  }
+
+  const names = Object.keys(metrics.by_scenario || {}).sort();
+  if (names.length === 0) {
+    body.innerHTML = '<tr><td colspan="9" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>';
+  } else {
+    body.innerHTML = names
+      .map((name) => {
+        const b = metrics.by_scenario[name];
+        const own = (metrics.attempts || []).filter((a) => a.scenario === name);
+        const stale = rbCountStaleAttempts(own, RB_METRICS_HOURS);
+        const allStale = b.attempts > 0 && own.length === b.attempts && stale === own.length;
+        const dash = "—";
+        const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
+        return `
+        <tr${rowAttr}>
+          <td>${rbCell(name)}</td>
+          <td>${b.attempts}</td>
+          <td>${allStale ? dash : rbFormatPercent(b.coverage_rate, b.attempts)}</td>
+          <td>${allStale ? dash : rbFormatSeconds(b.avg_mttd_seconds)}</td>
+          <td>${allStale ? dash : b.detected_by_rule}</td>
+          <td>${allStale ? dash : b.detected_by_ml}</td>
+          <td>${allStale ? dash : b.detected_by_both}</td>
+          <td>${allStale || !metrics.network_capture_configured ? dash : b.detected_by_network_only}</td>
+          <td>${allStale ? dash : b.detected_by_neither}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  const techniques = rbMttdByTechnique(metrics.attempts);
+  if (techniques.length === 0) {
+    techBody.innerHTML = '<tr><td colspan="5" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>';
+  } else {
+    techBody.innerHTML = techniques
+      .map((t) => {
+        const allStale = t.attempts > 0 && t.staleAttempts === t.attempts;
+        const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
+        return `
+      <tr${rowAttr}>
+        <td>${rbCell(t.technique)}</td>
+        <td>${rbCell(t.tactic)}</td>
+        <td>${t.attempts}</td>
+        <td>${allStale ? "—" : t.detected}</td>
+        <td>${allStale ? "—" : rbFormatSeconds(t.avgMttd)}</td>
+      </tr>`;
+      })
+      .join("");
+  }
+}
+
 refreshRedBlueTab();
 setInterval(refreshRedBlueTab, RB_REFRESH_MS);
