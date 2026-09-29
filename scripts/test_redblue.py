@@ -146,6 +146,10 @@ def run() -> None:
     from fastapi.testclient import TestClient
 
     os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
+    # Os casos abaixo testam o backend "sem captura de rede configurada"; fixar
+    # VM_SSH_HOST vazio antes de `import main` para não depender do scripts/.env
+    # real (load_dotenv() não sobrepõe variáveis já definidas no ambiente).
+    os.environ["VM_SSH_HOST"] = ""
 
     import main
     import ml_anomalies

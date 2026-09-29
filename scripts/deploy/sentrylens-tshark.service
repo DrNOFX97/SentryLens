@@ -7,11 +7,16 @@ After=network.target
 # `ip addr` na VM) e a lista de IPs do filtro BPF pelos IPs reais do
 # laboratório (Kali + alvos Windows) — específico de cada instalação,
 # editado à mão, não passado dinamicamente pelo backend.
+# O filtro exclui multicast/NetBIOS e as portas de infraestrutura do próprio
+# SentryLens/Wazuh (SSH, dashboard, agentes, Indexer, Manager): sem isso o
+# backend a consultar o Indexer gera ~4 GB/dia e falsos positivos de
+# brute force/port scan contra si próprio.
 ExecStart=/usr/bin/tshark -i <IFACE> -l \
-    -f "host <IP_KALI> or host <IP_ALVO1> or host <IP_ALVO2>" \
+    -f "(host <IP_KALI> or host <IP_ALVO1> or host <IP_ALVO2>) and not ether multicast and not port 137 and not port 138 and not port 22 and not port 443 and not port 1514 and not port 1515 and not port 9200 and not port 55000" \
     -T fields -E separator=, -E quote=n -E occurrence=f \
     -e frame.time_epoch -e ip.src -e ip.dst -e ip.proto -e frame.len \
-    -e tcp.srcport -e tcp.dstport -e udp.srcport -e udp.dstport
+    -e tcp.srcport -e tcp.dstport -e udp.srcport -e udp.dstport \
+    -e tcp.flags.syn -e tcp.flags.ack
 StandardOutput=append:/var/log/sentrylens/network.csv
 Restart=on-failure
 RestartSec=5

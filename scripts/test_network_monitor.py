@@ -50,6 +50,20 @@ def run_parse_tests() -> None:
     packet_udp = _parse_fields_line(linha_udp)
     check("dst_port vem de udp.dstport quando tcp vazio", packet_udp["dst_port"] == 53)
 
+    # --- formato antigo (9 colunas): sem flags -> tcp_syn/tcp_ack None ---
+    check("9 colunas (captura antiga): tcp_syn None", packet["tcp_syn"] is None and packet["tcp_ack"] is None)
+
+    # --- formato novo (11 colunas): + tcp.flags.syn, tcp.flags.ack ---
+    syn = _parse_fields_line("1758812764.0,192.168.1.170,192.168.1.20,6,60,57789,80,,,1,0")
+    check("11 colunas: SYN puro", syn is not None and syn["tcp_syn"] is True and syn["tcp_ack"] is False)
+    check("11 colunas: dst_port continua a vir de tcp.dstport", syn["dst_port"] == 80)
+    rst = _parse_fields_line("1758812764.1,192.168.1.20,192.168.1.170,6,54,80,57789,,,0,1")
+    check("11 colunas: RST/ACK (syn=0, ack=1)", rst["tcp_syn"] is False and rst["tcp_ack"] is True)
+    udp_flags = _parse_fields_line("1758812764.2,192.168.1.170,192.168.1.20,17,80,,,51820,53,,")
+    check("11 colunas: UDP sem flags fica None", udp_flags["tcp_syn"] is None and udp_flags["tcp_ack"] is None)
+    check("10 colunas (formato inválido) devolve None",
+          _parse_fields_line("1758812764.0,192.168.1.170,192.168.1.20,6,60,57789,80,,,1") is None)
+
     check("linha com campos a menos devolve None", _parse_fields_line("1,2,3") is None)
     check("linha sem ip.src devolve None", _parse_fields_line("1758812760.0,,192.168.1.20,6,66,,,,") is None)
     check("epoch inválido devolve None", _parse_fields_line("nao-e-um-numero,192.168.1.1,192.168.1.2,6,66,,,,") is None)
