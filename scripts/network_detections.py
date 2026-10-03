@@ -42,6 +42,20 @@ def _parse_timestamp(raw_timestamp: str | None) -> datetime | None:
     return parsed
 
 
+def _is_connection_attempt(packet: dict) -> bool:
+    """Um pacote conta como 'tentativa' (port_scan/brute_force) se abre uma
+    ligação: TCP com SYN e sem ACK. Respostas (RST/ACK de portas fechadas,
+    SYN+ACK de serviços abertos) e tráfego de sessões já estabelecidas não
+    contam — sem isto, o scan de um atacante gerava também um brute_force
+    invertido (alvo -> atacante) a partir dos RST de resposta. Sem flags
+    (UDP/ICMP, ou captura antiga de 9 colunas) mantém-se o comportamento
+    anterior: conta sempre."""
+    syn = packet.get("tcp_syn")
+    if syn is None:
+        return True
+    return bool(syn) and not packet.get("tcp_ack")
+
+
 def detect_network_anomalies(packets: list[dict], rules: dict = RULES) -> list[dict]:
     """Analisa a lista de pacotes já parseados e devolve as deteções
     encontradas na janela mais recente de cada regra (a janela termina no
@@ -65,7 +79,7 @@ def detect_network_anomalies(packets: list[dict], rules: dict = RULES) -> list[d
     window_start = now - timedelta(seconds=cfg["window_seconds"])
     ports_by_pair: dict[tuple, set] = {}
     for ts, p in parsed:
-        if ts < window_start or p.get("dst_port") is None:
+        if ts < window_start or p.get("dst_port") is None or not _is_connection_attempt(p):
             continue
         ports_by_pair.setdefault((p["src_ip"], p["dst_ip"]), set()).add(p["dst_port"])
     for (src_ip, dst_ip), ports in ports_by_pair.items():
@@ -80,9 +94,9 @@ def detect_network_anomalies(packets: list[dict], rules: dict = RULES) -> list[d
     window_start = now - timedelta(seconds=cfg["window_seconds"])
     counts: dict[tuple, int] = {}
     for ts, p in parsed:
-        if ts < window_start or p.get("dst_port") is None:
+        if ts < window_start or p.get("dst_port") is None or not _is_connection_attempt(p):
             continue
-        key = (p["src_ip"], p["dst_ip"], p["dst_port"])
+        key =(p["src_ip"], p["dst_ip"], p["dst_port"])
         counts[key] = counts.get(key, 0) + 1
     for (src_ip, dst_ip, dst_port), count in counts.items():
         if count >= cfg["connections"]:

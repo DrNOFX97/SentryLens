@@ -62,13 +62,27 @@ def _safe_int(raw: str) -> int | None:
         return None
 
 
+def _parse_flag(raw: str) -> bool | None:
+    """Flag TCP do tshark ("1"/"0"); vazio ou qualquer outro valor (UDP,
+    ICMP, captura antiga sem a coluna) -> None, 'desconhecido'."""
+    if raw == "1":
+        return True
+    if raw == "0":
+        return False
+    return None
+
+
 def _parse_fields_line(line: str) -> dict | None:
     """
     Faz parse de uma linha CSV produzida pelo tshark (-T fields -E
-    separator=, -E quote=n, exatamente 9 campos, na ordem:
+    separator=, -E quote=n, 11 campos, na ordem:
     frame.time_epoch,ip.src,ip.dst,ip.proto,frame.len,tcp.srcport,
-    tcp.dstport,udp.srcport,udp.dstport — ver scripts/deploy/sentrylens-tshark.service).
-    Devolve None (nunca lança) se a linha não tiver os 9 campos ou os
+    tcp.dstport,udp.srcport,udp.dstport,tcp.flags.syn,tcp.flags.ack — ver
+    scripts/deploy/sentrylens-tshark.service). Aceita também o formato
+    antigo de 9 campos (sem as duas colunas de flags), para não partir
+    capturas já gravadas no network.csv antes desta mudança: nesse caso
+    tcp_syn/tcp_ack ficam None ("flags desconhecidas"), tal como em UDP/ICMP.
+    Devolve None (nunca lança) se a linha não tiver 9 ou 11 campos ou os
     campos obrigatórios (timestamp/src_ip/dst_ip) vierem vazios/inválidos.
     Campos numéricos opcionais (portas, comprimento) que vierem presentes
     mas não-numéricos não fazem a linha inteira falhar — ficam None (ou,
@@ -76,9 +90,11 @@ def _parse_fields_line(line: str) -> dict | None:
     do batch em _poll_once.
     """
     fields = line.rstrip("\n").split(",")
-    if len(fields) != 9:
+    if len(fields) == 9:
+        fields += ["", ""]
+    elif len(fields) != 11:
         return None
-    epoch, src_ip, dst_ip, proto, length, tcp_src, tcp_dst, udp_src, udp_dst = fields
+    epoch, src_ip, dst_ip, proto, length, tcp_src, tcp_dst, udp_src, udp_dst, syn_flag, ack_flag = fields
     if not epoch or not src_ip or not dst_ip:
         return None
     try:
@@ -95,6 +111,8 @@ def _parse_fields_line(line: str) -> dict | None:
         "length": _safe_int(length) if length else 0,
         "src_port": src_port,
         "dst_port": dst_port,
+        "tcp_syn": _parse_flag(syn_flag),
+        "tcp_ack": _parse_flag(ack_flag),
     }
 
 

@@ -754,6 +754,32 @@ async def get_redblue_network():
     }
 
 
+@app.get("/api/redblue/attack-log", dependencies=_REQUIRE_API_KEY)
+async def get_redblue_attack_log():
+    """
+    Log de ataques real (attack_log.jsonl, escrito por attack_scenarios.py na
+    VM Kali) + o mapeamento MITRE de cada cenário (SCENARIOS) — o que o
+    painel Red Team da aba Red vs Blue precisa e que /api/redblue/metrics
+    não devolve (só devolve as tentativas dentro da janela de correlação,
+    e sem a ferramenta usada). Ficheiro ausente/vazio → entries: [].
+    """
+    entries = load_attack_log(ATTACK_LOG_PATH)
+    return {
+        "entries": entries,
+        "total": len(entries),
+        "scenarios": {
+            name: {
+                "description": s.description,
+                "tool": s.tool,
+                "event_ids": s.event_ids,
+                "mitre_tactic": s.mitre_tactic,
+                "mitre_technique": s.mitre_technique,
+            }
+            for name, s in SCENARIOS.items()
+        },
+    }
+
+
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
 async def export_report(hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas")):
     """
