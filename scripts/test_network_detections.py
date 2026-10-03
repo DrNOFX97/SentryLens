@@ -24,12 +24,20 @@ def check(label: str, condition: bool) -> None:
 BASE = datetime(2026, 9, 28, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def pkt(offset_seconds: float, src_ip: str, dst_ip: str, dst_port: int | None) -> dict:
+def pkt(
+    offset_seconds: float, src_ip: str, dst_ip: str, dst_port: int | None,
+    syn: bool | None = None, ack: bool | None = None, src_port: int = 50000,
+) -> dict:
     ts = BASE + timedelta(seconds=offset_seconds)
-    return {
+    packet = {
         "timestamp": ts.isoformat(), "src_ip": src_ip, "dst_ip": dst_ip,
-        "src_port": 50000, "dst_port": dst_port, "protocol": "TCP", "length": 66,
+        "src_port": src_port, "dst_port": dst_port, "protocol": "TCP", "length": 66,
     }
+    # syn/ack None = captura antiga (9 colunas), sem flags TCP -> chaves ausentes.
+    if syn is not None:
+        packet["tcp_syn"] = syn
+        packet["tcp_ack"] = bool(ack)
+    return packet
 
 
 def run() -> None:
@@ -80,6 +88,32 @@ def run() -> None:
         "limiar customizado deteta scan pequeno que o default ignoraria",
         any(d["type"] == "port_scan" for d in detect_network_anomalies(packets_small_scan, rules=custom_rules)),
     )
+
+    # --- Caso 9: scan real (200 SYN do atacante + 200 RST/ACK de resposta do alvo,
+    # captura de 2026-09-29): só o atacante é port_scan e as respostas do alvo
+    # não geram um brute_force invertido alvo -> atacante ---
+    kali, vm = "192.168.1.170", "192.168.1.143"
+    packets_real_scan = []
+    for i in range(200):
+        packets_real_scan.append(pkt(i * 0.001, kali, vm, i + 1, syn=True, ack=False, src_port=57789))
+        packets_real_scan.append(pkt(i * 0.001 + 0.0005, vm, kali, 57789, syn=False, ack=True, src_port=i + 1))
+    dets_real = detect_network_anomalies(packets_real_scan)
+    scans = [d for d in dets_real if d["type"] == "port_scan"]
+    check("scan real: um único port_scan, do atacante para o alvo",
+          len(scans) == 1 and scans[0]["src_ip"] == kali and scans[0]["dst_ip"] == vm)
+    check("scan real: 200 portas distintas contadas só pelos SYN", scans[0]["detail"]["distinct_ports"] == 200)
+    check("scan real: respostas RST/ACK do alvo não geram brute_force invertido",
+          not any(d["type"] == "brute_force" for d in dets_real))
+
+    # --- Caso 10: SYN+ACK (resposta de serviço aberto) não conta como tentativa ---
+    packets_synack = [pkt(i * 0.5, vm, kali, 40000, syn=True, ack=True) for i in range(30)]
+    check("SYN+ACK repetido não conta para brute_force",
+          not any(d["type"] == "brute_force" for d in detect_network_anomalies(packets_synack)))
+
+    # --- Caso 11: SYN puro repetido continua a ser brute_force com flags presentes ---
+    packets_syn_bf = [pkt(i * 0.5, kali, vm, 3389, syn=True, ack=False) for i in range(20)]
+    check("20 SYN à mesma porta com flags continuam a ser brute_force",
+          any(d["type"] == "brute_force" for d in detect_network_anomalies(packets_syn_bf)))
 
     print()
     if failures:

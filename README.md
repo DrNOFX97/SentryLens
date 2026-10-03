@@ -85,24 +85,46 @@ Wazuh Manager/Indexer, que já têm os alertas processados.
 
 ## Funcionalidades
 
-- Dashboard web com 9 abas — ver tabela em [Servir o frontend](#3-servir-o-frontend).
-- Classificação de 23 Event IDs do Windows Security Log em nome
+- **Dashboard web com 10 abas** — ver tabela em [Servir o frontend](#3-servir-o-frontend).
+- **Classificação de 23 Event IDs** do Windows Security Log em nome
   amigável + severidade + recomendação — ver
   [`docs/API.md`](docs/API.md#catálogo-de-event-ids-scriptsevent_catalogpy).
-- Atualização em tempo real por WebSocket (`/ws/alerts`), com fallback
-  automático para polling a cada 30s se a ligação falhar.
-- Autenticação por API key em todos os endpoints `/api/*`.
-- Persistência própria de histórico de alertas (JSONL + índice SQLite),
+
+### 🔴 Monitorização em Tempo Real — Wazuh + Wireshark
+
+- **WebSocket de alertas** (`/ws/alerts`): push imediato de alertas novos do Wazuh
+  conforme chegam, com fallback automático para polling a cada 30s se a ligação
+  falhar. Estado da ligação em tempo real no canto superior direito do dashboard.
+- **Captura de rede ao vivo** (`/ws/network`): snapshot do buffer de pacotes (SYN/ACK/data)
+  com deteção de padrões suspeitos (port scans, brute-force SSH, anomalias de volume),
+  capturado via WMI/Wireshark. Janela de 7 dias. Ver [Rede em tempo real](#-rede-em-tempo-real).
+- **Deteção de anomalias por Machine Learning** (Isolation Forest): lado a lado com
+  a classificação por regras — dois pontos de vista sobre os mesmos alertas.
+  Retreinável com `scripts/train_anomaly_model.py` — ver [Treino de ML](#-treino-de-ml).
+
+### 🎯 Correlação Red vs Blue (Fase 11)
+
+- **Aba Red vs Blue**: correlação entre log de ataques simulados e alertas reais,
+  com cobertura e MTTD por cenário de ataque e técnica MITRE. 4 painéis:
+  - **Red Team**: log de ataques (`launched`, `failed`, `skipped`)
+  - **Blue Team**: deteção por cenário, cobertura e MTTD
+  - **Rede em tempo real**: snapshot + push de pacotes e deteções (Wireshark)
+  - **Manager/Auditor**: estado do backend e agentes
+- Guia completo: [`docs/ML.md#-correlação-red-vs-blue`](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11)
+
+### Outras funcionalidades
+
+- **Autenticação por API key** em todos os endpoints `/api/*`.
+- **Persistência própria de histórico** de alertas (JSONL + índice SQLite),
   para além dos 90 dias de retenção do Wazuh Indexer.
-- Exportação de relatório HTML autónomo (`GET /api/export/report`).
-- Avaliação de conformidade regulatória (RGPD/NIS2/AI Act) por alerta.
-- Classificação NIS2 sugerida a partir de CAE/colaboradores/faturação
+- **Exportação de relatório HTML** autónomo (`GET /api/export/report`) — CSS embutido,
+  zero recursos externos.
+- **Avaliação de conformidade regulatória** (RGPD/NIS2/AI Act) por alerta.
+- **Classificação NIS2 sugerida** a partir de CAE/colaboradores/faturação
   já conhecidos (sem pesquisa automática online).
-- Deteção de anomalias por Machine Learning (Isolation Forest), lado a
-  lado com a classificação por regras.
-- Monitorização detalhada do sistema local (CPU, RAM, disco físico por
-  modelo/SSD-HDD, rede) via WMI/PowerShell.
-- Arranque automático configurado neste PC (VM + backend + frontend, ao
+- **Monitorização detalhada do sistema local** (CPU, RAM, disco físico por
+  modelo/SSD-HDD, rede, interfaces ativas) via WMI/PowerShell.
+- **Arranque automático** neste PC (VM + backend + frontend, ao
   iniciar sessão) — ver [secção dedicada](#-arranque-automático).
 
 > ⚠️ Sem distinção entre múltiplos utilizadores — a API key é
@@ -303,7 +325,7 @@ continua a existir só como *fallback*. O indicador no canto superior
 direito mostra **● ligado ao Wazuh** (verde) ou **● sem ligação**
 (vermelho, consultar a consola do browser para o erro exato).
 
-A interface está organizada em 9 abas:
+A interface está organizada em 10 abas:
 
 | Aba | Conteúdo |
 |---|---|
@@ -316,6 +338,38 @@ A interface está organizada em 9 abas:
 | 👤 **Contas Admin** | Atividade de contas administrativas — privilégios especiais, tarefas agendadas |
 | 🧠 **ML Anomalias** | Deteção por Isolation Forest lado a lado com a classificação por regras |
 | 🛡️ **Conformidade** | Veredito RGPD/NIS2/AI Act por alerta, resumo agregado, perfil da organização |
+| ⚔️ **Red vs Blue** | Correlação entre o log de ataques e os alertas (Fase 11, Onda 3) — 4 painéis, ver abaixo |
+
+A aba **⚔️ Red vs Blue** vive em `redblue.js` (não edita `app.js`; reutiliza
+os seus globais) e usa uma janela fixa de 7 dias (168 h, o máximo de
+`/api/redblue/metrics`). Tem um resumo de KPIs e 4 painéis:
+
+- **Red Team** — o log de ataques (`GET /api/redblue/attack-log`): data,
+  cenário, alvo, ferramenta, estado e técnica/tática MITRE. O log só tem os
+  estados `launched`, `failed` e `skipped`.
+- **Blue Team** — deteção por cenário e MTTD por técnica MITRE
+  (`GET /api/redblue/metrics`). Declara que a aplicação não regista ações de
+  resposta, por isso não mostra nenhuma.
+- **Rede em tempo real** — snapshot de `GET /api/redblue/network` e push por
+  `/ws/network`.
+- **Manager/Auditor** — estado do backend (`/api/health`) e agentes
+  (`/api/agents`).
+
+Em vez de números, a aba mostra estado vazio ou um aviso em três situações:
+
+1. **Sem ataques na janela** — sem tentativas nos últimos 7 dias, cobertura e
+   MTTD não se aplicam. As tentativas são construídas a partir de *todo* o
+   log, mas os alertas só são pesquisados nos últimos 7 dias; uma tentativa
+   mais antiga não pode ter correspondência, pelo que a interface mostra um
+   aviso e "—" (não 0%) para ela.
+2. **Captura de rede não configurada** — com `VM_SSH_HOST` vazio, o painel de
+   rede mostra "captura não configurada".
+3. **Modelo de ML por treinar** — aviso para correr
+   `scripts/train_anomaly_model.py`.
+
+O `serve_frontend.py` tem uma whitelist fixa de ficheiros que inclui
+`/redblue.js`; é preciso reiniciar o servidor de frontend dedicado para o
+passar a servir.
 
 ---
 
@@ -323,34 +377,134 @@ A interface está organizada em 9 abas:
 
 Sem laboratório Wazuh ligado — tudo mockado (`AsyncMock` sobre
 `WazuhIndexerClient`/`WazuhManagerClient`). Sem framework (nem pytest):
-13 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
+17 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
 por caso e sai com `sys.exit(1)` se algo falhar.
+
+### Correr todos os testes
 
 ```bash
 cd scripts
+# Abas principais do dashboard (Fase 1-6):
 python test_with_mock.py         # classificação, /api/stats, /api/brute-force
 python test_new_panels.py        # /api/lifecycle, /api/privileges, /api/admin-activity
-python test_ml_anomalies.py      # /api/ml-anomalies
-python test_redblue.py           # correlação Red vs Blue + /api/redblue/metrics
-python test_network_detections.py # deteção de padrões suspeitos de rede
-python test_ssh_client.py         # VMSSHClient (SSH mockado)
-python test_network_monitor.py    # parsing/buffer/poll loop de rede + /ws/network
 python test_auth.py              # autenticação por API key (401/200, /docs desligado)
+
+# WebSocket em tempo real:
 python test_websocket_alerts.py  # /ws/alerts — auth por query param, _poll_once
+
+# Persistência e relatórios:
 python test_history_store.py     # persistência JSONL de histórico
 python test_history_index.py     # índice SQLite + /api/history/query
+python test_report_generator.py  # gerador + /api/export/report
+
+# Monitorização do sistema:
+python test_system_monitor.py    # THRESHOLDS + /api/system/thresholds
+
+# Conformidade regulatória:
 python test_compliance.py        # motor RGPD/NIS2/AI Act + /api/compliance
 python test_nis2_lookup.py       # classificação NIS2 sugerida + /api/nis2-lookup
-python test_report_generator.py  # gerador + /api/export/report
-python test_system_monitor.py    # THRESHOLDS + /api/system/thresholds
-python test_feature_extractor.py # extração de features de ML (não usa TestClient)
+
+# Machine Learning — anomalias e treino:
+python test_ml_anomalies.py      # /api/ml-anomalies (Isolation Forest)
+python test_feature_extractor.py # extração de features para ML (não usa TestClient)
+
+# Red vs Blue + Rede em tempo real (Fase 11):
+python test_redblue.py                # correlação Red vs Blue + /api/redblue/metrics
+python test_redblue_attack_log.py     # log de ataques simulados
+python test_network_monitor.py        # captura de rede + /ws/network (Wireshark)
+python test_network_detections.py     # deteção de port scans/brute-force/anomalias
+python test_ssh_client.py             # VMSSHClient para acesso remoto
 ```
 
-Todos definem `SENTRYLENS_API_KEY` em `os.environ` **antes** de
-`import main` e fazem `main.app.router.on_startup.clear()` para não
-arrancar os loops de background. Correm no `.venv` de `scripts/` — o
-Python global desta máquina não tem `scikit-learn`/`joblib`/`PyYAML`
-instalados.
+### Particularidades
+
+- Todos definem `SENTRYLENS_API_KEY` em `os.environ` **antes** de `import main`
+- Fazem `main.app.router.on_startup.clear()` para não arrancar os loops de background
+- Correm no `.venv` de `scripts/` — o Python global desta máquina não tem
+  `scikit-learn`/`joblib`/`PyYAML` instalados
+
+---
+
+## 🧠 Treino de ML — Isolation Forest
+
+O painel **ML Anomalias** (aba 8) usa um modelo `IsolationForest` (scikit-learn)
+que é retreinado com histórico de alertas reais de ataque. O treino é manual e
+off-line — não automático.
+
+### Retreinar o modelo
+
+```bash
+cd scripts
+python train_anomaly_model.py
+```
+
+Lê histórico JSONL (`scripts/historico/`), extrai features via `feature_extractor.py`
+(contagem de tentativas, intervalo médio, desvio padrão, etc.) e guarda o modelo
+em `scripts/models/anomaly_model.pkl`.
+
+### Ciclo de validação com dados reais
+
+O projeto inclui um ciclo de teste com dados reais:
+
+1. **Definir cenários de ataque:** `scripts/attack_scenarios.py` — scanning, brute-force,
+   privilege escalation, etc. com timestamps e técnicas MITRE.
+2. **Simular ataques no laboratório** via Kali (dentro da VM ou externa) — scripts de
+   ataque, port scans, SSH brute-force, etc.
+3. **Exportar snapshot de treino:** `scripts/export_snapshot.py` — gera snapshot de época
+   (data/tipo/severidade) para treino.
+4. **Retreinar:** `python train_anomaly_model.py` com dados reais.
+5. **Correlacionar:** Aba Red vs Blue compara a cobertura (alertas detetados por ML vs.
+   regras vs. nenhum).
+
+Metodologia, features, resultados (precisão/recall/F1) e validação cruzada em
+**[`docs/ML.md`](docs/ML.md)**.
+
+> ⚠️ Primeiro ciclo com dados reais do laboratório em 2026-09-14
+> (5 cenários, 35 eventos processáveis) — amostra ainda pequena. Não é uma
+> estimativa robusta de taxa de deteção em produção.
+
+---
+
+## 📡 Rede em Tempo Real — Captura e Deteção
+
+A aba **⚔️ Red vs Blue** inclui um painel de rede que captura e analisa tráfego ao vivo.
+
+### Captura via WMI/PowerShell
+
+- **Módulo:** `scripts/network_monitor.py`
+- **Tecnologia:** WMI + `Get-NetStat` (Windows) — captura de pacotes de nível OS,
+  funciona como Wireshark ao nível de sistema local.
+- **O que captura:** SYN/ACK/data packets, estatísticas por porto/protocolo.
+- **Frequência:** a cada 20 minutos (configurável via `NETWORK_CAPTURE_INTERVAL`).
+- **Histórico:** 7 dias — janela fixa da aba Red vs Blue.
+- **Endpoints:**
+  - `GET /api/redblue/network` — snapshot do buffer ao vivo
+  - `WS /ws/network` — push em tempo real de pacotes novos e deteções
+
+### Análise de Padrões Suspeitos
+
+- **Módulo:** `scripts/network_detections.py`
+- **O que deteta:**
+  - **Port scans** — múltiplas tentativas de ligação a portos consecutivos
+  - **Brute-force SSH** — tentativas falhadas repetidas na porta 22
+  - **Anomalias de volume** — picos de tráfego acima da linha de base
+- **Integração:** marca alertas no dashboard como "detetado por rede" quando um padrão
+  suspeito corresponde a um evento de ataque no log Red vs Blue.
+
+### Configuração de SSH remoto (opcional)
+
+Para análise avançada em máquinas remotas, a captura requer uma ligação SSH com a VM:
+
+```env
+# scripts/.env
+VM_SSH_HOST=<IP_DA_VM>
+VM_SSH_PORT=22
+VM_SSH_USER=root
+VM_SSH_PRIVATE_KEY=<path para chave privada>
+```
+
+Sem SSH configurado, o painel de rede mostra "captura não configurada" e funciona
+apenas com dados locais. Validação em `test_network_monitor.py` (com SSH mockado).
 
 ---
 
@@ -372,6 +526,7 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | GET | `/api/brute-force` | Deteção de força bruta (Event ID 4625) |
 | GET | `/api/ml-anomalies` | Deteção por Isolation Forest vs. regras — ver [docs/ML.md](docs/ML.md) |
 | GET | `/api/redblue/metrics` | Correlação Red vs Blue (Fase 11) — cobertura/MTTD por cenário de ataque — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/redblue/attack-log` | Log de ataques real (`attack_log.jsonl`) + mapeamento MITRE dos cenários (Fase 11, Onda 3) — resposta: `entries`, `total`, `scenarios`; exige `X-API-Key` |
 | GET | `/api/redblue/network` | Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — pacotes + deteções — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/export/report` | Relatório HTML autónomo (download) |
 | GET | `/api/compliance` | Veredito RGPD/NIS2/AI Act por alerta |
@@ -382,26 +537,6 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | WS | `/ws/network` | Push de pacotes e deteções de rede em tempo real (Fase 11, Onda 2, auth por query param) — ver [docs/API.md](docs/API.md#-websocket-de-rede-em-tempo-real-wsnetwork) |
 | GET | `/api/system/*` | Specs, alertas, histórico e thresholds do sistema local |
 | POST | `/api/system/speedtest` | Força medição de velocidade de rede |
-
----
-
-## 5. Deteção de anomalias por Machine Learning
-
-O painel **🧠 ML Anomalias** usa um `IsolationForest` (scikit-learn)
-lado a lado com a classificação por regras, como segundo ponto de
-vista sobre os mesmos alertas.
-
-> ⚠️ Primeiro ciclo com dados reais do laboratório feito em 2026-09-14
-> (5 cenários de ataque via Kali, 35 eventos processáveis) — amostra
-> ainda pequena, não é uma estimativa robusta de taxa de deteção em
-> produção. Ver detalhe em [`docs/ML.md`](docs/ML.md).
-
-Retreinar: `cd scripts && python train_anomaly_model.py`. Metodologia,
-features, resultados (precisão/recall/F1) e o ciclo de validação com
-dados reais (`attack_scenarios.py` + `export_snapshot.py`) em
-**[`docs/ML.md`](docs/ML.md)**. A correlação Red vs Blue (Fase 11, por
-cenário de ataque) que reaproveita este modelo está documentada na
-mesma página.
 
 ---
 
