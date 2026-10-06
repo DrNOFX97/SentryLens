@@ -79,25 +79,34 @@ def run() -> None:
 
         # --- /config.js via HTTP ---
         env_file.write_text("SENTRYLENS_API_KEY=k-123\n", encoding="utf-8")
-        status, headers, body = get(port, "/config.js")
-        check("/config.js sem Sec-Fetch-Site (curl/local) -> 200", status == 200)
-        check("/config.js entrega a chave do .env", 'apiKey: "k-123"' in body)
+        status, headers, body = get(port, "/config.js", {"Sec-Fetch-Site": "same-origin"})
+        check("/config.js same-origin -> 200 com a chave do .env", status == 200 and 'apiKey: "k-123"' in body)
         check("/config.js é JavaScript", headers.get("content-type", "").startswith("application/javascript"))
         check("/config.js tem Cache-Control: no-store", headers.get("cache-control") == "no-store")
+        check("/config.js tem X-Content-Type-Options: nosniff", headers.get("x-content-type-options") == "nosniff")
 
-        status, _, body = get(port, "/config.js", {"Sec-Fetch-Site": "same-origin"})
-        check("/config.js same-origin -> 200 com chave", status == 200 and "k-123" in body)
+        # Fail-closed: sem Sec-Fetch-Site (browser antigo / curl) só passa com Referer do mesmo origin.
+        status, _, body = get(port, "/config.js")
+        check("/config.js sem Sec-Fetch-Site nem Referer -> 403 sem a chave", status == 403 and "k-123" not in body)
+        status, _, body = get(port, "/config.js", {"Referer": f"http://127.0.0.1:{port}/index.html"})
+        check("/config.js sem Sec-Fetch-Site, Referer do mesmo origin -> 200", status == 200 and "k-123" in body)
+        status, _, body = get(port, "/config.js", {"Referer": "https://evil.example.com/page"})
+        check("/config.js sem Sec-Fetch-Site, Referer de outro site -> 403", status == 403 and "k-123" not in body)
+        status, _, body = get(port, "/config.js", {"Referer": f"http://127.0.0.1:{port + 1}/"})
+        check("/config.js sem Sec-Fetch-Site, Referer de outra porta local -> 403", status == 403 and "k-123" not in body)
+        status, _, body = get(port, "/config.js", {"Sec-Fetch-Site": "cross-site", "Referer": f"http://127.0.0.1:{port}/"})
+        check("Sec-Fetch-Site cross-site prevalece sobre um Referer same-origin -> 403", status == 403)
 
         for site in ("cross-site", "same-site", "none"):
             status, _, body = get(port, "/config.js", {"Sec-Fetch-Site": site})
             check(f"/config.js com Sec-Fetch-Site={site} -> 403 sem a chave", status == 403 and "k-123" not in body)
 
         # --- Host (DNS rebinding) ---
-        status, _, body = get(port, "/config.js", {"Host": "evil.example.com"})
+        status, _, body = get(port, "/config.js", {"Host": "evil.example.com", "Sec-Fetch-Site": "same-origin"})
         check("Host não-loopback -> 421 sem a chave", status == 421 and "k-123" not in body)
         status, _, _ = get(port, "/index.html", {"Host": "evil.example.com"})
         check("Host não-loopback também recusa ficheiros estáticos", status == 421)
-        status, _, _ = get(port, "/config.js", {"Host": f"localhost:{port}"})
+        status, _, _ = get(port, "/config.js", {"Host": f"localhost:{port}", "Sec-Fetch-Site": "same-origin"})
         check("Host localhost:porta é aceite", status == 200)
 
         # --- whitelist continua intacta ---

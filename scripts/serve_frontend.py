@@ -17,10 +17,11 @@ SENTRYLENS_API_KEY de scripts/.env, para o dashboard não precisar de a ter
 colada no app.js. Como um <script src> cross-origin consegue ler globais do
 script que carrega (ao estilo JSONP), uma página maliciosa aberta noutro
 separador podia ir buscar a chave a http://127.0.0.1:5500/config.js. Por
-isso o /config.js só responde quando o browser declara Sec-Fetch-Site:
-same-origin (ou não declara nada, caso de curl/processos locais, que já
-conseguem ler o .env). Todos os pedidos com Host que não seja loopback são
-recusados (DNS rebinding).
+isso o /config.js é fail-closed: só responde com Sec-Fetch-Site:
+same-origin ou, em browsers antigos que não enviam esse cabeçalho, com um
+Referer do mesmo origin (o Host do próprio pedido). Sem nenhum dos dois —
+incluindo curl, que já pode ler o .env diretamente — recusa. Todos os
+pedidos com Host que não seja loopback são recusados (DNS rebinding).
 """
 
 import json
@@ -28,6 +29,7 @@ import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -108,9 +110,22 @@ class FrontendHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _serve_config(self):
+    def _is_same_origin_request(self) -> bool:
+        """Fail-closed. Sec-Fetch-Site não pode ser forjado por uma página
+        (é um cabeçalho proibido para JS), por isso quando existe decide
+        sozinho. Quando falta (browser antigo), só aceita um Referer cujo
+        origin seja o Host deste pedido — uma página atacante que suprima o
+        Referer (referrerpolicy=no-referrer) é recusada, não aceite."""
         site = self.headers.get("Sec-Fetch-Site")
-        if site is not None and site != "same-origin":
+        if site is not None:
+            return site == "same-origin"
+        referer = self.headers.get("Referer")
+        if not referer:
+            return False
+        return urlparse(referer).netloc == self.headers.get("Host", "")
+
+    def _serve_config(self):
+        if not self._is_same_origin_request():
             self.send_error(403, "Forbidden")
             return
         data = build_config_js(load_api_key())
@@ -118,6 +133,7 @@ class FrontendHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", CONTENT_TYPES[".js"])
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
 
