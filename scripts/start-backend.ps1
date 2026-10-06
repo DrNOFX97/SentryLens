@@ -5,8 +5,13 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PythonExe = "C:\Python314\python.exe"
+$PythonExe = Join-Path $ScriptsDir ".venv\Scripts\python.exe"
 $LogFile = Join-Path $ScriptsDir "backend.log"
+
+if (-not (Test-Path $PythonExe)) {
+    Write-Error "Python do .venv nao encontrado em '$PythonExe'. Corre 'python -m venv .venv' + 'pip install -r requirements.txt' dentro de scripts/ primeiro."
+    exit 1
+}
 
 Set-Location $ScriptsDir
 

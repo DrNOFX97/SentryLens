@@ -7,7 +7,7 @@ const API_BASE = "http://localhost:8001";
 // entregue ao browser; aceitável só porque o CORS já restringe a loopback
 // e isto é um dashboard de laboratório local, não uma app exposta à
 // internet.
-const API_KEY = "";
+const API_KEY = "";  // Preenchido manualmente em localhost (ver .env)
 
 // WebSocket de alertas em tempo real (/ws/alerts) — ver connectWebSocket()
 // mais abaixo. Autenticação vai por query param (não header) porque o
