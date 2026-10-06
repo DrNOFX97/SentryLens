@@ -177,12 +177,20 @@ def build_redblue_report(
             round((network_matches[0][0] - ts).total_seconds(), 2) if network_matches else None
         )
 
+        # A técnica/ferramenta realmente executada (quando o log as regista)
+        # prevalece sobre a do cenário: vários ataques reais partilham o
+        # mesmo cenário aproximado (Round 3 colapsou 12 técnicas em 5
+        # cenários), e atribuir-lhes a técnica do cenário reportava MITRE
+        # errado. A correspondência de alertas continua a usar os event_ids
+        # do cenário.
         attempts.append({
+            "attack_id": entry.get("id"),
             "scenario": scenario_name,
             "target": target,
+            "tool": entry.get("tool") or scenario.tool,
             "timestamp": entry.get("timestamp"),
             "mitre_tactic": scenario.mitre_tactic,
-            "mitre_technique": scenario.mitre_technique,
+            "mitre_technique": entry.get("technique") or scenario.mitre_technique,
             "detected": detected,
             "detected_by": detected_by,
             "mttd_seconds": mttd_seconds,

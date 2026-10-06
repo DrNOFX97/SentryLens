@@ -93,6 +93,17 @@ def run() -> None:
     check("caso 7: cenário desconhecido vai para unknown_scenario", len(report7["unknown_scenario"]) == 1)
     check("caso 7: cenário desconhecido não entra em attempts", report7["attempts"] == [])
 
+    # --- Caso 7b: técnica/ferramenta/id do próprio log prevalecem sobre o cenário ---
+    entry_real = attack("brute_force_rdp", "192.168.1.27", "2026-09-14T17:00:00+00:00")
+    entry_real.update({"id": 6, "technique": "T1003", "tool": "mimikatz"})
+    report7b = build_redblue_report([entry_real], [], SCENARIOS)
+    a7b = report7b["attempts"][0]
+    check("caso 7b: mitre_technique do log prevalece (T1003, não T1110)", a7b["mitre_technique"] == "T1003")
+    check("caso 7b: tool e attack_id do log expostos", a7b["tool"] == "mimikatz" and a7b["attack_id"] == 6)
+    check("caso 7b: sem technique no log cai para o cenário",
+          build_redblue_report([attack("brute_force_rdp", "192.168.1.28", "2026-09-14T18:00:00+00:00")],
+                               [], SCENARIOS)["attempts"][0]["mitre_technique"] == "T1110")
+
     # --- Caso 8: entradas vazias -> estrutura vazia bem formada, nunca lança ---
     empty_report = build_redblue_report([], [], SCENARIOS)
     check("caso 8: attempts=[] com input vazio", empty_report["attempts"] == [])
