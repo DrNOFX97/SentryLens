@@ -50,6 +50,8 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
   `attack_log_round3.jsonl`, 12/12) e `build_redblue_report` dá-lhes
   prioridade (`attack_id`, `tool`, `mitre_technique` em cada tentativa).
   A correspondência de alertas continua a usar os `event_ids` do cenário.
+- **API key fora do `app.js`:** `serve_frontend.py` serve `/config.js` gerado a
+  partir de `scripts/.env` (same-origin + Host loopback; ver `SECURITY.md`).
 - `.controls` do cabeçalho passa a quebrar linha (overflow horizontal em
   ecrãs estreitos).
 

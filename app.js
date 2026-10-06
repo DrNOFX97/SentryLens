@@ -2,12 +2,12 @@
 // Consome a API FastAPI (backend/main.py) e preenche a interface
 
 const API_BASE = "http://localhost:8001";
-// Tem de corresponder ao valor de SENTRYLENS_API_KEY em scripts/.env — ver
-// README.md para como gerar e configurar. Fica visível no código-fonte
-// entregue ao browser; aceitável só porque o CORS já restringe a loopback
-// e isto é um dashboard de laboratório local, não uma app exposta à
-// internet.
-const API_KEY = "";  // Preenchido manualmente em localhost (ver .env)
+// A chave vem de /config.js, gerado por scripts/serve_frontend.py a partir de
+// SENTRYLENS_API_KEY em scripts/.env (nunca vai para o repositório). Esse
+// endpoint só responde ao próprio origin do dashboard (ver serve_frontend.py).
+// Se config.js não existir (outro servidor estático), fica vazia e a API
+// responde 401 — o dashboard mostra "sem ligação", não falha em silêncio.
+const API_KEY = (window.SENTRYLENS_CONFIG && window.SENTRYLENS_CONFIG.apiKey) || "";
 
 // WebSocket de alertas em tempo real (/ws/alerts) — ver connectWebSocket()
 // mais abaixo. Autenticação vai por query param (não header) porque o

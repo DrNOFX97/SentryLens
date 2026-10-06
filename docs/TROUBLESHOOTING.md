@@ -18,9 +18,11 @@ seguido de `startvm ... --type headless`. Remédio de fundo: libertar
 espaço em `C:\` ou mover o armazenamento da VM para outro disco.
 
 **Erro 401 Unauthorized**
-→ `SENTRYLENS_API_KEY` não definida em `scripts/.env`, ou a constante
-`API_KEY` em `app.js` não é exatamente igual — reinicia o `uvicorn`
-depois de editar `.env` (variáveis só são lidas no arranque).
+→ `SENTRYLENS_API_KEY` não definida em `scripts/.env`, ou o frontend não está
+a ser servido por `serve_frontend.py` (só ele entrega `/config.js`, de onde o
+`app.js` lê a chave). Depois de editar `.env`: reinicia o `uvicorn` (lê o `.env`
+no arranque) e recarrega a página (o `serve_frontend.py` lê-o a cada pedido,
+não precisa de reinício).
 
 **Dashboard nunca atualiza em tempo real**
 → Handshake de WebSocket com `api_key` errado/em falta falha

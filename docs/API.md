@@ -23,7 +23,9 @@ internet.
    -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })   # PowerShell
    ```
 2. **Backend** — `SENTRYLENS_API_KEY=<key>` em `scripts/.env`.
-3. **Frontend** — mesma key na constante `API_KEY` em `app.js`.
+3. **Frontend** — automático: `scripts/serve_frontend.py` gera `/config.js` com a
+   `SENTRYLENS_API_KEY` de `scripts/.env` (só responde ao próprio origin do
+   dashboard e a Hosts de loopback). Não há nada a colar no `app.js`.
 
 **Fail-closed:** sem `SENTRYLENS_API_KEY` definida, ou com `X-API-Key`
 em falta/errado, a API devolve sempre `401`

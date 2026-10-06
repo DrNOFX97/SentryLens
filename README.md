@@ -556,7 +556,9 @@ Os 3 problemas mais comuns:
   está a correr (`uvicorn main:app --port 8001`) e que a VM Wazuh está
   ativa (`VBoxManage list runningvms`).
 - **401 Unauthorized** → `SENTRYLENS_API_KEY` não definida em
-  `scripts/.env`, ou diferente da constante `API_KEY` em `app.js`.
+  `scripts/.env`, ou o frontend não está a ser servido por `serve_frontend.py`
+  (só ele entrega `/config.js` com a chave; com `python -m http.server` o
+  `API_KEY` fica vazio).
 - **`uvicorn` falha na porta 8000** → usa `--port 8001` (ver [Nota
   sobre a porta 8000](#nota-sobre-a-porta-8000)).
 
