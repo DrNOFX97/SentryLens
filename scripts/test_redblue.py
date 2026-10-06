@@ -15,7 +15,7 @@ Correr:
 import sys
 
 from attack_scenarios import SCENARIOS
-from redblue_correlator import build_redblue_report
+from redblue_correlator import attack_windows, build_redblue_report, parse_launched_attacks
 
 failures: list[str] = []
 
@@ -103,6 +103,27 @@ def run() -> None:
     check("caso 7b: sem technique no log cai para o cenário",
           build_redblue_report([attack("brute_force_rdp", "192.168.1.28", "2026-09-14T18:00:00+00:00")],
                                [], SCENARIOS)["attempts"][0]["mitre_technique"] == "T1110")
+
+    # --- Caso 7c: helpers partilhados com incident_engine ---
+    mixed = [
+        attack("smb_enum", "192.168.1.30", "2026-09-14T19:00:30+00:00"),
+        attack("smb_enum", "192.168.1.30", "2026-09-14T19:00:00+00:00"),
+        attack("smb_enum", "192.168.1.30", "2026-09-14T19:30:00+00:00", status="skipped"),
+        attack("cenario_inexistente", "192.168.1.30", "2026-09-14T19:01:00+00:00"),
+        attack("smb_enum", "192.168.1.30", "nao-e-data"),
+        "lixo",
+    ]
+    parsed, not_exec, unknown, invalid = parse_launched_attacks(mixed, SCENARIOS)
+    check("parse_launched_attacks: 2 tentativas válidas ordenadas por tempo",
+          [e["timestamp"] for _, e in parsed] == ["2026-09-14T19:00:00+00:00", "2026-09-14T19:00:30+00:00"])
+    check("parse_launched_attacks: skipped/desconhecido/inválidos separados",
+          len(not_exec) == 1 and len(unknown) == 1 and len(invalid) == 2)
+    windows = attack_windows(parsed, 300)
+    check("attack_windows: janela do 1º cortada pelo início do 2º",
+          (windows[0][1] - windows[0][0]).total_seconds() == 30)
+    check("attack_windows: última janela tem a duração completa",
+          (windows[1][1] - windows[1][0]).total_seconds() == 300)
+    check("attack_windows: devolve a entrada original", windows[0][2] is parsed[0][1])
 
     # --- Caso 8: entradas vazias -> estrutura vazia bem formada, nunca lança ---
     empty_report = build_redblue_report([], [], SCENARIOS)

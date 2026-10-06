@@ -43,6 +43,52 @@ def _parse_timestamp(raw_timestamp: str | None) -> datetime | None:
     return parsed
 
 
+def parse_launched_attacks(attack_log: list[dict], scenarios: dict) -> tuple[list, list, list, list]:
+    """Separa o attack_log em (tentativas, not_executed, unknown_scenario,
+    invalid_entries). `tentativas` = [(datetime, entrada)] ordenadas por
+    tempo: só entradas com status "launched", cenário conhecido e timestamp
+    válido. Partilhada com incident_engine para a regra nunca divergir."""
+    parsed_attacks: list[tuple[datetime, dict]] = []
+    not_executed: list[dict] = []
+    unknown_scenario: list[dict] = []
+    invalid_entries: list[dict] = []
+    for entry in attack_log or []:
+        if not isinstance(entry, dict):
+            invalid_entries.append(entry)
+            continue
+        if entry.get("status") != "launched":
+            not_executed.append(entry)
+            continue
+        scenario_name = entry.get("scenario")
+        if scenario_name not in scenarios:
+            unknown_scenario.append(entry)
+            continue
+        ts = _parse_timestamp(entry.get("timestamp"))
+        if ts is None:
+            invalid_entries.append(entry)
+            continue
+        parsed_attacks.append((ts, entry))
+
+    parsed_attacks.sort(key=lambda item: item[0])
+    return parsed_attacks, not_executed, unknown_scenario, invalid_entries
+
+
+def attack_windows(
+    parsed_attacks: list[tuple[datetime, dict]], window_seconds: int = DEFAULT_WINDOW_SECONDS
+) -> list[tuple[datetime, datetime, dict]]:
+    """Janela de correlação de cada tentativa: `window_seconds` a partir do
+    início, cortada pelo início da tentativa seguinte (o que vier primeiro)."""
+    windows: list[tuple[datetime, datetime, dict]] = []
+    for i, (ts, entry) in enumerate(parsed_attacks):
+        window_end = ts + timedelta(seconds=window_seconds)
+        if i + 1 < len(parsed_attacks):
+            next_ts = parsed_attacks[i + 1][0]
+            if next_ts < window_end:
+                window_end = next_ts
+        windows.append((ts, window_end, entry))
+    return windows
+
+
 def build_redblue_report(
     attack_log: list[dict],
     ml_results: list[dict],
@@ -94,28 +140,9 @@ def build_redblue_report(
         detected_by_windows_only (só Windows, sem rede),
         detected_by_both_sources (as duas) e detected_by_neither (nenhuma).
     """
-    parsed_attacks: list[tuple[datetime, dict]] = []
-    not_executed: list[dict] = []
-    unknown_scenario: list[dict] = []
-    invalid_entries: list[dict] = []
-    for entry in attack_log or []:
-        if not isinstance(entry, dict):
-            invalid_entries.append(entry)
-            continue
-        if entry.get("status") != "launched":
-            not_executed.append(entry)
-            continue
-        scenario_name = entry.get("scenario")
-        if scenario_name not in scenarios:
-            unknown_scenario.append(entry)
-            continue
-        ts = _parse_timestamp(entry.get("timestamp"))
-        if ts is None:
-            invalid_entries.append(entry)
-            continue
-        parsed_attacks.append((ts, entry))
-
-    parsed_attacks.sort(key=lambda item: item[0])
+    parsed_attacks, not_executed, unknown_scenario, invalid_entries = parse_launched_attacks(
+        attack_log, scenarios
+    )
 
     parsed_alerts: list[tuple[datetime, dict]] = []
     for result in ml_results or []:
@@ -132,16 +159,10 @@ def build_redblue_report(
         parsed_network.append((ts, det))
 
     attempts: list[dict] = []
-    for i, (ts, entry) in enumerate(parsed_attacks):
+    for ts, window_end, entry in attack_windows(parsed_attacks, window_seconds):
         scenario_name = entry["scenario"]
         scenario = scenarios[scenario_name]
         target = entry.get("target")
-
-        window_end = ts + timedelta(seconds=window_seconds)
-        if i + 1 < len(parsed_attacks):
-            next_ts = parsed_attacks[i + 1][0]
-            if next_ts < window_end:
-                window_end = next_ts
 
         matches = [
             (alert_ts, result)
