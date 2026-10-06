@@ -325,7 +325,15 @@ continua a existir só como *fallback*. O indicador no canto superior
 direito mostra **● ligado ao Wazuh** (verde) ou **● sem ligação**
 (vermelho, consultar a consola do browser para o erro exato).
 
-A interface está organizada em 10 abas:
+A navegação é uma **sidebar** (Roadmap v2, R1) com grupos SOC, Red Team,
+Blue Team, Network, Wazuh, Identidade (IAM), ML, Vaccines, MITRE ATT&CK,
+Métricas, Relatórios e Sistema. Cada item é um painel real ou um marcador
+**planeado** (badge `R<n>`) que mostra "Sem dados — ainda não implementado"
+em vez de números inventados. Há deep links (`index.html#redblue`,
+`#planned:Incidentes`) e em ecrãs estreitos a sidebar abre pelo botão
+**☰ Menu**. Estado de cada fase em [docs/ROADMAP_STATUS.md](docs/ROADMAP_STATUS.md).
+
+Os painéis reais continuam a ser as 10 abas abaixo:
 
 | Aba | Conteúdo |
 |---|---|

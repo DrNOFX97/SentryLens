@@ -39,17 +39,86 @@
     </div>
   </header>
 
-  <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="overview">📊 Visão Geral</button>
-    <button class="tab-btn" data-tab="alerts">🚨 Alertas</button>
-    <button class="tab-btn" data-tab="agents">🖥️ Agentes</button>
-    <button class="tab-btn" data-tab="system">⚙️ Sistema</button>
-    <button class="tab-btn" data-tab="lifecycle">📋 Ciclo de Vida</button>
-    <button class="tab-btn" data-tab="privileges">🔑 Privilégios</button>
-    <button class="tab-btn" data-tab="admin-activity">👤 Contas Admin</button>
-    <button class="tab-btn" data-tab="ml-anomalies">🧠 ML Anomalias</button>
-    <button class="tab-btn" data-tab="compliance">🛡️ Conformidade</button>
-    <button class="tab-btn" data-tab="redblue">⚔️ Red vs Blue</button>
+  <div class="app-shell">
+    <button class="sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="false">☰ Menu</button>
+    <nav class="sidebar" id="sidebar" aria-label="Navegação principal">
+    <details class="nav-group" open>
+      <summary>Visão Geral</summary>
+      <button class="nav-item active" aria-current="page" data-tab="overview">📊 Overview</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>SOC</summary>
+      <button class="nav-item" data-tab="alerts">🚨 Alertas</button>
+      <button class="nav-item is-planned" data-planned="R3" data-label="Incidentes">🧩 Incidentes<span class="nav-badge">R3</span></button>
+      <button class="nav-item is-planned" data-planned="R3" data-label="Investigações">🔎 Investigações<span class="nav-badge">R3</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Red Team</summary>
+      <button class="nav-item" data-tab="redblue">⚔️ Red vs Blue</button>
+      <button class="nav-item is-planned" data-planned="R5" data-label="Attack Library">📚 Attack Library<span class="nav-badge">R5</span></button>
+      <button class="nav-item is-planned" data-planned="R4" data-label="Attack Registry">🗂️ Attack Registry<span class="nav-badge">R4</span></button>
+      <button class="nav-item is-planned" data-planned="R4" data-label="Attack Timeline">🕒 Attack Timeline<span class="nav-badge">R4</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Blue Team</summary>
+      <button class="nav-item is-planned" data-planned="R7" data-label="Detections">🎯 Detections<span class="nav-badge">R7</span></button>
+      <button class="nav-item is-planned" data-planned="R21" data-label="Response">🛠️ Response<span class="nav-badge">R21</span></button>
+      <button class="nav-item is-planned" data-planned="R21" data-label="Playbooks">📘 Playbooks<span class="nav-badge">R21</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Network</summary>
+      <button class="nav-item is-planned" data-planned="R6" data-label="Live Traffic">📡 Live Traffic<span class="nav-badge">R6</span></button>
+      <button class="nav-item is-planned" data-planned="R6" data-label="Network Detections">🚦 Network Detections<span class="nav-badge">R6</span></button>
+      <button class="nav-item is-planned" data-planned="R6" data-label="PCAP / Evidence">🧪 PCAP / Evidence<span class="nav-badge">R6</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Wazuh</summary>
+      <button class="nav-item" data-tab="agents">🖥️ Agentes</button>
+      <button class="nav-item is-planned" data-planned="R2" data-label="SIEM Health">❤️ SIEM Health<span class="nav-badge">R2</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Identidade (IAM)</summary>
+      <button class="nav-item" data-tab="lifecycle">📋 Ciclo de Vida</button>
+      <button class="nav-item" data-tab="privileges">🔑 Privilégios</button>
+      <button class="nav-item" data-tab="admin-activity">👤 Contas Admin</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>ML</summary>
+      <button class="nav-item" data-tab="ml-anomalies">🧠 Anomalias</button>
+      <button class="nav-item is-planned" data-planned="R9" data-label="Models">📦 Models<span class="nav-badge">R9</span></button>
+      <button class="nav-item is-planned" data-planned="R10" data-label="Training">🏋️ Training<span class="nav-badge">R10</span></button>
+      <button class="nav-item is-planned" data-planned="R9" data-label="Evaluation">📐 Evaluation<span class="nav-badge">R9</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Vaccines</summary>
+      <button class="nav-item is-planned" data-planned="R11" data-label="Candidates">💉 Candidates<span class="nav-badge">R11</span></button>
+      <button class="nav-item is-planned" data-planned="R12" data-label="Validation">✅ Validation<span class="nav-badge">R12</span></button>
+      <button class="nav-item is-planned" data-planned="R11" data-label="Approved">🏷️ Approved<span class="nav-badge">R11</span></button>
+      <button class="nav-item is-planned" data-planned="R14" data-label="Regression">🔁 Regression<span class="nav-badge">R14</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>MITRE ATT&amp;CK</summary>
+      <button class="nav-item is-planned" data-planned="R16" data-label="Coverage">🗺️ Coverage<span class="nav-badge">R16</span></button>
+      <button class="nav-item is-planned" data-planned="R16" data-label="Techniques">🧬 Techniques<span class="nav-badge">R16</span></button>
+      <button class="nav-item is-planned" data-planned="R16" data-label="Gaps">🕳️ Gaps<span class="nav-badge">R16</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Métricas</summary>
+      <button class="nav-item is-planned" data-planned="R8" data-label="MTTD / MTTR">⏱️ MTTD / MTTR<span class="nav-badge">R8</span></button>
+      <button class="nav-item is-planned" data-planned="R8" data-label="Detection Coverage">📈 Detection Coverage<span class="nav-badge">R8</span></button>
+      <button class="nav-item is-planned" data-planned="R8" data-label="Detection Rate">🎯 Detection Rate<span class="nav-badge">R8</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Relatórios</summary>
+      <button class="nav-item" data-tab="compliance">🛡️ Conformidade</button>
+      <button class="nav-item is-planned" data-planned="R19" data-label="Security Reports">📄 Security Reports<span class="nav-badge">R19</span></button>
+      <button class="nav-item is-planned" data-planned="R20" data-label="Executive">📊 Executive<span class="nav-badge">R20</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Sistema</summary>
+      <button class="nav-item" data-tab="system">⚙️ Sistema</button>
+      <button class="nav-item is-planned" data-planned="R22" data-label="Settings">🔧 Settings<span class="nav-badge">R22</span></button>
+    </details>
   </nav>
 
   <main class="container">
@@ -650,7 +719,17 @@
       </section>
     </div>
 
+    <!-- ===== Secção planeada (sem dados reais ainda) ===== -->
+    <div class="tab-content" id="tab-planned">
+      <section class="panel planned-panel">
+        <h2 id="planned-title">Secção planeada</h2>
+        <p class="empty-state">Sem dados — ainda não implementado.</p>
+        <p class="planned-note">Prevista na fase <strong id="planned-phase">R?</strong> do Roadmap v2. Esta secção só mostrará dados reais quando existir a fonte de dados correspondente (ver <code>docs/ROADMAP_STATUS.md</code>).</p>
+      </section>
+    </div>
+
   </main>
+  </div>
 
   <footer>
     <p>SentryLens — Fase 2 do projeto CET. Ligação em tempo real ao Wazuh.</p>
