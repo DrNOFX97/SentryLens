@@ -124,6 +124,7 @@ async def _poll_once(
     seen_detections: set,
     remote_path: str,
     detection_buffer: deque,
+    on_new_detections=None,
 ) -> tuple[list[dict], list[dict]]:
     """
     Uma iteração do polling: lê as linhas novas do ficheiro de captura via
@@ -172,6 +173,13 @@ async def _poll_once(
 
     detection_buffer.extend(new_detections)
 
+    if new_detections and on_new_detections is not None:
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, on_new_detections, new_detections)
+        except Exception:
+            logger.exception("Falha no callback on_new_detections")
+
     if new_detections and manager.active_connections:
         for det in new_detections:
             await manager.broadcast({"type": "network_detection", "detection": det})
@@ -186,6 +194,7 @@ async def network_poll_loop(
     remote_path: str,
     detection_buffer: deque,
     interval_seconds: int = 5,
+    on_new_detections=None,
 ) -> None:
     """Mesmo padrão de alert_poll_loop: try/except por iteração, nunca mata o loop."""
     offset_state: dict = {"offset": 0}
@@ -194,6 +203,7 @@ async def network_poll_loop(
         try:
             await _poll_once(
                 ssh_client, manager, packet_buffer, offset_state, seen_detections, remote_path, detection_buffer,
+                on_new_detections=on_new_detections,
             )
         except Exception:
             logger.exception("Falha ao fazer polling de rede para o WebSocket")

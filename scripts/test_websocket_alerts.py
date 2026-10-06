@@ -207,6 +207,34 @@ def run_poll_once_tests() -> None:
             result_3 == [] and seen_ids_2 == set(),
         )
 
+        # --- on_new_raw_alerts recebe os alertas BRUTOS novos (com _id), só quando há novos ---
+        raw_received: list = []
+        fake_raw = FakeIndexerClient([alert("r1", ts="2026-09-01T10:00:00Z"), alert("r2", ts="2026-09-01T10:01:00Z")])
+        seen_raw: set[str] = set()
+        await _poll_once(fake_raw, manager, main._enrich_alert, seen_raw, on_new_raw_alerts=raw_received.extend)
+        check("on_new_raw_alerts recebeu os 2 alertas brutos novos (com _id)",
+              [a["_id"] for a in raw_received] == ["r1", "r2"] and "@timestamp" in raw_received[0])
+        raw_received.clear()
+        await _poll_once(fake_raw, manager, main._enrich_alert, seen_raw, on_new_raw_alerts=raw_received.extend)
+        check("on_new_raw_alerts não é chamado sem alertas novos", raw_received == [])
+
+        def explode(_alerts):
+            raise RuntimeError("boom")
+
+        result_raw_err = await _poll_once(
+            FakeIndexerClient([alert("r3", ts="2026-09-01T10:02:00Z")]), manager, main._enrich_alert, set(),
+            on_new_raw_alerts=explode,
+        )
+        check("erro em on_new_raw_alerts não derruba o polling", len(result_raw_err) == 1)
+
+        enriched_received: list = []
+        await _poll_once(
+            FakeIndexerClient([alert("r4", ts="2026-09-01T10:03:00Z")]), manager, main._enrich_alert, set(),
+            on_new_alerts=enriched_received.extend,
+        )
+        check("on_new_alerts continua a receber os enriquecidos (sem _id)",
+              len(enriched_received) == 1 and "friendly_name" in enriched_received[0] and "_id" not in enriched_received[0])
+
     asyncio.run(_run())
 
 
