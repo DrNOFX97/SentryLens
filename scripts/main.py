@@ -48,12 +48,19 @@ from compliance_evaluator import evaluate_alert_compliance, load_compliance_rule
 from event_catalog import classify_alert
 from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
-from history_store import append_alert_history, append_compliance_history
+from history_store import (
+    NETWORK_EVIDENCE_MAX_LIMIT,
+    append_alert_history,
+    append_compliance_history,
+    append_network_detections_history,
+    read_network_detection_history,
+)
 from incident_engine import available_transitions, parse_timestamp as incident_engine_parse
 from incident_store import IncidentNotFound, IncidentStore, InvalidTransition
 from lifecycle import build_lifecycle_report
 from network_detections import detect_network_anomalies
 from network_monitor import NetworkConnectionManager, PACKET_BUFFER_MAX, network_poll_loop
+from network_soc import build_evidence_report, summarize_detections, summarize_packets
 from nis2_lookup import lookup_nis2_classification
 from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
@@ -343,10 +350,18 @@ def _ingest_incident_alerts(raw_alerts: list[dict]) -> None:
 
 
 def _ingest_incident_detections(detections: list[dict]) -> None:
-    """Callback de network_poll_loop (R3): agrupa deteções de rede novas em incidentes."""
+    """
+    Callback de network_poll_loop (R3/R6): agrupa deteções de rede novas em
+    incidentes e persiste-as em JSONL (R6, history_store.
+    append_network_detections_history) — resolve a dívida registada em R0
+    ("deteções de rede só existem em memória, perdem-se no restart"). Sem
+    segundo poller: reaproveita o mesmo callback que já corre a cada
+    deteção nova.
+    """
     counts = incident_ingest.ingest_network_detections(incident_store, detections, ATTACK_LOG_PATH, SCENARIOS)
     if counts["opened"] or counts["attached"]:
         logger.info("Incidentes (rede): %s", counts)
+    append_network_detections_history(detections, SENTRYLENS_HISTORY_DIR)
 
 
 @app.on_event("startup")
@@ -821,6 +836,56 @@ async def get_redblue_network():
         "detections": detect_network_anomalies(packets),
         "detection_history": list(network_detection_buffer),
     }
+
+
+@app.get("/api/network/live-traffic", dependencies=_REQUIRE_API_KEY)
+async def get_network_live_traffic():
+    """
+    Painel "Live Traffic" (R6): resumo agregado do buffer de pacotes ao
+    vivo — protocolos, "top talkers" e portas mais vistos. Mesma fonte que
+    /api/redblue/network ("packets"), sem reimplementar a captura; só
+    sumariza. Sem VM_SSH_HOST -> configured=False com zeros/listas vazias,
+    nunca 500.
+    """
+    packets = list(packet_buffer) if vm_ssh_client is not None else []
+    return {"configured": vm_ssh_client is not None, **summarize_packets(packets)}
+
+
+@app.get("/api/network/detections", dependencies=_REQUIRE_API_KEY)
+async def get_network_detections_panel():
+    """
+    Painel "Network Detections" (R6): deteções "agora" (recomputadas sobre
+    a janela curta mais recente do buffer) vs histórico acumulado desde o
+    arranque — mesma fonte de dados que /api/redblue/network
+    ("detections"/"detection_history"), resumida para um painel dedicado.
+    """
+    if vm_ssh_client is None:
+        return {"configured": False, **summarize_detections([], [])}
+    packets = list(packet_buffer)
+    return {
+        "configured": True,
+        **summarize_detections(detect_network_anomalies(packets), list(network_detection_buffer)),
+    }
+
+
+@app.get("/api/network/evidence", dependencies=_REQUIRE_API_KEY)
+async def get_network_evidence(
+    date: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="AAAA-MM-DD; omitido = hoje (UTC)"),
+    limit: int = Query(100, ge=1, le=NETWORK_EVIDENCE_MAX_LIMIT),
+):
+    """
+    Painel "PCAP / Evidence" (R6): lê as deteções de rede já persistidas em
+    JSONL (history_store.append_network_detection_history, ligado ao
+    callback on_new_detections de network_poll_loop) — resolve a dívida de
+    R0 ("deteções de rede só existem em memória"). Nunca é uma captura
+    PCAP/payload real — ver network_soc.build_evidence_report e a nota
+    fixa na própria resposta. Independente de VM_SSH_HOST: lê ficheiro,
+    pode ter dados de uma sessão anterior mesmo com a captura desligada
+    agora. `limit` é sempre capeado no servidor (<=500), independentemente
+    do que o pedido pedir.
+    """
+    entries = read_network_detection_history(SENTRYLENS_HISTORY_DIR, date_str=date, limit=limit)
+    return build_evidence_report(entries, configured=vm_ssh_client is not None)
 
 
 @app.get("/api/redblue/attack-log", dependencies=_REQUIRE_API_KEY)
