@@ -8,14 +8,22 @@ contagens) a alertas e incidentes — nunca cópias de payloads.
 
 Não reimplementa parsing nem janelas: usa parse_launched_attacks e
 build_redblue_report. Nunca lança exceção sobre dados malformados.
+
+Excepção à regra "sem I/O" (R5): expected_detection() consulta
+attack_library.get_expected_sensors() para o default por cenário em vez de
+reimplementar esse mapeamento aqui (fonte única de verdade). Isso é leitura
+de um ficheiro já carregado em cache por load_attack_library() no arranque do
+backend (ver main.py) — nunca toca em rede/relógio, e DEFAULT_EXPECTED
+continua como rede de segurança para um cenário sem entrada na biblioteca.
 """
 
 import re
 
+from attack_library import get_expected_sensors
 from redblue_correlator import DEFAULT_WINDOW_SECONDS, build_redblue_report, parse_launched_attacks
 
 EXPECTED_SOURCES = ("rule", "ml", "network")
-DEFAULT_EXPECTED = ("rule", "ml")
+DEFAULT_EXPECTED = ("rule", "ml")  # rede de segurança: cenário sem entrada na Attack Library (R5)
 VERDICTS = ("detected", "partial", "not_detected", "unknown")
 UNKNOWN_OPERATOR = "unknown"
 MAX_FIELD_LEN = 64
@@ -47,13 +55,16 @@ def normalize_attack_id(raw) -> int | None:
 
 def expected_detection(entry: dict) -> tuple[list[str], str]:
     """(fontes esperadas, origem). O log pode trazer `expected`; valores fora
-    da allowlist são descartados; sem nenhum válido usa-se o default do cenário."""
+    da allowlist são descartados; sem nenhum válido usa-se o default do
+    cenário — vindo da Attack Library (R5) quando o cenário lá tiver entrada,
+    senão o DEFAULT_EXPECTED fixo (cenário novo ainda não documentado)."""
     raw = entry.get("expected")
     if isinstance(raw, list):
         valid = [s for s in EXPECTED_SOURCES if s in raw]
         if valid:
             return valid, "log"
-    return list(DEFAULT_EXPECTED), "scenario_default"
+    library_default = get_expected_sensors(entry.get("scenario") or "")
+    return (library_default or list(DEFAULT_EXPECTED)), "scenario_default"
 
 
 def achieved_sources(attempt: dict) -> list[str]:
