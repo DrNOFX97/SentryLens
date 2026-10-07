@@ -803,3 +803,12 @@ tr.rb-stale td { font-style: italic; }
 .atk-timeline li::before { content: ""; position: absolute; left: -19px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: var(--cyan-600); }
 .atk-timeline li.empty-state::before { display: none; }
 .atk-timeline time { font-family: var(--font-mono); color: #888; margin-right: 6px; }
+
+/* ===== Attack Library (Roadmap v2, R5) ===== */
+.alib-risk { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e0e6ea; color: var(--ink-900); }
+.alib-risk-low { background: #d4efdf; }
+.alib-risk-medium { background: #fdecc8; }
+.alib-risk-high { background: #f8d7da; }
+.alib-replayable { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.alib-replayable-yes { background: #d4efdf; }
+.alib-replayable-no { background: #e0e0e0; color: #666; }

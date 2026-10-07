@@ -55,7 +55,7 @@
     <details class="nav-group" open>
       <summary>Red Team</summary>
       <button class="nav-item" data-tab="redblue">⚔️ Red vs Blue</button>
-      <button class="nav-item is-planned" data-planned="R5" data-label="Attack Library">📚 Attack Library<span class="nav-badge">R5</span></button>
+      <button class="nav-item" data-tab="attack-library">📚 Attack Library</button>
       <button class="nav-item" data-tab="attack-registry">🗂️ Attack Registry</button>
       <button class="nav-item" data-tab="attack-timeline">🕒 Attack Timeline</button>
     </details>
@@ -790,6 +790,59 @@
       </section>
     </div>
 
+    <!-- ===== Attack Library (Roadmap v2, R5) ===== -->
+    <div class="tab-content" id="tab-attack-library">
+      <section class="panel" id="attack-library-panel">
+        <h2>📚 Attack Library</h2>
+        <p class="panel-note">
+          Catálogo de referência dos cenários de ataque do laboratório (técnica/ferramenta/Event IDs,
+          risco, pré-requisitos, sensores esperados e passos de limpeza). Só leitura — não lança nada;
+          lançar um cenário continua a fazer-se manualmente com <code>attack_scenarios.py</code> na Kali.
+        </p>
+        <div class="filter-row">
+          <label for="alib-risk-filter">Risco:</label>
+          <select id="alib-risk-filter">
+            <option value="">Todos</option>
+            <option value="low">Baixo</option>
+            <option value="medium">Médio</option>
+            <option value="high">Alto</option>
+          </select>
+          <label for="alib-sensor-filter">Sensor esperado:</label>
+          <select id="alib-sensor-filter">
+            <option value="">Todos</option>
+            <option value="rule">Regra</option>
+            <option value="ml">ML</option>
+            <option value="network">Rede</option>
+          </select>
+        </div>
+        <div id="alib-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="alib-table">
+            <thead>
+              <tr>
+                <th>Cenário</th><th>Nome</th><th>MITRE</th><th>Ferramenta</th>
+                <th>Risco</th><th>Sensores esperados</th><th>Replayable</th><th>Duração</th>
+              </tr>
+            </thead>
+            <tbody id="alib-body">
+              <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="attack-library-detail-panel" hidden>
+        <h2 id="alib-detail-title">Cenário</h2>
+        <div id="alib-detail-meta" class="inc-meta"></div>
+        <h3>Pré-requisitos</h3>
+        <p id="alib-detail-prereqs"></p>
+        <h3>Passos de limpeza</h3>
+        <ul class="atk-evidence" id="alib-detail-cleanup"></ul>
+        <h3>Replayable</h3>
+        <p id="alib-detail-replayable"></p>
+      </section>
+    </div>
+
     <!-- ===== Attack Registry / Attack Timeline (Roadmap v2, R4) ===== -->
     <div class="tab-content" id="tab-attack-registry">
       <section class="panel" id="attack-registry-panel">
@@ -918,5 +971,6 @@
   <script src="incidents.js"></script>
   <script src="live_soc.js"></script>
   <script src="attack_registry.js"></script>
+  <script src="attack_library.js"></script>
 </body>
 </html>
