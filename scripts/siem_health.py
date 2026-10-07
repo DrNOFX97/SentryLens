@@ -9,6 +9,8 @@ Nunca inventa números: componente em baixo -> campos dependentes a None.
 from datetime import datetime, timezone
 
 WINDOW_MINUTES = 5
+ALERTS_FETCH_SIZE = 500
+STALE_AFTER_SECONDS = 300
 
 
 def parse_wazuh_timestamp(value) -> datetime | None:
@@ -46,10 +48,19 @@ def build_siem_health_report(
     indexer_error: str | None,
     now: datetime | None = None,
     window_minutes: int = WINDOW_MINUTES,
+    fetch_size: int = ALERTS_FETCH_SIZE,
 ) -> dict:
     """
-    agents_summary/manager_error: resultado do Manager OU o erro (um dos dois).
-    alerts/indexer_error: alertas crus recentes do Indexer OU o erro.
+    agents_summary/manager_error: resultado do Manager OU um código de erro
+    estável (ex. "timeout", "unreachable") — nunca texto cru de exceção, que
+    pode revelar host/URL/portas.
+    alerts/indexer_error: alertas crus recentes do Indexer (os `fetch_size`
+    MAIS RECENTES, ordenados desc) OU o código de erro.
+
+    Campos agregados: `status` ok|degraded|down (HTTP 200 não significa
+    saudável); `stale` = Indexer ok mas sem alerta há mais de
+    STALE_AFTER_SECONDS (ou nenhum na última hora) -> degraded; `truncated` =
+    o Indexer devolveu o limite pedido, logo a taxa é um mínimo (>=).
     """
     now = now or datetime.now(timezone.utc)
     manager_ok = manager_error is None and agents_summary is not None
@@ -62,7 +73,10 @@ def build_siem_health_report(
     lag = None
     per_minute = None
     in_window = None
+    truncated = False
+    stale = False
     if indexer_ok:
+        truncated = len(alerts) >= fetch_size
         stamps = [t for t in (parse_wazuh_timestamp(a.get("@timestamp")) for a in alerts) if t]
         if stamps:
             newest = max(stamps)
@@ -70,9 +84,20 @@ def build_siem_health_report(
             lag = max(0.0, (now - newest).total_seconds())
         in_window = sum(1 for t in stamps if 0 <= (now - t).total_seconds() <= window_minutes * 60)
         per_minute = round(in_window / window_minutes, 2)
+        stale = lag is None or lag > STALE_AFTER_SECONDS
+
+    if not manager_ok and not indexer_ok:
+        status = "down"
+    elif not manager_ok or not indexer_ok or stale:
+        status = "degraded"
+    else:
+        status = "ok"
 
     return {
         "generated_at": now.isoformat(),
+        "status": status,
+        "stale": stale,
+        "truncated": truncated,
         "manager": manager,
         "indexer": indexer,
         "agents": _agents_block(agents_summary) if manager_ok else None,

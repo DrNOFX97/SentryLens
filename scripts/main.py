@@ -31,6 +31,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8")
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
@@ -56,7 +57,7 @@ from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
 from redblue_correlator import build_redblue_report
 from report_generator import generate_html_report, render_compliance_section
-from siem_health import build_siem_health_report
+from siem_health import ALERTS_FETCH_SIZE, build_siem_health_report
 from ssh_client import VMSSHClient
 from system_monitor import (
     THRESHOLDS,
@@ -393,6 +394,14 @@ async def get_agents():
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Manager: {e}")
 
 
+def _siem_error_code(component: str, exc: Exception) -> str:
+    """Código estável para o cliente; o detalhe (pode ter host/URL) só vai para o log."""
+    logging.getLogger("sentrylens.siem_health").warning(
+        "Falha ao contactar %s: %s: %s", component, type(exc).__name__, exc
+    )
+    return "timeout" if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)) else "unreachable"
+
+
 @app.get("/api/siem/health", dependencies=_REQUIRE_API_KEY)
 async def get_siem_health():
     """
@@ -405,12 +414,12 @@ async def get_siem_health():
     try:
         agents_summary = await manager_client.get_agents_summary()
     except Exception as e:
-        manager_error = str(e) or type(e).__name__
+        manager_error = _siem_error_code("Manager", e)
     alerts, indexer_error = None, None
     try:
-        alerts = await indexer_client.get_recent_alerts(hours=1, size=500)
+        alerts = await indexer_client.get_recent_alerts(hours=1, size=ALERTS_FETCH_SIZE)
     except Exception as e:
-        indexer_error = str(e) or type(e).__name__
+        indexer_error = _siem_error_code("Indexer", e)
     return build_siem_health_report(agents_summary, manager_error, alerts, indexer_error)
 
 
