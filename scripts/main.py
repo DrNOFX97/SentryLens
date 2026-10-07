@@ -56,6 +56,7 @@ from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
 from redblue_correlator import build_redblue_report
 from report_generator import generate_html_report, render_compliance_section
+from siem_health import build_siem_health_report
 from ssh_client import VMSSHClient
 from system_monitor import (
     THRESHOLDS,
@@ -390,6 +391,27 @@ async def get_agents():
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Manager: {e}")
+
+
+@app.get("/api/siem/health", dependencies=_REQUIRE_API_KEY)
+async def get_siem_health():
+    """
+    Saúde do SIEM (R2): estado Manager/Indexer, agentes, atraso de ingestão e
+    taxa de alertas. Cada componente é consultado em separado — se um estiver
+    em baixo, responde 200 com esse componente "unavailable" e os campos
+    dependentes a null (nunca números inventados).
+    """
+    agents_summary, manager_error = None, None
+    try:
+        agents_summary = await manager_client.get_agents_summary()
+    except Exception as e:
+        manager_error = str(e) or type(e).__name__
+    alerts, indexer_error = None, None
+    try:
+        alerts = await indexer_client.get_recent_alerts(hours=1, size=500)
+    except Exception as e:
+        indexer_error = str(e) or type(e).__name__
+    return build_siem_health_report(agents_summary, manager_error, alerts, indexer_error)
 
 
 @app.get("/api/alerts", dependencies=_REQUIRE_API_KEY)
