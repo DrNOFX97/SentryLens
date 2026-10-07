@@ -1,0 +1,74 @@
+# Attack Library (R5) - catalogo de REFERENCIA, so leitura. Nunca e executado.
+#
+# Chave = scenario_name de attack_scenarios.SCENARIOS (event_ids, tecnica MITRE
+# e ferramenta vem de la; nao se repetem aqui). Campos obrigatorios por entrada:
+#   name, description, risk (low|medium|high, decidido a mao), prerequisites,
+#   expected_sensors (subconjunto de rule|ml|network), cleanup_steps (lista de
+#   FRASES descritivas - nunca comandos prontos a executar), replayable (bool),
+#   replayable_reason, duration_estimate (seconds|minutes).
+# Coerencia imposta pelo validador: replayable=false nunca e risk low; risk low
+# exige pelo menos um passo de cleanup. Sem IPs reais nem credenciais (so
+# 192.0.2.x / 203.0.113.x se for mesmo preciso um exemplo).
+
+brute_force_rdp:
+  name: "Força bruta de RDP"
+  description: "Tentativas de autenticação RDP com dicionário de passwords contra o alvo."
+  risk: medium
+  prerequisites: "Alvo com RDP exposto; sem credenciais prévias; wordlist disponível na máquina atacante."
+  expected_sensors: [rule, ml]
+  cleanup_steps:
+    - "Desbloquear a conta atacada se a política de bloqueio a tiver bloqueado."
+    - "Registar no relatório do exercício o intervalo de tempo da tentativa para distinguir de tráfego legítimo."
+  replayable: true
+  replayable_reason: "Não altera estado persistente; cada corrida é independente (apenas pode bloquear a conta temporariamente)."
+  duration_estimate: minutes
+
+smb_enum:
+  name: "Enumeração de partilhas SMB"
+  description: "Enumeração de partilhas SMB do alvo (leitura, sem alterar estado)."
+  risk: low
+  prerequisites: "Alvo com SMB acessível pela rede; não requer credenciais."
+  expected_sensors: [rule, ml]
+  cleanup_steps:
+    - "Nada a reverter no alvo; confirmar apenas que não ficaram sessões SMB abertas."
+  replayable: true
+  replayable_reason: "Só leitura; o resultado não depende de corridas anteriores."
+  duration_estimate: seconds
+
+blank_password_check:
+  name: "Verificação de password em branco"
+  description: "Verificação de sessão nula / password em branco no SMB do alvo."
+  risk: low
+  prerequisites: "Alvo com SMB acessível pela rede; não requer credenciais."
+  expected_sensors: [rule, ml]
+  cleanup_steps:
+    - "Nada a reverter no alvo; se alguma sessão ficou aberta, terminá-la."
+  replayable: true
+  replayable_reason: "Só tenta autenticar; cada corrida é independente."
+  duration_estimate: seconds
+
+lateral_movement_schtasks:
+  name: "Movimento lateral por tarefa agendada"
+  description: "Pós-comprometimento: cria uma tarefa agendada no alvo via SMB com credenciais válidas."
+  risk: high
+  prerequisites: "Requer utilizador e password válidos com privilégios administrativos (cenário pós-comprometimento); sem eles o cenário é saltado."
+  expected_sensors: [rule, ml]
+  cleanup_steps:
+    - "Remover a tarefa agendada de laboratório criada no alvo (apagá-la pelo agendador de tarefas)."
+    - "Confirmar que a tarefa já não consta na lista de tarefas agendadas do alvo."
+  replayable: false
+  replayable_reason: "A tarefa criada persiste no alvo; uma nova corrida colide com a anterior até o cleanup ser feito."
+  duration_estimate: seconds
+
+account_lockout_spray:
+  name: "Password spraying com bloqueio de conta"
+  description: "Password spraying com password errada para forçar o bloqueio da conta de teste."
+  risk: medium
+  prerequisites: "Conta de teste existente no alvo e política de bloqueio ativa; a conta fica bloqueada no fim."
+  expected_sensors: [rule, ml]
+  cleanup_steps:
+    - "Desbloquear a conta de teste que ficou bloqueada."
+    - "Repor o contador de tentativas falhadas da conta, se o exercício o exigir."
+  replayable: false
+  replayable_reason: "Se a conta já estiver bloqueada pela corrida anterior, a nova corrida não produz o mesmo efeito até o cleanup (desbloqueio) ser feito."
+  duration_estimate: seconds

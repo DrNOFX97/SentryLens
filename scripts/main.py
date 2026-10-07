@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, StringConstraints
 import incident_ingest
 import ml_anomalies
 from admin_activity import build_admin_activity_report
+from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
 from attack_registry import build_attack_registry, summarize as summarize_attacks
 from attack_scenarios import SCENARIOS
 from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
@@ -108,6 +109,12 @@ ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", os.path.join(os.path.dirname(__file__),
 # Caminho do log de ataques da VM Kali (ver attack_scenarios.py), usado
 # pelo endpoint /api/redblue/metrics (Fase 11).
 ATTACK_LOG_PATH = os.getenv("ATTACK_LOG_PATH", os.path.join(os.path.dirname(__file__), "attack_log.jsonl"))
+
+# Attack Library (R5): catálogo de referência só-leitura (scripts/attack_library.yaml).
+# Validação fail-fast e síncrona no arranque — um YAML inválido/incoerente
+# impede o processo de arrancar em vez de servir uma biblioteca corrompida
+# (ver attack_library.py e docs/superpowers/specs/2026-10-07-r5-attack-library-design.md).
+load_attack_library()
 
 # SSH para a VM Wazuh (Fase 11, Onda 2) — só usado pela captura de rede via
 # tshark. Funcionalidade opcional: sem VM_SSH_HOST definido,
@@ -1075,6 +1082,31 @@ async def get_attack(attack_id: Annotated[str, Path(pattern=r"^[0-9]{1,9}$")]):
         attack = min(matches, key=lambda a: incident_engine_parse(a["timestamp"]) or datetime.max.replace(tzinfo=timezone.utc))
         return {"attack": attack, "correlation": correlation, "incidents_available": incidents_available}
     raise HTTPException(status_code=404, detail="Ataque não encontrado")
+
+
+# ---------------------------------------------------------------------------
+# Attack Library (Roadmap v2, R5) — ver docs/superpowers/specs/2026-10-07-r5-attack-library-design.md
+# Catálogo de referência só-leitura: nunca lança ataques, nenhum campo contém
+# um comando executável. Só GET — sem rotas de escrita nesta fase.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/attack-library", dependencies=_REQUIRE_API_KEY)
+async def list_attack_library():
+    """Catálogo de ataques do laboratório (metadata editorial + MITRE/Event IDs
+    já existentes em attack_scenarios.SCENARIOS). Só leitura."""
+    return build_attack_library()
+
+
+@app.get("/api/attack-library/{library_id}", dependencies=_REQUIRE_API_KEY)
+async def get_attack_library_item(
+    library_id: Annotated[str, Path(pattern=ATTACK_LIBRARY_ID_RE.pattern)],
+):
+    """Detalhe de uma entrada da biblioteca pelo id (= scenario_name). 404 com
+    código estável se não existir."""
+    entry = get_attack_library_entry(library_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="entry_not_found")
+    return entry
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
