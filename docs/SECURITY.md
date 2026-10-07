@@ -22,7 +22,38 @@
 - `scripts/.env`, `models/`, `historico/`, `attack_log.jsonl` fora do git.
 - `attack_scenarios.py` redige passwords nos logs de comando.
 - `/api/attacks*` (R4) é só leitura, sem path nem ficheiro vindos do cliente: `{id}` valida-se com `^[0-9]{1,9}$`, `technique` com regex, o log lê-se sempre de `ATTACK_LOG_PATH`; erros viram códigos estáveis (`indexer_unavailable`...) e o detalhe só vai para o log do servidor. `operator`/`source` são texto livre do log: o frontend escapa-os e a API limpa controlos e trunca a 64 caracteres. Não há rota POST: forjar ataques falsearia cobertura/MTTD.
-- Cada ataque lançado é registado com timestamp/target. **Não** está imposto em código que o target seja do laboratório (`--target` aceita qualquer valor): é convenção — allowlist de targets prevista em R4/R5.
+- **Allowlist de alvos (R5), fail-closed, imposta em `attack_scenarios.py`**
+  (único lugar que lança ataques — o backend nunca executa nada, ver abaixo):
+  por omissão só loopback e os blocos de documentação RFC 5737/3849/4291
+  (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`) são
+  aceites; qualquer outro alvo (ex. um IP real do laboratório `192.168.x.x`)
+  é recusado com uma mensagem clara, sem lançar nada. Allowlist real via
+  `ATTACK_TARGETS_PATH` (ou `scripts/attack_targets.json`, gitignored) a
+  partir de `attack_targets.example.json` (só IPs de documentação); ficheiro
+  configurado ilegível/inválido é erro, nunca ignorado em silêncio. Hostnames
+  nunca são resolvidos (evita TOCTOU/DNS): só entram se constarem
+  explicitamente em `allowed_hosts`. `--allow-any-target` é o override
+  explícito para quem sabe que o alvo é do laboratório. **Compatibilidade**:
+  isto é uma mudança de comportamento — qualquer fluxo anterior que já
+  apontasse `--target` para um IP real do laboratório (`192.168.x.x`) passa a
+  ser recusado por omissão a partir desta versão; usa
+  `ATTACK_TARGETS_PATH`/`attack_targets.json` ou `--allow-any-target` para
+  continuar a lançar contra esse alvo. Testes em `test_attack_targets.py`.
+- **Attack Library (R5)**: catálogo de referência só-leitura
+  (`scripts/attack_library.yaml`), nunca um executor — estruturalmente, não só
+  por convenção: (1) só rotas `GET`, sem `POST`/`PUT`/`DELETE` nesta fase nem
+  previstas (uma eventual execução a partir do dashboard é uma fase própria,
+  com o seu próprio desenho de autorização/allowlist/auditoria, fora de
+  âmbito aqui); (2) o YAML nunca contém uma `list[str]` pronta para
+  `subprocess.run` nem um comando shell montado, só `cleanup_steps` em prosa —
+  os comandos reais continuam só em `attack_scenarios.py::build_command`;
+  (3) a API desta fase serve apenas o que está no YAML + os campos
+  MITRE/ferramenta/Event IDs já existentes em `SCENARIOS`, nunca
+  `build_command`/argv. `{id}` valida-se com `^[a-z_]{1,64}$`; 404 devolve o
+  código estável `entry_not_found`. Sem IPs/credenciais reais no YAML
+  (confirmado por inspeção: só texto descritivo). Validação de schema
+  fail-fast e síncrona no arranque do backend: um YAML inválido/incoerente
+  impede o processo de arrancar em vez de servir uma biblioteca corrompida.
 
 ## Riscos conhecidos
 

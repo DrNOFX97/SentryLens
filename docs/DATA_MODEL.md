@@ -38,7 +38,49 @@ cada pedido. Campos em [API.md](API.md#️-attack-registry-r4). Regras:
 é `detected` (todas as fontes esperadas viram), `partial`, `not_detected` ou
 `unknown` (correlação indisponível, ou sem correspondência com alertas truncados:
 `actual.correlation_reason = "alerts_truncated"`). Ataques sem `id` têm `id: null` e não
-ligam a incidentes; ids duplicados levam `duplicate_id: true`.
+ligam a incidentes; ids duplicados levam `duplicate_id: true`. Desde a R5,
+`expected.detection` sem `expected` no log vem de
+`attack_library.get_expected_sensors(scenario)` (a biblioteca, ver abaixo);
+`["rule","ml"]` fica como rede de segurança só para um cenário sem entrada lá.
+
+## Biblioteca de ataques (R5)
+
+`scripts/attack_library.yaml` (versionado, editorial) — uma entrada por
+`scenario_name` de `attack_scenarios.SCENARIOS`:
+
+```yaml
+brute_force_rdp:
+  name: "Força bruta de RDP"
+  description: "Tentativas de autenticação RDP com dicionário de passwords contra o alvo."
+  risk: medium
+  prerequisites: "Alvo com RDP exposto; sem credenciais prévias; wordlist disponível na máquina atacante."
+  expected_sensors: [rule, ml]
+  cleanup_steps:
+    - "Desbloquear a conta atacada se a política de bloqueio a tiver bloqueado."
+  replayable: true
+  replayable_reason: "Não altera estado persistente; cada corrida é independente (...)."
+  duration_estimate: minutes
+```
+
+Campos obrigatórios por entrada: `name, description, risk (low|medium|high),
+prerequisites, expected_sensors[] (⊂ rule|ml|network), cleanup_steps[]
+(frases descritivas, nunca comandos/argv), replayable (bool),
+replayable_reason, duration_estimate (seconds|minutes)`.
+`attack_library.load_attack_library()` junta cada entrada com os campos já
+existentes em `SCENARIOS` (`event_ids`, `mitre_tactic`, `mitre_technique`,
+`tool`) — o YAML não os repete. Resposta de `GET /api/attack-library[/{id}]`
+= a entrada combinada + `id` (= `scenario_name`). Nunca expõe
+`build_command`/argv.
+
+**Validação (fail-fast, síncrona, no arranque do backend)**: campo
+obrigatório em falta, `risk`/`duration_estimate` fora da taxonomia,
+`expected_sensors` fora de `rule|ml|network`, técnica MITRE (herdada de
+`SCENARIOS`) fora do formato `Txxxx`/`Txxxx.xxx`, entrada no YAML sem par em
+`SCENARIOS` → erro, processo não arranca. Cenário em `SCENARIOS` sem entrada
+no YAML → aviso não-bloqueante (stderr), o arranque continua. Incoerências
+risco/replayable/cleanup (decisão do utilizador, R5): `risk: low` com
+`replayable: false`, ou `risk: low` com `cleanup_steps` vazio, são erros de
+validação — o risco em si continua decidido à mão por entrada, não calculado.
 
 ## Alerta enriquecido — `main._enrich_alert`
 

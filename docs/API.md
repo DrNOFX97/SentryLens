@@ -311,6 +311,54 @@ incidentes falhar. Exemplo ilustrativo (IPs de documentação):
 
 **Testes:** `scripts/test_attack_registry.py`.
 
+## 📚 Attack Library (R5)
+
+Catálogo de referência dos cenários de ataque do laboratório
+(`scripts/attack_library.yaml`, editorial, versionado), combinado em memória
+com `attack_scenarios.SCENARIOS` (técnica/tática MITRE, ferramenta, Event
+IDs — não duplicados no YAML). Só leitura: não existe nenhuma rota que lance
+um ataque; lançar continua a ser `attack_scenarios.py`, manual, na Kali.
+Ambas as rotas exigem `X-API-Key`. Validação fail-fast no arranque do
+backend: um `attack_library.yaml` em falta, mal formado ou incoerente impede
+o processo de arrancar (ver [SECURITY.md](SECURITY.md)).
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/attack-library` | — | `{entries[], total}` | 401 |
+| GET | `/api/attack-library/{id}` | `id`: `^[a-z_]{1,64}$` (= `scenario_name`) | Uma entrada | 401, 404 (`entry_not_found`), 422 (id malformado) |
+
+Cada entrada: `id, name, description, mitre_tactic, mitre_technique, tool,
+event_ids[], risk (low|medium|high), prerequisites, expected_sensors[]
+(⊂ rule|ml|network), cleanup_steps[] (frases descritivas, nunca comandos),
+replayable (bool), replayable_reason, duration_estimate
+(seconds|minutes)`. Detalhes em
+[DATA_MODEL.md](DATA_MODEL.md#biblioteca-de-ataques-r5). Nenhum campo expõe
+um comando executável (`build_command`/argv) — ver
+[SECURITY.md](SECURITY.md).
+
+Exemplo ilustrativo:
+
+```json
+{"id": "brute_force_rdp", "name": "Força bruta de RDP",
+ "description": "Tentativas de autenticação RDP com dicionário de passwords contra o alvo.",
+ "mitre_tactic": "Credential Access", "mitre_technique": "T1110", "tool": "hydra",
+ "event_ids": [4625, 4740], "risk": "medium",
+ "prerequisites": "Alvo com RDP exposto; sem credenciais prévias; wordlist disponível na máquina atacante.",
+ "expected_sensors": ["rule", "ml"],
+ "cleanup_steps": ["Desbloquear a conta atacada se a política de bloqueio a tiver bloqueado.", "..."],
+ "replayable": true, "replayable_reason": "Não altera estado persistente; cada corrida é independente (...).",
+ "duration_estimate": "minutes"}
+```
+
+Integração com a R4: `attack_registry.expected_detection()` usa
+`attack_library.get_expected_sensors(scenario_name)` como o default de
+"esperado" quando o `attack_log` não trouxer `expected` próprio — mesmo
+contrato observável de `/api/attacks` (campo `expected.source =
+"scenario_default"`), só muda a fonte do default (antes fixo no código,
+agora a biblioteca).
+
+**Testes:** `scripts/test_attack_library.py`.
+
 ## Tabela de endpoints
 
 | Method | Endpoint | Parâmetros principais | Descrição |
@@ -328,6 +376,8 @@ incidentes falhar. Exemplo ilustrativo (IPs de documentação):
 | POST | `/api/incidents/{id}/notes` | `{text}` | Acrescenta nota à timeline (R3) |
 | POST | `/api/incidents/backfill` | `{days}` | Importa o histórico do Indexer (R3) |
 | GET | `/api/export/report` | `hours` | Relatório HTML autónomo (download) |
+| GET | `/api/attack-library` | — | Catálogo de referência dos cenários de ataque (R5) |
+| GET | `/api/attack-library/{id}` | — | Detalhe de uma entrada da biblioteca (R5) |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | `cae_principal` (obrig.), `cae_secundarios`, `nipc`, `colaboradores`, `faturacao_eur`, `excecao_conhecida` | Classificação NIS2 sugerida |
 | GET | `/api/history/query` | `date_from`, `date_to`, `severity`, `rgpd_estado`, `nis2_estado`, `ai_act_estado`, `limit` (máx. 1000) | Consulta o histórico via índice SQLite |
