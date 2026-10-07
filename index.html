@@ -56,8 +56,8 @@
       <summary>Red Team</summary>
       <button class="nav-item" data-tab="redblue">⚔️ Red vs Blue</button>
       <button class="nav-item is-planned" data-planned="R5" data-label="Attack Library">📚 Attack Library<span class="nav-badge">R5</span></button>
-      <button class="nav-item is-planned" data-planned="R4" data-label="Attack Registry">🗂️ Attack Registry<span class="nav-badge">R4</span></button>
-      <button class="nav-item is-planned" data-planned="R4" data-label="Attack Timeline">🕒 Attack Timeline<span class="nav-badge">R4</span></button>
+      <button class="nav-item" data-tab="attack-registry">🗂️ Attack Registry</button>
+      <button class="nav-item" data-tab="attack-timeline">🕒 Attack Timeline</button>
     </details>
     <details class="nav-group" open>
       <summary>Blue Team</summary>
@@ -790,6 +790,78 @@
       </section>
     </div>
 
+    <!-- ===== Attack Registry / Attack Timeline (Roadmap v2, R4) ===== -->
+    <div class="tab-content" id="tab-attack-registry">
+      <section class="panel" id="attack-registry-panel">
+        <h2>🗂️ Attack Registry</h2>
+        <p class="panel-note">
+          Ataques lançados (log da Kali), o que se esperava detetar e o que foi realmente detetado
+          (regra, ML, rede), com os incidentes ligados. Só dados reais; sem correlação disponível
+          o veredito é «Desconhecido», nunca «Não detetado».
+        </p>
+        <section class="kpi-grid" id="atk-kpi-grid">
+          <div class="card"><h3>Ataques</h3><div class="value" id="kpi-atk-total">—</div></div>
+          <div class="card"><h3>Detetados</h3><div class="value" id="kpi-atk-detected">—</div></div>
+          <div class="card"><h3>Parciais</h3><div class="value" id="kpi-atk-partial">—</div></div>
+          <div class="card critical"><h3>Não detetados</h3><div class="value" id="kpi-atk-missed">—</div></div>
+        </section>
+        <div class="filter-row">
+          <label for="atk-status-filter">Veredito:</label>
+          <select id="atk-status-filter">
+            <option value="">Todos</option>
+            <option value="detected">Detetado</option>
+            <option value="partial">Parcial</option>
+            <option value="not_detected">Não detetado</option>
+            <option value="unknown">Desconhecido</option>
+          </select>
+          <label for="atk-technique-filter">Técnica MITRE:</label>
+          <input id="atk-technique-filter" type="text" maxlength="9" placeholder="T1110" autocomplete="off">
+        </div>
+        <div id="atk-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="attacks-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Hora</th><th>Cenário</th><th>MITRE</th><th>Ferramenta</th>
+                <th>Alvo</th><th>Operador</th><th>Esperado</th><th>Real</th><th>Incidentes</th>
+              </tr>
+            </thead>
+            <tbody id="attacks-body">
+              <tr><td colspan="10" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="attack-detail-panel" hidden>
+        <h2 id="atk-detail-title">Ataque</h2>
+        <div id="atk-detail-error" class="panel-error-banner" hidden></div>
+        <div id="atk-detail-meta" class="inc-meta"></div>
+        <h3>Esperado vs real</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Fonte</th><th>Esperada</th><th>Observada</th></tr></thead>
+            <tbody id="atk-detail-compare"></tbody>
+          </table>
+        </div>
+        <h3>Evidência (referências)</h3>
+        <ul class="atk-evidence" id="atk-detail-evidence"></ul>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-attack-timeline">
+      <section class="panel" id="attack-timeline-panel">
+        <h2>🕒 Attack Timeline</h2>
+        <p class="panel-note">
+          Linha temporal dos ataques lançados (mais antigo primeiro), com o veredito esperado vs real.
+          Usa os filtros do Attack Registry e a janela do seletor de período.
+        </p>
+        <ol class="atk-timeline" id="atk-timeline">
+          <li class="empty-state">A carregar...</li>
+        </ol>
+      </section>
+    </div>
+
     <!-- ===== Live SOC (Roadmap v2, R2): feed ao vivo + saude do SIEM ===== -->
     <div class="tab-content" id="tab-live-soc">
       <section class="panel">
@@ -845,5 +917,6 @@
   <script src="redblue.js"></script>
   <script src="incidents.js"></script>
   <script src="live_soc.js"></script>
+  <script src="attack_registry.js"></script>
 </body>
 </html>

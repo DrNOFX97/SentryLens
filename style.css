@@ -786,3 +786,20 @@ tr.rb-stale td { font-style: italic; }
 .ls-banner-degraded { background: #b9770e; }
 .ls-banner-down { background: #c0392b; }
 .ls-banner-wait { background: #7f8c8d; }
+
+/* ===== Attack Registry / Timeline (Roadmap v2, R4) ===== */
+.atk-row { cursor: pointer; }
+.atk-row:hover, .atk-row.selected { background: #eef7f9; }
+.atk-row:focus-visible { outline: 2px solid var(--cyan-600); outline-offset: -2px; }
+.atk-verdict { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e0e6ea; color: var(--ink-900); }
+.atk-verdict-detected { background: #d4efdf; }
+.atk-verdict-partial { background: #fdecc8; }
+.atk-verdict-not_detected { background: #f8d7da; }
+.atk-verdict-unknown { background: #e0e0e0; color: #666; }
+#atk-technique-filter { padding: 6px 8px; border: 1px solid #ccd3d8; border-radius: 6px; font: inherit; width: 8em; max-width: 100%; }
+.atk-evidence { margin: 8px 0 0; padding-left: 20px; font-size: 14px; overflow-wrap: anywhere; }
+.atk-timeline { list-style: none; margin: 8px 0 0; padding: 0 0 0 12px; border-left: 2px solid #ccd3d8; font-size: 14px; }
+.atk-timeline li { position: relative; padding: 8px 0 8px 12px; border-bottom: 1px solid #eee; overflow-wrap: anywhere; }
+.atk-timeline li::before { content: ""; position: absolute; left: -19px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: var(--cyan-600); }
+.atk-timeline li.empty-state::before { display: none; }
+.atk-timeline time { font-family: var(--font-mono); color: #888; margin-right: 6px; }
