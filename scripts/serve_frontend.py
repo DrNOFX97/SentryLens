@@ -45,6 +45,7 @@ ALLOWED_FILES = {
     "/live_soc.js": "live_soc.js",
     "/attack_registry.js": "attack_registry.js",
     "/attack_library.js": "attack_library.js",
+    "/network_soc.js": "network_soc.js",
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",

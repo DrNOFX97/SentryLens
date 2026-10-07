@@ -67,9 +67,9 @@
     </details>
     <details class="nav-group" open>
       <summary>Network</summary>
-      <button class="nav-item is-planned" data-planned="R6" data-label="Live Traffic">📡 Live Traffic<span class="nav-badge">R6</span></button>
-      <button class="nav-item is-planned" data-planned="R6" data-label="Network Detections">🚦 Network Detections<span class="nav-badge">R6</span></button>
-      <button class="nav-item is-planned" data-planned="R6" data-label="PCAP / Evidence">🧪 PCAP / Evidence<span class="nav-badge">R6</span></button>
+      <button class="nav-item" data-tab="live-traffic">📡 Live Traffic</button>
+      <button class="nav-item" data-tab="network-detections">🚦 Network Detections</button>
+      <button class="nav-item" data-tab="pcap-evidence">🧪 PCAP / Evidence</button>
     </details>
     <details class="nav-group" open>
       <summary>Wazuh</summary>
@@ -675,6 +675,10 @@
       <section class="panel" id="redblue-network-panel">
         <h2>🌐 Rede em Tempo Real</h2>
         <p class="panel-note" id="redblue-network-note">A carregar...</p>
+        <p class="panel-note">Este painel é a vista de correlação (pacotes do buffer + deteções recomputadas,
+          a mesma fonte usada por <code>/api/redblue/metrics</code>). Para resumos dedicados e para o histórico
+          persistido de deteções (sobrevive a um restart do backend), ver as abas
+          <strong>Network → Live Traffic / Network Detections / PCAP Evidence</strong> na sidebar.</p>
         <section class="kpi-grid">
           <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="kpi-rb-packets">—</div></div>
           <div class="card"><h3>Deteções Atuais</h3><div class="value" id="kpi-rb-detections">—</div></div>
@@ -946,6 +950,91 @@
       </section>
     </div>
 
+    <!-- ===== Network SOC: Live Traffic / Network Detections / PCAP Evidence (Roadmap v2, R6) ===== -->
+    <div class="tab-content" id="tab-live-traffic">
+      <section class="panel" id="live-traffic-panel">
+        <h2>📡 Live Traffic</h2>
+        <p class="panel-note" id="nst-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="nst-total">—</div></div>
+          <div class="card"><h3>Janela (início)</h3><div class="value ls-small" id="nst-window-start">—</div></div>
+          <div class="card"><h3>Janela (fim)</h3><div class="value ls-small" id="nst-window-end">—</div></div>
+        </section>
+        <h3 class="rb-subtitle">Protocolos</h3>
+        <div class="table-scroll">
+          <table id="nst-protocol-table">
+            <thead><tr><th>Protocolo</th><th>Pacotes</th></tr></thead>
+            <tbody id="nst-protocol-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <h3 class="rb-subtitle">Top talkers (origem)</h3>
+        <div class="table-scroll">
+          <table id="nst-talkers-table">
+            <thead><tr><th>IP de origem</th><th>Pacotes</th></tr></thead>
+            <tbody id="nst-talkers-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <h3 class="rb-subtitle">Portas de destino mais vistas</h3>
+        <div class="table-scroll">
+          <table id="nst-ports-table">
+            <thead><tr><th>Porta</th><th>Pacotes</th></tr></thead>
+            <tbody id="nst-ports-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-network-detections">
+      <section class="panel" id="network-detections-panel">
+        <h2>🚦 Network Detections</h2>
+        <p class="panel-note" id="nsd-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Deteções Agora</h3><div class="value" id="nsd-live-count">—</div></div>
+          <div class="card"><h3>Deteções Acumuladas</h3><div class="value" id="nsd-history-count">—</div></div>
+        </section>
+        <h3 class="rb-subtitle">Por tipo</h3>
+        <div class="table-scroll">
+          <table id="nsd-bytype-table">
+            <thead><tr><th>Tipo</th><th>Ocorrências</th></tr></thead>
+            <tbody id="nsd-bytype-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <h3 class="rb-subtitle">Mais recentes (até 50)</h3>
+        <div class="table-scroll">
+          <table id="nsd-recent-table">
+            <thead><tr><th>Data</th><th>Tipo</th><th>Origem</th><th>Destino</th><th>Detalhe</th></tr></thead>
+            <tbody id="nsd-recent-body"><tr><td colspan="5" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-pcap-evidence">
+      <section class="panel" id="pcap-evidence-panel">
+        <h2>🧪 PCAP / Evidence</h2>
+        <p class="panel-note" id="nse-disclaimer">A carregar...</p>
+        <div class="filter-row">
+          <label for="nse-date-filter">Dia (AAAA-MM-DD):</label>
+          <input id="nse-date-filter" type="text" maxlength="10" placeholder="hoje" autocomplete="off">
+          <label for="nse-limit-filter">Limite:</label>
+          <select id="nse-limit-filter">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+          <button id="nse-reload-btn" type="button">Atualizar</button>
+        </div>
+        <div id="nse-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="nse-table">
+            <thead><tr><th>Data</th><th>Hora</th><th>Tipo</th><th>Origem</th><th>Destino</th><th>Detalhe</th></tr></thead>
+            <tbody id="nse-body"><tr><td colspan="6" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
     <!-- ===== Secção planeada (sem dados reais ainda) ===== -->
     <div class="tab-content" id="tab-planned">
       <section class="panel planned-panel">
@@ -972,5 +1061,6 @@
   <script src="live_soc.js"></script>
   <script src="attack_registry.js"></script>
   <script src="attack_library.js"></script>
+  <script src="network_soc.js"></script>
 </body>
 </html>
