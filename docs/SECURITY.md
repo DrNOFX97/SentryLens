@@ -54,6 +54,23 @@
   (confirmado por inspeção: só texto descritivo). Validação de schema
   fail-fast e síncrona no arranque do backend: um YAML inválido/incoerente
   impede o processo de arrancar em vez de servir uma biblioteca corrompida.
+- **Network SOC (R6)**: as 3 rotas novas (`/api/network/live-traffic`,
+  `/api/network/detections`, `/api/network/evidence`) são `GET`, exigem
+  `X-API-Key`, e não expõem nada que `/api/redblue/network` (Fase 11) já não
+  expusesse — mesmos IPs/portas dos pacotes capturados, já públicos a quem
+  tem a API key. `GET /api/network/evidence` nunca devolve mais de 500
+  entradas: `limit` é validado por `Query(..., ge=1, le=500)` em `main.py` **e**
+  capeado outra vez dentro de `history_store.read_network_detection_history`
+  (não confia só no parâmetro HTTP) — impede um pedido de forçar a leitura
+  de um ficheiro de evidência arbitrariamente grande. `date` é validado por
+  regex (`^\d{4}-\d{2}-\d{2}$`) antes de tocar no filesystem, e
+  `history_file_path`/`datetime.strptime` rejeitam datas malformadas sem
+  construir um path fora do diretório esperado — sem risco de path
+  traversal. A evidência persistida é só metadados (tipo/origem/destino/
+  detalhe) — nunca payload, nunca um dump PCAP real (confirmado por leitura
+  de `network_monitor._parse_fields_line`: só 11 campos de cabeçalho
+  tshark); `payload_capture: false` é sempre explícito na resposta, nunca
+  implícito.
 
 ## Riscos conhecidos
 

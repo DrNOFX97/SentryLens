@@ -19,7 +19,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R3 | Gestão de incidentes | ✅ | Incidentes automáticos (alertas Wazuh + rede), estados, timeline, backfill, painel |
 | R4 | Attack Registry | ✅ | `attack_registry.py` + `GET /api/attacks[/{id}]` (esperado vs real, operador, evidência por referência, incidentes ligados); painéis Attack Registry e Attack Timeline (`attack_registry.js`) |
 | R5 | Attack Library | ✅ | `attack_library.py` + `scripts/attack_library.yaml` + `GET /api/attack-library[/{id}]` (catálogo de risco/pré-requisitos/sensores esperados/cleanup/replayable, combinado com `attack_scenarios.SCENARIOS`); painel `attack_library.js`; allowlist de alvos fail-closed em `attack_scenarios.py` |
-| R6 | Network SOC | 🟡 | `network_monitor.py`, `network_detections.py`; falta PCAP/evidência |
+| R6 | Network SOC | ✅ | `network_monitor.py`, `network_detections.py` + `network_soc.py` (R6): 3 painéis reais (`GET /api/network/live-traffic[/detections/evidence]`); deteções de rede persistidas em JSONL (`history_store.append_network_detection_history`, resolve a dívida de R0); "PCAP/Evidence" é evidência de metadados, não PCAP real (sem payload capturado — ver `SECURITY.md`/`DATA_MODEL.md`) |
 | R7 | Detection Engine (`DetectionEvent`) | ⬜ | Hoje 3 detetores independentes unidos só no correlator; base para `DetectionEvent` nos incidentes (R3) |
 | R8 | MTTD / MTTR / métricas | 🟡 | MTTD existe em `redblue_correlator`; falta MTTR, FP/FN, definição formal; tempo até à 1.ª resposta já calculado nos incidentes |
 | R9 | ML Intelligence | 🟡 | Isolation Forest + `feature_extractor` partilhado; falta model registry e avaliação |
@@ -65,9 +65,13 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
   loops e estado global; `@app.on_event("startup")` deprecated.
 - Confirmar que a API key que esteve no histórico git foi rodada.
 - Incidentes (R3): a janela de 10 min (`INCIDENT_GAP_SECONDS`) pode fundir ataques
-  distintos ao mesmo ativo; deteções de rede só existem em memória (ficam fora do
+  distintos ao mesmo ativo; deteções de rede **agora persistidas em JSONL desde o
+  arranque do backend** (R6, `historico/.../AAAA-MM-DD-network-detections.jsonl`)
+  — mas o backfill de incidentes continua a não as reimportar retroativamente de
+  dias anteriores ao arranque (só consome a partir de agora, como o resto do
   backfill); o autor das ações manuais é fixo (`analyst`).
 - Live SOC (R2): saúde do SIEM só pesquisa a última hora (sem alertas -> `stale`); taxa limitada aos 500 alertas mais recentes (`truncated` -> "≥"); Manager e Indexer são consultados em série (até ~30 s se ambos em timeout).
 - Numeração: os planos antigos usam "Fase N"; este roadmap usa "R<n>".
 - Attack Registry (R4): só lê o log (sem rota de escrita; operador/esperado só à nascença via `attack_scenarios.py --operator/--source/--expect`); ataques sem `id` não ligam a incidentes; o esperado por omissão vem agora da Attack Library (R5) em vez de um default fixo no código (mesmo valor hoje, `["rule","ml"]`, por cenário); janela de alertas até 720 h e teto de 1000 alertas (`alerts_truncated`: ataques sem correspondência ficam `unknown`).
 - Attack Library (R5): só leitura, catálogo estático (`attack_library.yaml`); nenhuma automação liga `cleanup_steps` a uma execução real (ficam como checklist para o operador); sem versionamento de schema do YAML; risco (`low/medium/high`) decidido à mão por entrada, não calculado (a validação só rejeita incoerências flagrantes risco/replayable/cleanup); allowlist de alvos de `attack_scenarios.py` é fail-closed mas só cobre IPs/hostnames — não impede um alvo de documentação configurado incorretamente como "real" por engano; `attack_log_round3.jsonl` (achado lateral, formato antigo sem campo `scenario`) não é coberto pela biblioteca — ver ROUND3 em `.superpowers/sdd/r5-report.md`.
+- Network SOC (R6): "PCAP/Evidence" é evidência de metadados das deteções (JSONL), nunca uma exportação PCAP/payload real — `network_monitor.py` só captura cabeçalhos tshark, não há payload para exportar (ruling explícito na spec, não uma lacuna por fazer); o JSONL de deteções cresce sem rotação/purga automática (mesma política — ou ausência dela — de `historico/` hoje); evidência só pagina "últimas N de um dia" (sem offset/paginação por página), suficiente para o laboratório mas não para consultar meses de histórico de uma vez; sem índice SQLite dedicado (ficou em JSONL simples, como os alertas antes de `history_index.py` — candidato a usar o mesmo padrão se o volume justificar).

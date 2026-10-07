@@ -91,6 +91,35 @@ windows_event_id, friendly_name, severity, category, recommendation, full_log`.
 
 `type (port_scan|brute_force|volume_spike), src_ip, dst_ip, timestamp, detail`.
 
+## Network SOC (R6) — `network_soc.py` + persistência de deteções
+
+Três resumos puros sobre os mesmos dados de `network_monitor.py`/
+`network_detections.py` (pacotes capturados via tshark/SSH, deteções de
+padrão), sem reimplementar captura nem deteção:
+
+- `summarize_packets(packets)` → `{total, window_start, window_end,
+  by_protocol{}, top_talkers[{src_ip, packets}] (top 10), top_ports[{port,
+  packets}] (top 10)}` — painel "Live Traffic".
+- `summarize_detections(live, history)` → `{live_count, history_count,
+  by_type{}, recent[] (até 50, mais recente primeiro)}` — painel "Network
+  Detections".
+- `build_evidence_report(entries, configured)` → `{configured, entries[],
+  total, payload_capture: false, note}` — painel "PCAP / Evidence".
+
+**Persistência das deteções** (`history_store.py`, resolve a dívida de R0
+"deteções de rede só existem em memória"):
+`historico/AAAA/MM-mês/AAAA-MM-DD-network-detections.jsonl`, JSONL
+append-only, mesmo padrão de `AAAA-MM-DD-alerts.jsonl`. Cada linha:
+`{date, time, type, src_ip, dst_ip, detail}` — metadados só, nunca payload.
+Escrita por `append_network_detection(s)_history`, ligada ao callback
+`on_new_detections` que `network_poll_loop` já chama (sem segundo poller).
+Leitura por `read_network_detection_history(base_dir, date_str=None,
+limit=100)` — `limit` sempre capeado a `NETWORK_EVIDENCE_MAX_LIMIT` (500),
+dia inválido/ficheiro ausente/linha malformada → `[]`/ignorada, nunca
+exceção. **Nunca é uma captura PCAP real**: `network_monitor._parse_fields_line`
+só lê 11 campos de cabeçalho exportados pelo tshark (timestamps, IPs,
+portas, protocolo, flags TCP) — não há payload capturado para exportar.
+
 ## Incidente (R3)
 
 Base `scripts/incidents.sqlite3` (`INCIDENTS_DB_PATH`, fora do git). Três tabelas:

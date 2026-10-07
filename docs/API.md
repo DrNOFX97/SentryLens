@@ -359,6 +359,45 @@ agora a biblioteca).
 
 **Testes:** `scripts/test_attack_library.py`.
 
+## 📡 Network SOC (R6)
+
+Três painéis dedicados de rede (sidebar: Live Traffic / Network Detections /
+PCAP Evidence), que reaproveitam os dados já recolhidos por
+`network_monitor.py`/`network_detections.py` — a mesma fonte que
+`GET /api/redblue/network` — sem reimplementar a captura. Módulo puro:
+`scripts/network_soc.py`. Todas `GET`, exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/network/live-traffic` | — | `{configured, total, window_start, window_end, by_protocol{}, top_talkers[], top_ports[]}` | 401 |
+| GET | `/api/network/detections` | — | `{configured, live_count, history_count, by_type{}, recent[]}` | 401 |
+| GET | `/api/network/evidence` | `date` (`AAAA-MM-DD`, opcional, default hoje UTC), `limit` (1–500, default 100) | `{configured, entries[], total, payload_capture: false, note}` | 401, 422 (`date`/`limit` fora do formato/intervalo) |
+
+`configured: false` (sem `VM_SSH_HOST`) devolve 200 com zeros/listas vazias
+nas duas primeiras rotas — nunca 500. `top_talkers`/`top_ports` são capados
+a 10 entradas, `recent` a 50 — nunca a lista completa do buffer.
+
+`GET /api/network/evidence` lê deteções de rede **já persistidas** em JSONL
+(`history_store.append_network_detection_history`, ligado ao mesmo callback
+que já alimenta os incidentes — sem segundo poller) — resolve a dívida
+registada em R0 ("deteções de rede só existem em memória, perdem-se no
+restart"). Independente de `VM_SSH_HOST`: continua a devolver dados de uma
+sessão anterior mesmo com a captura desligada agora. **Nunca é uma captura
+PCAP/payload real** — `payload_capture` é sempre `false` e `note` explica
+porquê (`network_monitor.py` só lê cabeçalhos tshark, nunca o conteúdo dos
+pacotes); ver [DATA_MODEL.md](DATA_MODEL.md) e
+[SECURITY.md](SECURITY.md). `limit` é sempre capeado no servidor (≤500),
+mesmo que o pedido peça mais.
+
+Frontend: `network_soc.js` (padrão `attack_registry.js`/`incidents.js`) —
+cada painel só pede dados com a sua aba ativa e o separador visível, sem
+abrir um 2º WebSocket. O painel de rede da aba Red vs Blue (`redblue.js`,
+`GET /api/redblue/network`) continua a existir tal como está — é a vista de
+correlação ao vivo que alimenta `/api/redblue/metrics` — com uma nota de
+link cruzado para estas 3 abas.
+
+**Testes:** `scripts/test_network_soc.py`.
+
 ## Tabela de endpoints
 
 | Method | Endpoint | Parâmetros principais | Descrição |
@@ -376,6 +415,9 @@ agora a biblioteca).
 | POST | `/api/incidents/{id}/notes` | `{text}` | Acrescenta nota à timeline (R3) |
 | POST | `/api/incidents/backfill` | `{days}` | Importa o histórico do Indexer (R3) |
 | GET | `/api/export/report` | `hours` | Relatório HTML autónomo (download) |
+| GET | `/api/network/live-traffic` | — | Resumo do buffer de pacotes ao vivo (R6) |
+| GET | `/api/network/detections` | — | Deteções "agora" vs histórico acumulado (R6) |
+| GET | `/api/network/evidence` | `date`, `limit` (≤500) | Deteções de rede persistidas em JSONL (R6) |
 | GET | `/api/attack-library` | — | Catálogo de referência dos cenários de ataque (R5) |
 | GET | `/api/attack-library/{id}` | — | Detalhe de uma entrada da biblioteca (R5) |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |

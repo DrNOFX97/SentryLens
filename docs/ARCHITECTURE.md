@@ -20,7 +20,7 @@ vive em módulos puros que recebem dados já obtidos (testáveis sem Wazuh):
 | Ingestão Wazuh | `wazuh_client.py`, `event_catalog.py` |
 | Painéis | `lifecycle.py`, `rbac.py`, `admin_activity.py`, `compliance_evaluator.py` |
 | Red/Blue | `attack_scenarios.py`, `redblue_correlator.py`, `attack_registry.py` (R4, puro), `attack_library.py` (R5, catálogo só-leitura) |
-| Rede | `network_monitor.py`, `network_detections.py` |
+| Rede | `network_monitor.py`, `network_detections.py`, `network_soc.py` (R6, resumos puros para os painéis dedicados) |
 | ML | `feature_extractor.py` (partilhado treino/inferência), `ml_anomalies.py`, `train_anomaly_model.py` |
 | Persistência | `history_store.py` (JSONL), `history_index.py` (SQLite) |
 | Incidentes | `incident_engine.py` (puro), `incident_store.py`, `incident_ingest.py` |
@@ -37,7 +37,7 @@ não há `DetectionEvent` comum (R7).
 Estático, sem build. `index.html` tem a sidebar (grupos → itens). Cada item
 com `data-tab="x"` mostra `#tab-x`; itens `is-planned` (`data-planned="R<n>"`)
 mostram `#tab-planned` com "Sem dados". `app.js` expõe `activateTab(name)` e
-usa o hash da URL para deep links. `attack_registry.js` (R4) serve os itens Attack Registry e Attack Timeline (um só pedido a `/api/attacks`, só com a aba visível). `attack_library.js` (R5) serve o item Attack Library: um só pedido a `/api/attack-library` por ativação da aba (catálogo estático, não depende do período selecionado), filtros por risco/sensor aplicados em memória. `redblue.js` reutiliza os globais de `app.js`.
+usa o hash da URL para deep links. `attack_registry.js` (R4) serve os itens Attack Registry e Attack Timeline (um só pedido a `/api/attacks`, só com a aba visível). `attack_library.js` (R5) serve o item Attack Library: um só pedido a `/api/attack-library` por ativação da aba (catálogo estático, não depende do período selecionado), filtros por risco/sensor aplicados em memória. `network_soc.js` (R6) serve os 3 itens "Network" (Live Traffic/Network Detections/PCAP Evidence): cada painel só pede dados com a sua aba ativa e o separador visível, reaproveita os dados de `network_monitor.py`/`network_detections.py` já expostos a `redblue.js` (que mantém o seu próprio painel de rede, com nota de link cruzado para estas abas) — sem abrir um 2º WebSocket. `redblue.js` reutiliza os globais de `app.js`.
 
 ## Persistência (fontes de verdade atuais)
 

@@ -85,7 +85,7 @@ Wazuh Manager/Indexer, que já têm os alertas processados.
 
 ## Funcionalidades
 
-- **Dashboard web com 14 abas** (inclui **🧩 Incidentes**, R3, **🗂️ Attack Registry / 🕒 Attack Timeline**, R4, e **📚 Attack Library**, R5) — ver tabela em [Servir o frontend](#3-servir-o-frontend).
+- **Dashboard web com 17 abas** (inclui **🧩 Incidentes**, R3, **🗂️ Attack Registry / 🕒 Attack Timeline**, R4, **📚 Attack Library**, R5, e **📡 Live Traffic / 🚦 Network Detections / 🧪 PCAP Evidence**, R6) — ver tabela em [Servir o frontend](#3-servir-o-frontend).
 - **Classificação de 23 Event IDs** do Windows Security Log em nome
   amigável + severidade + recomendação — ver
   [`docs/API.md`](docs/API.md#catálogo-de-event-ids-scriptsevent_catalogpy).
@@ -165,8 +165,9 @@ Dashboard cybersec/
 │   ├── incident_engine.py / incident_store.py / incident_ingest.py ← incidentes (R3)
 │   ├── attack_registry.py       ← registo de ataques, esperado vs real (R4)
 │   ├── attack_library.py / attack_library.yaml ← catálogo de referência de ataques, só leitura (R5)
+│   ├── network_soc.py           ← resumos puros p/ Live Traffic/Network Detections/PCAP Evidence (R6)
 │   ├── system_monitor.py        ← specs/saúde da máquina local
-│   ├── test_*.py                ← 26 scripts de teste standalone (ver Testes)
+│   ├── test_*.py                ← 27 scripts de teste standalone (ver Testes)
 │   ├── requirements.txt         ← dependências Python do backend
 │   ├── .env / .env.example      ← credenciais reais (não versionar) / template
 │   ├── README.md                ← guia dos scripts de automação do laboratório
@@ -354,6 +355,9 @@ Os painéis reais continuam a ser as 14 abas abaixo:
 | 🧩 **Incidentes** | Gestão de incidentes (R3, `incidents.js`): agrupamento automático de alertas Wazuh e deteções de rede por ativo, estados NEW→CLOSED, timeline, notas e importação do histórico — ver [docs/API.md](docs/API.md#-incidentes-r3) |
 | 🗂️ **Attack Registry** / 🕒 **Attack Timeline** | Registo de ataques (R4, `attack_registry.js`): operador, esperado vs real (regra/ML/rede), evidência por referência e incidentes ligados; só leitura — ver [docs/API.md](docs/API.md#️-attack-registry-r4) |
 | 📚 **Attack Library** | Catálogo de referência dos cenários de ataque do laboratório (R5, `attack_library.js`): risco, pré-requisitos, sensores esperados, passos de limpeza, replayable; só leitura, nunca lança nada — ver [docs/API.md](docs/API.md#-attack-library-r5) |
+| 📡 **Live Traffic** | Resumo do buffer de pacotes ao vivo (R6, `network_soc.js`): protocolos, top talkers, portas mais vistas — ver [docs/API.md](docs/API.md#-network-soc-r6) |
+| 🚦 **Network Detections** | Deteções de rede "agora" vs histórico acumulado, por tipo (R6, `network_soc.js`) — mesma fonte de `network_detections.py` que o painel de rede da aba Red vs Blue |
+| 🧪 **PCAP / Evidence** | Deteções de rede persistidas em JSONL (R6): resolve a dívida de R0 ("deteções só em memória"); **evidência de metadados, nunca uma exportação PCAP/payload real** — sem captura de payload, só cabeçalhos tshark |
 
 A aba **⚔️ Red vs Blue** vive em `redblue.js` (não edita `app.js`; reutiliza
 os seus globais) e usa uma janela fixa de 7 dias (168 h, o máximo de
@@ -366,7 +370,12 @@ os seus globais) e usa uma janela fixa de 7 dias (168 h, o máximo de
   (`GET /api/redblue/metrics`). Declara que a aplicação não regista ações de
   resposta, por isso não mostra nenhuma.
 - **Rede em tempo real** — snapshot de `GET /api/redblue/network` e push por
-  `/ws/network`.
+  `/ws/network`; é a vista de correlação viva deste painel (alimenta
+  `/api/redblue/metrics`). Para resumos dedicados e para o histórico
+  persistido de deteções (sobrevive a um restart do backend), ver as abas
+  **📡 Live Traffic / 🚦 Network Detections / 🧪 PCAP Evidence** (R6,
+  `network_soc.js`) — mesma fonte de dados, sem segundo poller nem segundo
+  WebSocket.
 - **Manager/Auditor** — estado do backend (`/api/health`) e agentes
   (`/api/agents`).
 
@@ -443,6 +452,9 @@ python test_attack_registry.py        # módulo puro + /api/attacks (log antigo/
 python test_attack_library.py         # validação do YAML (fail-fast), merge com SCENARIOS, /api/attack-library (401/404/422)
 python test_attack_targets.py         # allowlist de alvos fail-closed em attack_scenarios.py
 
+# Network SOC (R6):
+python test_network_soc.py            # network_soc.py puro + persistência JSONL + /api/network/* (401/422, limit capeado, "restart")
+
 # Live SOC (R2):
 python test_siem_health.py            # saúde do SIEM pura + /api/siem/health (erros, stale, truncated)
 ```
@@ -500,31 +512,47 @@ Metodologia, features, resultados (precisão/recall/F1) e validação cruzada em
 
 ---
 
-## 📡 Rede em Tempo Real — Captura e Deteção
+## 📡 Rede em Tempo Real — Captura, Deteção e Evidência (R6)
 
-A aba **⚔️ Red vs Blue** inclui um painel de rede que captura e analisa tráfego ao vivo.
+A aba **⚔️ Red vs Blue** inclui um painel de rede que captura e analisa tráfego ao
+vivo; as abas dedicadas **📡 Live Traffic / 🚦 Network Detections / 🧪 PCAP Evidence**
+(R6) reaproveitam os mesmos dados em painéis próprios — ver tabela de abas acima.
 
-### Captura via WMI/PowerShell
+### Captura via SSH + tshark (VM Wazuh)
 
 - **Módulo:** `scripts/network_monitor.py`
-- **Tecnologia:** WMI + `Get-NetStat` (Windows) — captura de pacotes de nível OS,
-  funciona como Wireshark ao nível de sistema local.
-- **O que captura:** SYN/ACK/data packets, estatísticas por porto/protocolo.
-- **Frequência:** a cada 20 minutos (configurável via `NETWORK_CAPTURE_INTERVAL`).
-- **Histórico:** 7 dias — janela fixa da aba Red vs Blue.
+- **Tecnologia:** SSH para a VM Wazuh + `tshark -T fields` (não WMI local) — lê só
+  campos de cabeçalho (timestamps, IPs, portas, protocolo, flags TCP), nunca o
+  payload do pacote.
+- **O que captura:** metadados SYN/ACK, estatísticas por porto/protocolo — sem
+  conteúdo, por isso não há payload para uma exportação PCAP real (ver R6 abaixo).
+- **Frequência:** polling a cada 5s (`network_poll_loop`), só ativo com `VM_SSH_HOST`
+  configurado.
 - **Endpoints:**
-  - `GET /api/redblue/network` — snapshot do buffer ao vivo
+  - `GET /api/redblue/network` — snapshot do buffer ao vivo (aba Red vs Blue)
+  - `GET /api/network/live-traffic` — resumo dedicado (R6, aba Live Traffic)
   - `WS /ws/network` — push em tempo real de pacotes novos e deteções
 
 ### Análise de Padrões Suspeitos
 
 - **Módulo:** `scripts/network_detections.py`
 - **O que deteta:**
-  - **Port scans** — múltiplas tentativas de ligação a portos consecutivos
-  - **Brute-force SSH** — tentativas falhadas repetidas na porta 22
-  - **Anomalias de volume** — picos de tráfego acima da linha de base
+  - **Port scans** — muitas portas de destino distintas no mesmo par origem/destino
+  - **Força bruta** — muitos pacotes de abertura de ligação no mesmo trio origem/destino/porta
+  - **Picos de volume** — muitos pacotes da mesma origem numa janela curta
 - **Integração:** marca alertas no dashboard como "detetado por rede" quando um padrão
-  suspeito corresponde a um evento de ataque no log Red vs Blue.
+  suspeito corresponde a um evento de ataque no log Red vs Blue; resumo dedicado em
+  `GET /api/network/detections` (R6, aba Network Detections).
+
+### Evidência persistida — PCAP / Evidence (R6)
+
+As deteções de rede deixam de existir só em memória (dívida registada em R0): cada
+deteção nova é gravada em JSONL (`history_store.append_network_detection_history`,
+`historico/AAAA/MM-mês/AAAA-MM-DD-network-detections.jsonl`), lida por
+`GET /api/network/evidence` (`date`, `limit` ≤500). **Não é uma exportação PCAP
+real** — `network_monitor.py` só lê cabeçalhos tshark, nunca payload; a resposta
+declara sempre `payload_capture: false`. Ver
+[docs/superpowers/specs/2026-10-07-r6-network-soc-design.md](docs/superpowers/specs/2026-10-07-r6-network-soc-design.md).
 
 ### Configuração de SSH remoto (opcional)
 
@@ -563,6 +591,8 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | GET | `/api/redblue/metrics` | Correlação Red vs Blue (Fase 11) — cobertura/MTTD por cenário de ataque — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/redblue/attack-log` | Log de ataques real (`attack_log.jsonl`) + mapeamento MITRE dos cenários (Fase 11, Onda 3) — resposta: `entries`, `total`, `scenarios`; exige `X-API-Key` |
 | GET | `/api/redblue/network` | Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — pacotes + deteções — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/network/live-traffic` \| `/api/network/detections` | Resumos dedicados (Live Traffic/Network Detections, R6) sobre o mesmo buffer — ver [docs/API.md](docs/API.md#-network-soc-r6) |
+| GET | `/api/network/evidence` | Deteções de rede persistidas em JSONL (R6, PCAP/Evidence) — metadados só, nunca payload/PCAP real; `date`, `limit` (≤500) |
 | GET | `/api/siem/health` | Saúde do SIEM (R2): `status` ok/degraded/down, `stale`, `truncated`, agentes, atraso e taxa — sempre 200, ler `status` |
 | GET | `/api/incidents` | Incidentes + resumo (R3) — filtros `status`, `severity`, `hours`, `limit`, `offset` |
 | GET | `/api/incidents/{id}` | Detalhe do incidente: evidências, timeline, `ml_summary` (R3) |
