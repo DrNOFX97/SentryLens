@@ -18,10 +18,18 @@ Uso:
     python attack_scenarios.py --target 192.0.2.20 --all
     python attack_scenarios.py --target 192.0.2.20 --scenario lateral_movement_schtasks \
         --user administrator --password "Sup3rS3cret!"
+
+Allowlist de alvos (R5, fail-closed): por omissão só são aceites loopback e os
+blocos de documentação (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24). Para o
+laboratório real copia attack_targets.example.json para attack_targets.json
+(gitignored) ou aponta ATTACK_TARGETS_PATH para o teu ficheiro. --allow-any-target
+é o override explícito.
 """
 
 import argparse
+import ipaddress
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -31,6 +39,82 @@ from pathlib import Path
 from typing import Callable
 
 DEFAULT_LOG_PATH = Path(__file__).parent / "attack_log.jsonl"
+
+# --- Allowlist de alvos (R5) -------------------------------------------------
+# Fail-closed: sem allowlist configurada só são aceites alvos em loopback ou nos
+# blocos de documentação (RFC 5737 / RFC 3849 / RFC 4291 ::1). Para atacar o
+# laboratório real configura ATTACK_TARGETS_PATH (ou scripts/attack_targets.json,
+# gitignored) a partir de attack_targets.example.json. Hostnames nunca são
+# resolvidos (evita TOCTOU/DNS): só entram se constarem em allowed_hosts.
+DEFAULT_TARGETS_PATH = Path(__file__).parent / "attack_targets.json"
+BUILTIN_ALLOWED_NETWORKS = tuple(ipaddress.ip_network(n) for n in (
+    "127.0.0.0/8", "::1/128", "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32",
+))
+MIN_PREFIX_V4 = 16  # recusa redes demasiado largas (ex. 0.0.0.0/0) na allowlist configurada
+MIN_PREFIX_V6 = 48
+_HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
+
+
+class TargetNotAllowed(ValueError):
+    """Alvo recusado pela allowlist (mensagem em português, sem segredos)."""
+
+
+def load_target_allowlist(path: str | os.PathLike | None = None) -> dict:
+    """Lê a allowlist de alvos configurada. Devolve
+    {"networks": [...], "hosts": set(), "source": str}. Sem ficheiro configurado
+    -> só os blocos built-in (source="builtin"). Ficheiro configurado mas
+    ilegível/inválido -> TargetNotAllowed (nunca se ignora em silêncio)."""
+    explicit = path or os.getenv("ATTACK_TARGETS_PATH")
+    candidate = Path(explicit) if explicit else (DEFAULT_TARGETS_PATH if DEFAULT_TARGETS_PATH.exists() else None)
+    result = {"networks": list(BUILTIN_ALLOWED_NETWORKS), "hosts": set(), "source": "builtin"}
+    if candidate is None:
+        return result
+    try:
+        data = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise TargetNotAllowed(f"allowlist de alvos ilegível ({candidate.name}): {type(exc).__name__}") from None
+    if not isinstance(data, dict):
+        raise TargetNotAllowed(f"allowlist de alvos inválida ({candidate.name}): esperado um objeto JSON")
+    for key in ("allowed_networks", "allowed_hosts"):
+        value = data.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise TargetNotAllowed(f"allowlist de alvos inválida ({candidate.name}): '{key}' tem de ser lista de texto")
+    for raw in data.get("allowed_networks", []):
+        try:
+            net = ipaddress.ip_network(raw.strip(), strict=True)
+        except ValueError:
+            raise TargetNotAllowed(f"allowlist de alvos inválida ({candidate.name}): rede '{raw[:64]}' não é um CIDR/IP válido") from None
+        if net.prefixlen < (MIN_PREFIX_V4 if net.version == 4 else MIN_PREFIX_V6):
+            raise TargetNotAllowed(f"allowlist de alvos inválida ({candidate.name}): rede '{net}' é demasiado larga")
+        result["networks"].append(net)
+    for raw in data.get("allowed_hosts", []):
+        if not _HOST_RE.match(raw.strip()):
+            raise TargetNotAllowed(f"allowlist de alvos inválida ({candidate.name}): hostname '{raw[:64]}' inválido")
+        result["hosts"].add(raw.strip().lower())
+    result["source"] = candidate.name
+    return result
+
+
+def check_target_allowed(target: str | None, allowlist: dict | None = None) -> None:
+    """Levanta TargetNotAllowed se o alvo não estiver na allowlist."""
+    allowlist = allowlist or load_target_allowlist()
+    value = (target or "").strip()
+    if not value:
+        raise TargetNotAllowed("alvo vazio")
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        if value.lower() in allowlist["hosts"]:
+            return
+        raise TargetNotAllowed(
+            f"alvo '{value[:64]}' recusado: hostnames só são aceites se estiverem em allowed_hosts "
+            "(ver attack_targets.example.json / ATTACK_TARGETS_PATH)") from None
+    if any(ip.version == net.version and ip in net for net in allowlist["networks"]):
+        return
+    raise TargetNotAllowed(
+        f"alvo '{value}' recusado: fora de loopback/intervalos de documentação e da allowlist "
+        f"({allowlist['source']}). Configura ATTACK_TARGETS_PATH (ver attack_targets.example.json) "
+        "ou usa --allow-any-target, sabendo que o alvo é do laboratório.")
 
 
 def _redact_command_for_log(command: list[str]) -> str:
@@ -199,11 +283,23 @@ def append_attack_log(entry: dict, log_path: Path = DEFAULT_LOG_PATH) -> None:
 
 
 def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = DEFAULT_LOG_PATH) -> dict:
+    """Lança o cenário. Defesa em profundidade (R5): mesmo chamado diretamente, um
+    alvo fora da allowlist não lança nada — fica "skipped" no log, tal como a
+    falta de argumentos. allow_any_target (--allow-any-target) é o override explícito."""
     meta = {"operator": getattr(args, "operator", None), "source": getattr(args, "source", None),
             "expected": getattr(args, "expect", None)}
 
     def _fmt(*a, **k):
         return format_log_entry(*a, **meta, **k)
+
+    if not getattr(args, "allow_any_target", False):
+        try:
+            check_target_allowed(args.target, getattr(args, "target_allowlist", None))
+        except TargetNotAllowed as exc:
+            entry = _fmt(scenario.name, args.target, scenario.tool, "skipped",
+                         {"reason": "target_not_allowed", "detail": str(exc)})
+            append_attack_log(entry, log_path)
+            return entry
 
     command = scenario.build_command(args)
     if command is None:
@@ -322,6 +418,8 @@ def main() -> None:
     parser.add_argument("--user", help="Utilizador (cenários pós-comprometimento)")
     parser.add_argument("--password", help="Password (cenários pós-comprometimento)")
     parser.add_argument("--wordlist", help="Wordlist para força bruta (default: rockyou.txt)")
+    parser.add_argument("--allow-any-target", action="store_true",
+                        help="Override explícito da allowlist de alvos (R5): só se o alvo for do laboratório")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout por cenário, em segundos")
     parser.add_argument("--operator", type=_validated_label, help="Quem lança o ataque (registado no log, R4)")
     parser.add_argument("--source", type=_validated_label, help="Origem do ataque, ex. máquina atacante (registado no log, R4)")
@@ -340,6 +438,13 @@ def main() -> None:
 
     if not args.target:
         parser.error("--target é obrigatório (exceto com --list/--self-check)")
+
+    if not args.allow_any_target:
+        try:
+            args.target_allowlist = load_target_allowlist()
+            check_target_allowed(args.target, args.target_allowlist)
+        except TargetNotAllowed as exc:
+            parser.error(str(exc))
 
     log_path = Path(args.log_path)
     names = list(SCENARIOS) if args.all else [args.scenario] if args.scenario else []
