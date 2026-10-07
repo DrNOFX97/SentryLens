@@ -16,12 +16,12 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R0 | Fundação / auditoria | ✅ | Auditoria de 2026-10-06; correções abaixo; docs `ARCHITECTURE`, `DATA_MODEL`, `SECURITY` |
 | R1 | Sidebar SOC | ✅ | `index.html`, `app.js` (`activateTab`/`activatePlanned`), `style.css`; itens sem dados mostram "Sem dados" |
 | R2 | Live SOC | ⬜ | Reutiliza `/api/stats`, `/api/alerts`, `/ws/alerts` |
-| R3 | Gestão de incidentes | ⬜ | Entidade nova (estados NEW→CLOSED, timeline). Maior lacuna estrutural |
-| R4 | Attack Registry | 🟡 | `attack_log.jsonl` já tem `id/technique/tool` (ver R0); faltam operador, evidência, esperado vs real |
+| R3 | Gestão de incidentes | ✅ | Incidentes automáticos (alertas Wazuh + rede), estados, timeline, backfill, painel |
+| R4 | Attack Registry | 🟡 | `attack_log.jsonl` já tem `id/technique/tool` (ver R0); faltam operador, evidência, esperado vs real; usa `attack_id` em `incident_events` |
 | R5 | Attack Library | 🟡 | `attack_scenarios.SCENARIOS`; faltam cleanup, risco, sensores, replayable |
 | R6 | Network SOC | 🟡 | `network_monitor.py`, `network_detections.py`; falta PCAP/evidência |
-| R7 | Detection Engine (`DetectionEvent`) | ⬜ | Hoje 3 detetores independentes unidos só no correlator |
-| R8 | MTTD / MTTR / métricas | 🟡 | MTTD existe em `redblue_correlator`; falta MTTR, FP/FN, definição formal |
+| R7 | Detection Engine (`DetectionEvent`) | ⬜ | Hoje 3 detetores independentes unidos só no correlator; base para `DetectionEvent` nos incidentes (R3) |
+| R8 | MTTD / MTTR / métricas | 🟡 | MTTD existe em `redblue_correlator`; falta MTTR, FP/FN, definição formal; tempo até à 1.ª resposta já calculado nos incidentes |
 | R9 | ML Intelligence | 🟡 | Isolation Forest + `feature_extractor` partilhado; falta model registry e avaliação |
 | R10 | ML Learning Loop | ⬜ | |
 | R11 | Vaccine Engine | ⬜ | |
@@ -64,4 +64,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 - `_parse_timestamp` duplicado em vários módulos; `main.py` mistura rotas,
   loops e estado global; `@app.on_event("startup")` deprecated.
 - Confirmar que a API key que esteve no histórico git foi rodada.
+- Incidentes (R3): a janela de 10 min (`INCIDENT_GAP_SECONDS`) pode fundir ataques
+  distintos ao mesmo ativo; deteções de rede só existem em memória (ficam fora do
+  backfill); o autor das ações manuais é fixo (`analyst`).
 - Numeração: os planos antigos usam "Fase N"; este roadmap usa "R<n>".

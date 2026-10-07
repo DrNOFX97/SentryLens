@@ -40,7 +40,7 @@ A classificação de Event ID → nome amigável / severidade / recomendação
 | Persistência | JSONL (histórico bruto/conformidade) + SQLite (índice de consulta) |
 | Machine Learning | scikit-learn 1.5.2 (Isolation Forest) |
 | Frontend | HTML/CSS/JavaScript puro (sem framework nem build step), Chart.js |
-| Testes | 13 scripts standalone (`scripts/test_*.py`) — sem pytest, ver [Testes](#-testes) |
+| Testes | 22 scripts standalone (`scripts/test_*.py`) — sem pytest, ver [Testes](#-testes) |
 | SO alvo | Windows 10/11 (WMI/PowerShell para specs do sistema) |
 
 ---
@@ -85,7 +85,7 @@ Wazuh Manager/Indexer, que já têm os alertas processados.
 
 ## Funcionalidades
 
-- **Dashboard web com 10 abas** — ver tabela em [Servir o frontend](#3-servir-o-frontend).
+- **Dashboard web com 11 abas** (inclui **🧩 Incidentes**, R3) — ver tabela em [Servir o frontend](#3-servir-o-frontend).
 - **Classificação de 23 Event IDs** do Windows Security Log em nome
   amigável + severidade + recomendação — ver
   [`docs/API.md`](docs/API.md#catálogo-de-event-ids-scriptsevent_catalogpy).
@@ -162,8 +162,9 @@ Dashboard cybersec/
 │   ├── lifecycle.py / rbac.py / admin_activity.py ← painéis de ciclo de vida/RBAC/admin
 │   ├── ml_anomalies.py / feature_extractor.py / train_anomaly_model.py ← deteção por ML
 │   ├── redblue_correlator.py    ← correlação Red vs Blue (Fase 11)
+│   ├── incident_engine.py / incident_store.py / incident_ingest.py ← incidentes (R3)
 │   ├── system_monitor.py        ← specs/saúde da máquina local
-│   ├── test_*.py                ← 13 scripts de teste standalone (ver Testes)
+│   ├── test_*.py                ← 22 scripts de teste standalone (ver Testes)
 │   ├── requirements.txt         ← dependências Python do backend
 │   ├── .env / .env.example      ← credenciais reais (não versionar) / template
 │   ├── README.md                ← guia dos scripts de automação do laboratório
@@ -333,7 +334,7 @@ em vez de números inventados. Há deep links (`index.html#redblue`,
 `#planned:Incidentes`) e em ecrãs estreitos a sidebar abre pelo botão
 **☰ Menu**. Estado de cada fase em [docs/ROADMAP_STATUS.md](docs/ROADMAP_STATUS.md).
 
-Os painéis reais continuam a ser as 10 abas abaixo:
+Os painéis reais continuam a ser as 11 abas abaixo:
 
 | Aba | Conteúdo |
 |---|---|
@@ -347,6 +348,7 @@ Os painéis reais continuam a ser as 10 abas abaixo:
 | 🧠 **ML Anomalias** | Deteção por Isolation Forest lado a lado com a classificação por regras |
 | 🛡️ **Conformidade** | Veredito RGPD/NIS2/AI Act por alerta, resumo agregado, perfil da organização |
 | ⚔️ **Red vs Blue** | Correlação entre o log de ataques e os alertas (Fase 11, Onda 3) — 4 painéis, ver abaixo |
+| 🧩 **Incidentes** | Gestão de incidentes (R3, `incidents.js`): agrupamento automático de alertas Wazuh e deteções de rede por ativo, estados NEW→CLOSED, timeline, notas e importação do histórico — ver [docs/API.md](docs/API.md#-incidentes-r3) |
 
 A aba **⚔️ Red vs Blue** vive em `redblue.js` (não edita `app.js`; reutiliza
 os seus globais) e usa uma janela fixa de 7 dias (168 h, o máximo de
@@ -385,7 +387,7 @@ passar a servir.
 
 Sem laboratório Wazuh ligado — tudo mockado (`AsyncMock` sobre
 `WazuhIndexerClient`/`WazuhManagerClient`). Sem framework (nem pytest):
-17 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
+22 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
 por caso e sai com `sys.exit(1)` se algo falhar.
 
 ### Correr todos os testes
@@ -422,6 +424,12 @@ python test_redblue_attack_log.py     # log de ataques simulados
 python test_network_monitor.py        # captura de rede + /ws/network (Wireshark)
 python test_network_detections.py     # deteção de port scans/brute-force/anomalias
 python test_ssh_client.py             # VMSSHClient para acesso remoto
+
+# Incidentes (R3):
+python test_incident_engine.py        # regras puras de agrupamento, estados, ataque ligado
+python test_incident_store.py         # SQLite, IDs diários, deduplicação, timeline append-only
+python test_incident_ingest.py        # ingest de alertas/deteções de rede + resumo ML
+python test_incidents_api.py          # /api/incidents/* (401/404/409/422/502, backfill)
 ```
 
 ### Particularidades
@@ -536,6 +544,11 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | GET | `/api/redblue/metrics` | Correlação Red vs Blue (Fase 11) — cobertura/MTTD por cenário de ataque — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/redblue/attack-log` | Log de ataques real (`attack_log.jsonl`) + mapeamento MITRE dos cenários (Fase 11, Onda 3) — resposta: `entries`, `total`, `scenarios`; exige `X-API-Key` |
 | GET | `/api/redblue/network` | Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — pacotes + deteções — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/incidents` | Incidentes + resumo (R3) — filtros `status`, `severity`, `hours`, `limit`, `offset` |
+| GET | `/api/incidents/{id}` | Detalhe do incidente: evidências, timeline, `ml_summary` (R3) |
+| POST | `/api/incidents/{id}/status` | Muda o estado `{status, note?}` (R3) |
+| POST | `/api/incidents/{id}/notes` | Acrescenta nota `{text}` à timeline (R3) |
+| POST | `/api/incidents/backfill` | Importa os alertas do Indexer `{days}` — idempotente (R3) |
 | GET | `/api/export/report` | Relatório HTML autónomo (download) |
 | GET | `/api/compliance` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | Classificação NIS2 sugerida (CAE/colaboradores/faturação) |

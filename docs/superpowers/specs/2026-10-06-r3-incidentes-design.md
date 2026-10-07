@@ -1,6 +1,6 @@
 # R3 — Gestão de incidentes (design)
 
-Roadmap v2, fase R3 (ver `docs/ROADMAP_STATUS.md`). Estado: spec para revisão.
+Roadmap v2, fase R3 (ver `docs/ROADMAP_STATUS.md`). Estado: implementada (R3 concluída); alinhada com a implementação.
 
 ## Objetivo
 
@@ -92,7 +92,7 @@ o ingest corre numa thread de executor e o backfill/API noutra.
 
 ```sql
 incidents(
-  id TEXT PRIMARY KEY,            -- INC-AAAAMMDD-NNN (data da criação, sequência diária)
+  id TEXT PRIMARY KEY,            -- INC-AAAAMMDD-NNN (data da 1.ª evidência, sequência diária)
   status TEXT NOT NULL,           -- NEW|INVESTIGATING|CONTAINED|RESOLVED|CLOSED
   severity TEXT NOT NULL,
   asset TEXT NOT NULL,
@@ -124,14 +124,14 @@ calculado em `GET /api/incidents/{id}` com `ml_anomalies.build_ml_anomalies_repo
 sobre os alertas brutos do próprio incidente (a janela certa para as features;
 `null` se o modelo não existir, sem falhar o pedido); MTTD do incidente = `first_evidence_at −
 timestamp do ataque ligado mais antigo` (None sem ataque); tempo até à primeira
-resposta = primeiro `status_changed → INVESTIGATING` menos `created_at` (entrada
-para o MTTR do R8).
+resposta = primeiro `status_changed → INVESTIGATING` menos `first_evidence_at` (não `created_at`,
+que no backfill é a hora da importação; entrada para o MTTR do R8).
 
 ## 3. API (`main.py`, todas com `dependencies=_REQUIRE_API_KEY`)
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/api/incidents` | `status`, `severity`, `hours` (1–720, default 168), `limit`/`offset`. Devolve `incidents[]` com `evidence_count`, `techniques`, `attack_ids`, `mttd_seconds` + `summary` (contagens por estado/severidade, abertos, críticos abertos, MTTD médio). |
+| GET | `/api/incidents` | `status`, `severity`, `hours` (1–720, default 168), `limit`/`offset`. Devolve `incidents[]` com `evidence_count`, `techniques`, `attack_ids`, `mttd_seconds` + `summary` (contagens por estado/severidade, abertos, altos/críticos abertos, MTTD médio). |
 | GET | `/api/incidents/{id}` | Incidente + `evidence[]` + `timeline[]`. 404 se não existir. |
 | POST | `/api/incidents/{id}/status` | `{status, note?}`. 409 se a transição for inválida; 422 se faltar a nota obrigatória. |
 | POST | `/api/incidents/{id}/notes` | `{text}` (1–2000 chars) → evento `note_added`. |
@@ -166,7 +166,7 @@ O CORS não muda (`GET`/`POST` já permitidos).
   e ganha `#tab-incidents`; "Investigações" mantém-se planeada. `index.html`
   carrega `incidents.js` depois de `redblue.js`; reutiliza os globais de
   `app.js` (`fetchJSON`, `escapeHtml`, `severityBadge`, `renderPanelError`).
-- **Lista**: KPIs (abertos, críticos abertos, MTTD médio, por estado), filtros
+- **Lista**: KPIs (abertos, altos/críticos abertos, MTTD médio, por estado), filtros
   de estado/severidade, tabela (id, severidade, estado, ativo, primeira/última
   evidência, nº evidências, técnicas MITRE, ataque ligado).
 - **Detalhe** (ao selecionar uma linha): evidências, timeline, botões das

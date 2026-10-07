@@ -200,6 +200,73 @@ o perfil fixo usado pela camada de conformidade.
 
 **Testes:** `scripts/test_nis2_lookup.py`.
 
+## 🧩 Incidentes (R3)
+
+Incidente = agrupamento automático de deteções (alertas Wazuh e deteções de
+rede) sobre o mesmo ativo, com estado e timeline. Persistido em
+`scripts/incidents.sqlite3` (ver [DATA_MODEL.md](DATA_MODEL.md#incidente-r3)).
+Todas as rotas exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/incidents` | `status`, `severity`, `hours` (1–720, default 168, sobre a última evidência), `limit` (1–500, default 100), `offset` | `{window_hours, incidents[], summary}` | 401, 422 (parâmetro inválido), 500 |
+| GET | `/api/incidents/{id}` | — | Incidente + `evidence[]` + `timeline[]` + `ml_summary` + `available_transitions` | 401, 404, 500 |
+| POST | `/api/incidents/{id}/status` | corpo `{status, note?}` | Detalhe do incidente atualizado | 401, 404, 409 (transição inválida), 422 (falta a nota ao fechar um `NEW`), 500 |
+| POST | `/api/incidents/{id}/notes` | corpo `{text}` (1–2000 caracteres) | Detalhe atualizado (evento `note_added`) | 401, 404, 422, 500 |
+| POST | `/api/incidents/backfill` | corpo `{days}` (1–90, default 7) | `{opened, attached, duplicate, ignored, invalid, fetched, truncated}` | 401, 422, 502 (Indexer indisponível), 500 |
+
+Transições de estado válidas: `NEW → INVESTIGATING | CLOSED` (nota
+obrigatória), `INVESTIGATING → CONTAINED | RESOLVED`, `CONTAINED → RESOLVED |
+INVESTIGATING`, `RESOLVED → CLOSED | INVESTIGATING`; `CLOSED` é final.
+
+O backfill reprocessa os alertas do Wazuh Indexer (máx. 5000 por corrida,
+`truncated: true` se atingir o teto) com a mesma função pura do ingest em
+tempo real e é idempotente por chave de evidência. Só cobre alertas Wazuh
+(as deteções de rede existem apenas em memória). `invalid` conta alertas sem
+`_id`, timestamp válido ou `agent.ip`. Erros de base de dados devolvem `500`
+genérico, sem caminhos nem SQL.
+
+Exemplo de `GET /api/incidents?hours=168` (valores ilustrativos):
+
+```json
+{
+  "window_hours": 168,
+  "incidents": [
+    {
+      "id": "INC-20261007-001",
+      "status": "NEW",
+      "severity": "high",
+      "asset": "192.168.1.84",
+      "created_at": "2026-10-07T09:22:30+00:00",
+      "first_evidence_at": "2026-10-07T08:41:12+00:00",
+      "last_evidence_at": "2026-10-07T09:19:48+00:00",
+      "updated_at": "2026-10-07T09:22:30+00:00",
+      "evidence_count": 62,
+      "techniques": ["T1110"],
+      "attack_ids": ["atk-0007"],
+      "mttd_seconds": 14.0,
+      "time_to_first_response_seconds": null
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "by_status": {"NEW": 1},
+    "by_severity": {"high": 1},
+    "open": 1,
+    "high_or_critical_open": 1,
+    "avg_mttd_seconds": 14.0,
+    "avg_time_to_first_response_seconds": null
+  }
+}
+```
+
+`techniques`/`attack_ids` vêm só de ataques do `attack_log.jsonl` ligados ao
+incidente; sem ataque ligado ficam vazios e `mttd_seconds` é `null` — nunca são
+inferidos.
+
+**Testes:** `scripts/test_incident_engine.py`, `test_incident_store.py`,
+`test_incident_ingest.py`, `test_incidents_api.py`.
+
 ## Tabela de endpoints
 
 | Method | Endpoint | Parâmetros principais | Descrição |
@@ -211,6 +278,11 @@ o perfil fixo usado pela camada de conformidade.
 | GET | `/api/brute-force` | `hours`, `threshold` | Agrupa Event ID 4625 por utilizador-alvo |
 | GET | `/api/ml-anomalies` | `hours` (máx. 168) | Deteção por Isolation Forest vs. regras — ver [ML.md](ML.md) |
 | GET | `/api/redblue/metrics` | `hours` (máx. 168), `window_seconds` (30–3600) | Correlação Red vs Blue por cenário de ataque (Fase 11) — ver [ML.md](ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/incidents` | `status`, `severity`, `hours`, `limit`, `offset` | Incidentes + resumo (R3) |
+| GET | `/api/incidents/{id}` | — | Detalhe: evidências, timeline, `ml_summary` (R3) |
+| POST | `/api/incidents/{id}/status` | `{status, note?}` | Muda o estado (R3) |
+| POST | `/api/incidents/{id}/notes` | `{text}` | Acrescenta nota à timeline (R3) |
+| POST | `/api/incidents/backfill` | `{days}` | Importa o histórico do Indexer (R3) |
 | GET | `/api/export/report` | `hours` | Relatório HTML autónomo (download) |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | `cae_principal` (obrig.), `cae_secundarios`, `nipc`, `colaboradores`, `faturacao_eur`, `excecao_conhecida` | Classificação NIS2 sugerida |
