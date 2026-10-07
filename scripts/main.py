@@ -18,9 +18,11 @@ import json
 import logging
 import os
 import secrets
+import sqlite3
 import sys
 from collections import Counter, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Literal
 
 # Windows redirects stdout/stderr para o codepage da consola por omissão,
 # o que corrompe os acentos nos logs (ex: "Violações" -> "Viola��es") quando
@@ -31,8 +33,11 @@ for _stream in (sys.stdout, sys.stderr):
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, StringConstraints
 
+import incident_ingest
 import ml_anomalies
 from admin_activity import build_admin_activity_report
 from attack_scenarios import SCENARIOS
@@ -41,6 +46,8 @@ from event_catalog import classify_alert
 from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
 from history_store import append_alert_history, append_compliance_history
+from incident_engine import available_transitions
+from incident_store import IncidentNotFound, IncidentStore, InvalidTransition
 from lifecycle import build_lifecycle_report
 from network_detections import detect_network_anomalies
 from network_monitor import NetworkConnectionManager, PACKET_BUFFER_MAX, network_poll_loop
@@ -114,6 +121,12 @@ NETWORK_CAPTURE_REMOTE_PATH = os.getenv("NETWORK_CAPTURE_REMOTE_PATH", "/var/log
 SENTRYLENS_HISTORY_DIR = os.getenv(
     "SENTRYLENS_HISTORY_DIR", os.path.join(os.path.dirname(__file__), "historico")
 )
+
+# Base de dados dos incidentes (R3) — separada do índice de histórico, que é
+# uma cache reconstruível; aqui há estado e notas do analista.
+INCIDENTS_DB_PATH = os.getenv("INCIDENTS_DB_PATH", os.path.join(os.path.dirname(__file__), "incidents.sqlite3"))
+# Teto de alertas por corrida de POST /api/incidents/backfill (o Indexer limita a 10000).
+BACKFILL_MAX_ALERTS = 5000
 
 # O CORS (configurado mais abaixo) já restringe as origens a loopback, mas
 # isso não chega sozinho — foi por não haver autenticação nenhuma nos
@@ -198,6 +211,7 @@ packet_buffer: deque = deque(maxlen=PACKET_BUFFER_MAX)
 # pacotes (janela curta) já ter avançado para além dele.
 network_detection_buffer: deque = deque(maxlen=5000)
 vm_ssh_client = VMSSHClient(VM_SSH_HOST, VM_SSH_USER, VM_SSH_KEY_PATH) if VM_SSH_HOST else None
+incident_store = IncidentStore(INCIDENTS_DB_PATH)
 
 
 def _extract_windows_event_id(alert: dict) -> int | None:
@@ -311,6 +325,20 @@ def _persist_new_alerts(alerts: list[dict]) -> None:
         )
 
 
+def _ingest_incident_alerts(raw_alerts: list[dict]) -> None:
+    """Callback de alert_poll_loop (R3): agrupa alertas brutos novos em incidentes."""
+    counts = incident_ingest.ingest_raw_alerts(incident_store, raw_alerts, ATTACK_LOG_PATH, SCENARIOS)
+    if counts["opened"] or counts["attached"]:
+        logger.info("Incidentes (alertas): %s", counts)
+
+
+def _ingest_incident_detections(detections: list[dict]) -> None:
+    """Callback de network_poll_loop (R3): agrupa deteções de rede novas em incidentes."""
+    counts = incident_ingest.ingest_network_detections(incident_store, detections, ATTACK_LOG_PATH, SCENARIOS)
+    if counts["opened"] or counts["attached"]:
+        logger.info("Incidentes (rede): %s", counts)
+
+
 @app.on_event("startup")
 async def _start_system_monitor() -> None:
     """Lança o loop de monitorização em background, sem bloquear o arranque do servidor."""
@@ -321,6 +349,7 @@ async def _start_system_monitor() -> None:
             ws_manager,
             _enrich_alert,
             on_new_alerts=_persist_new_alerts,
+            on_new_raw_alerts=_ingest_incident_alerts,
         )
     )
     if vm_ssh_client is not None:
@@ -328,6 +357,7 @@ async def _start_system_monitor() -> None:
             network_poll_loop(
                 vm_ssh_client, network_ws_manager, packet_buffer, NETWORK_CAPTURE_REMOTE_PATH,
                 network_detection_buffer,
+                on_new_detections=_ingest_incident_detections,
             )
         )
 
@@ -778,6 +808,116 @@ async def get_redblue_attack_log():
             for name, s in SCENARIOS.items()
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Incidentes (Roadmap v2, R3) — ver docs/superpowers/specs/2026-10-06-r3-incidentes-design.md
+# ---------------------------------------------------------------------------
+
+IncidentStatus = Literal["NEW", "INVESTIGATING", "CONTAINED", "RESOLVED", "CLOSED"]
+IncidentSeverity = Literal["info", "low", "medium", "high", "critical"]
+
+
+class StatusChange(BaseModel):
+    status: IncidentStatus
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class IncidentNote(BaseModel):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+class BackfillRequest(BaseModel):
+    days: int = Field(default=7, ge=1, le=90)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _incidents_call(func, *args):
+    """Corre uma operação da base de incidentes fora do event loop. Erros SQLite
+    viram 500 genérico: nunca expõem caminhos nem SQL."""
+    try:
+        return await run_in_threadpool(func, *args)
+    except sqlite3.Error:
+        logger.exception("Falha na base de dados de incidentes")
+        raise HTTPException(status_code=500, detail="Erro interno ao aceder à base de incidentes")
+
+
+async def _incident_detail(incident_id: str) -> dict | None:
+    incident = await _incidents_call(incident_store.get_incident, incident_id)
+    if incident is None:
+        return None
+    raw_alerts = [e["payload"] for e in incident["evidence"] if e["kind"] == "wazuh_alert"]
+    incident["ml_summary"] = await run_in_threadpool(incident_ingest.ml_summary, raw_alerts, ML_MODEL_DIR)
+    for evidence in incident["evidence"]:
+        if evidence["kind"] == "wazuh_alert":
+            evidence["alert"] = _enrich_alert(evidence["payload"])
+            del evidence["payload"]
+    incident["available_transitions"] = list(available_transitions(incident["status"]))
+    return incident
+
+
+@app.get("/api/incidents", dependencies=_REQUIRE_API_KEY)
+async def list_incidents(
+    status: IncidentStatus | None = Query(None),
+    severity: IncidentSeverity | None = Query(None),
+    hours: int = Query(168, ge=1, le=720, description="Janela temporal (última evidência), em horas"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    incidents = await _incidents_call(incident_store.list_incidents, status, severity, since, limit, offset)
+    summary = await _incidents_call(incident_store.summary, since)
+    return {"window_hours": hours, "incidents": incidents, "summary": summary}
+
+
+@app.post("/api/incidents/backfill", dependencies=_REQUIRE_API_KEY)
+async def backfill_incidents(body: BackfillRequest):
+    """Reprocessa os alertas do Wazuh Indexer (retenção de 90 dias) com a mesma
+    função pura do ingest em tempo real. Idempotente. Deteções de rede só
+    existem em memória, por isso não entram."""
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=body.days * 24, size=BACKFILL_MAX_ALERTS)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+    counts = await _incidents_call(
+        incident_ingest.ingest_raw_alerts, incident_store, raw_alerts, ATTACK_LOG_PATH, SCENARIOS
+    )
+    counts["fetched"] = len(raw_alerts)
+    counts["truncated"] = len(raw_alerts) >= BACKFILL_MAX_ALERTS
+    return counts
+
+
+@app.get("/api/incidents/{incident_id}", dependencies=_REQUIRE_API_KEY)
+async def get_incident(incident_id: str):
+    incident = await _incident_detail(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return incident
+
+
+@app.post("/api/incidents/{incident_id}/status", dependencies=_REQUIRE_API_KEY)
+async def change_incident_status(incident_id: str, body: StatusChange):
+    try:
+        await _incidents_call(incident_store.set_status, incident_id, body.status, body.note, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    except InvalidTransition as e:
+        if e.reason == "nota_obrigatoria":
+            raise HTTPException(status_code=422, detail="Fechar um incidente NEW exige uma nota (falso positivo)")
+        raise HTTPException(status_code=409, detail="Transição de estado inválida")
+    return await _incident_detail(incident_id)
+
+
+@app.post("/api/incidents/{incident_id}/notes", dependencies=_REQUIRE_API_KEY)
+async def add_incident_note(incident_id: str, body: IncidentNote):
+    try:
+        await _incidents_call(incident_store.add_note, incident_id, body.text, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return await _incident_detail(incident_id)
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
