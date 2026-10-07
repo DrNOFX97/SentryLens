@@ -103,8 +103,12 @@ body = resp.json()
 check("rota 200 com ambos ok", resp.status_code == 200 and body["manager"]["status"] == "ok" and body["indexer"]["status"] == "ok")
 check("rota devolve agentes", body["agents"]["active"] == 3)
 check("rota ok: status ok", body["status"] == "ok")
-main.indexer_client.get_recent_alerts.assert_awaited_with(hours=1, size=500)
-check("rota pede os 500 mais recentes (hours=1,size=500)", True)
+try:
+    main.indexer_client.get_recent_alerts.assert_awaited_with(hours=1, size=500)
+    asked_500 = True
+except AssertionError:
+    asked_500 = False
+check("rota pede os 500 mais recentes (hours=1,size=500)", asked_500)
 
 import httpx
 

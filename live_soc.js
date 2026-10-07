@@ -8,6 +8,7 @@
 // Todo o texto dinâmico (agente, regra, erros) passa por escapeHtml.
 
 const LS_FEED_MAX = 50;
+const LS_PENDING_MAX = 200;
 const LS_REFRESH_MS = 30000;
 const LS_TICK_MS = 5000;
 
@@ -33,8 +34,13 @@ function lsAlertKey(a) {
   return [a.timestamp, a.rule_id, a.agent_name, a.full_log].join("|");
 }
 
+// Wazuh envia "+0000"; Safari/Firefox exigem "+00:00" em new Date().
+function lsParseDate(ts) {
+  return new Date(String(ts).replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
+}
+
 function lsFormatTime(ts) {
-  const d = new Date(ts);
+  const d = lsParseDate(ts);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("pt-PT");
 }
 
@@ -52,7 +58,10 @@ function lsAddToFeed(alerts) {
   const seen = new Set(lsFeed.map(lsAlertKey));
   const fresh = alerts.filter((a) => !seen.has(lsAlertKey(a)));
   if (!fresh.length) return;
-  lsFeed = fresh.concat(lsFeed).slice(0, LS_FEED_MAX);
+  // Ordena por timestamp desc: mais recente em cima, seja qual for a origem
+  // (histórico inicial, WebSocket ou alertas retidos durante a pausa).
+  const time = (a) => { const t = lsParseDate(a.timestamp).getTime(); return Number.isNaN(t) ? 0 : t; };
+  lsFeed = fresh.concat(lsFeed).sort((a, b) => time(b) - time(a)).slice(0, LS_FEED_MAX);
 }
 
 function lsRenderFeed() {
@@ -87,25 +96,37 @@ function lsRenderConnection() {
   el.textContent = `● ${label}`;
 }
 
+let lsLoadingFeed = false;
+
+// Devolve true se o histórico inicial foi carregado. Faz merge (não substitui)
+// para não perder alertas chegados por WebSocket durante o fetch.
 async function lsLoadInitialFeed() {
+  if (lsLoadingFeed) return false;
+  lsLoadingFeed = true;
   try {
     const response = await fetch(`${API_BASE}/api/alerts?hours=1`, { headers: { "X-API-Key": API_KEY } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    // O backend devolve do mais recente para o mais antigo.
-    lsFeed = (data.alerts || []).slice(0, LS_FEED_MAX);
+    const history = (data.alerts || []).slice(0, LS_FEED_MAX);
+    if (lsPaused) lsPending = lsPending.concat(history).slice(0, LS_PENDING_MAX);
+    else lsAddToFeed(history);
   } catch (err) {
-    document.getElementById("ls-feed-body").innerHTML =
-      `<tr><td colspan="4" class="empty-state">Sem dados: ${escapeHtml(err.message)}</td></tr>`;
-    return;
+    if (!lsFeed.length) {
+      document.getElementById("ls-feed-body").innerHTML =
+        `<tr><td colspan="4" class="empty-state">Sem dados: ${escapeHtml(err.message)}</td></tr>`;
+    }
+    return false;
+  } finally {
+    lsLoadingFeed = false;
   }
   lsRenderFeed();
+  return true;
 }
 
 document.addEventListener("sentrylens:new-alert", (event) => {
   const alert = event.detail;
   if (!alert) return;
-  if (lsPaused) lsPending.unshift(alert);
+  if (lsPaused) lsPending = [alert].concat(lsPending).slice(0, LS_PENDING_MAX);
   else lsAddToFeed([alert]);
   lsRenderFeed();
 });
@@ -113,7 +134,7 @@ document.addEventListener("sentrylens:new-alert", (event) => {
 document.getElementById("ls-pause-btn").addEventListener("click", () => {
   lsPaused = !lsPaused;
   if (!lsPaused && lsPending.length) {
-    lsAddToFeed(lsPending.slice().reverse());
+    lsAddToFeed(lsPending);
     lsPending = [];
   }
   lsRenderFeed();
@@ -200,10 +221,7 @@ function lsOnShow() {
   if (!lsIsActive()) return;
   lsRenderConnection();
   lsRefreshHealth();
-  if (!lsLoadedOnce) {
-    lsLoadedOnce = true;
-    lsLoadInitialFeed();
-  }
+  if (!lsLoadedOnce) lsLoadInitialFeed().then((ok) => { if (ok) lsLoadedOnce = true; });
 }
 
 new MutationObserver(lsOnShow).observe(lsTab, { attributes: true, attributeFilter: ["class"] });
