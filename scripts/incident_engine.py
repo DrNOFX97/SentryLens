@@ -10,11 +10,20 @@ Evidência normalizada: {kind, key, ts, asset, severity, payload}
   ts       ISO-8601 com fuso
   asset    IP do ativo afetado (agent.ip / dst_ip)
   payload  alerta bruto do Wazuh ou deteção de rede
+
+R7: evidence_from_raw_alert/evidence_from_network_detection constroem-se
+agora sobre detection_event.py (base comum partilhada com
+redblue_correlator.py) — ts/asset/severity vêm de lá; kind/key continuam
+decididos aqui, por serem conceitos de deduplicação de incidente, não do
+tipo de deteção em si. Contrato observável (a forma da evidência) não
+mudou — ver docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md.
 """
 
 import os
 
-from event_catalog import classify_alert
+from detection_event import NETWORK_SEVERITY
+from detection_event import from_network_detection as _detection_from_network_detection
+from detection_event import from_rule_alert as _detection_from_rule_alert
 from redblue_correlator import (
     DEFAULT_WINDOW_SECONDS,
     _parse_timestamp,
@@ -32,7 +41,8 @@ TRANSITIONS = {
     "RESOLVED": ("CLOSED", "INVESTIGATING"),
     "CLOSED": (),
 }
-NETWORK_SEVERITY = {"port_scan": "medium", "brute_force": "medium", "volume_spike": "low"}
+# NETWORK_SEVERITY vive agora em detection_event.py (R7, fonte única) —
+# reexportado aqui para quem já importava incident_engine.NETWORK_SEVERITY.
 
 
 def _int_env(name: str, default: int) -> int:
@@ -62,54 +72,56 @@ def max_severity(a: str, b: str) -> str:
     return a if severity_rank(a) >= severity_rank(b) else b
 
 
-def _windows_event_id(raw: dict) -> int | None:
-    try:
-        value = raw.get("data", {}).get("win", {}).get("system", {}).get("eventID")
-        return int(value) if value is not None else None
-    except (ValueError, TypeError, AttributeError):
-        return None
-
-
 def evidence_from_raw_alert(raw: dict) -> dict | None:
     """Alerta bruto do Indexer (`_source` + `_id`) -> evidência, ou None se
-    faltar _id, timestamp válido ou agent.ip."""
+    faltar _id, timestamp válido ou agent.ip.
+
+    R7: a normalização (timestamp/asset/severidade) é feita por
+    detection_event.from_rule_alert — este construtor só decide o que é
+    específico de incidente (kind/key de deduplicação); `payload` é
+    sempre `event["ref"]`, ou seja, o próprio `raw` recebido, nunca uma
+    cópia (ver docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md,
+    ruling 3)."""
     if not isinstance(raw, dict):
         return None
     alert_id = raw.get("_id")
-    ts = _parse_timestamp(raw.get("@timestamp"))
-    agent = raw.get("agent")
-    asset = agent.get("ip") if isinstance(agent, dict) else None
-    if not alert_id or ts is None or not asset:
+    if not alert_id:
+        return None
+    event = _detection_from_rule_alert(raw)
+    if event is None:
         return None
     return {
         "kind": "wazuh_alert",
         "key": f"alert:{alert_id}",
-        "ts": ts.isoformat(),
-        "asset": asset,
-        "severity": classify_alert(_windows_event_id(raw))["severity"],
-        "payload": raw,
+        "ts": event["ts"],
+        "asset": event["asset"],
+        "severity": event["severity"],
+        "payload": event["ref"],
     }
 
 
 def evidence_from_network_detection(det: dict) -> dict | None:
     """Deteção de rede (network_detections.detect_network_anomalies) ->
     evidência, ou None se faltar timestamp, tipo ou IPs. O ativo é o destino
-    (o alvo do padrão); volume_spike não tem destino, usa a origem."""
+    (o alvo do padrão); volume_spike não tem destino, usa a origem.
+
+    R7: normalização delegada em detection_event.from_network_detection
+    (mesmo critério de validade; `event["label"]` é sempre igual a
+    `det["type"]` quando o construtor aceita a entrada) — ver ruling 3 da
+    spec R7."""
     if not isinstance(det, dict):
         return None
-    ts = _parse_timestamp(det.get("timestamp"))
-    det_type = det.get("type")
-    asset = det.get("dst_ip") or det.get("src_ip")
-    if ts is None or not det_type or not asset:
+    event = _detection_from_network_detection(det)
+    if event is None:
         return None
     return {
         "kind": "network_detection",
         # Mesma granularidade (minuto) com que network_monitor._poll_once deduplica.
-        "key": f"net:{det_type}:{det.get('src_ip')}:{det.get('dst_ip')}:{ts.isoformat()[:16]}",
-        "ts": ts.isoformat(),
-        "asset": asset,
-        "severity": NETWORK_SEVERITY.get(det_type, "low"),
-        "payload": det,
+        "key": f"net:{event['label']}:{det.get('src_ip')}:{det.get('dst_ip')}:{event['ts'][:16]}",
+        "ts": event["ts"],
+        "asset": event["asset"],
+        "severity": event["severity"],
+        "payload": event["ref"],
     }
 
 
