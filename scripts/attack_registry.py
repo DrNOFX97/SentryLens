@@ -20,7 +20,7 @@ VERDICTS = ("detected", "partial", "not_detected", "unknown")
 UNKNOWN_OPERATOR = "unknown"
 MAX_FIELD_LEN = 64
 
-_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f\x85  ]")
 
 
 def clean_text(value, max_len: int = MAX_FIELD_LEN) -> str | None:
@@ -67,11 +67,14 @@ def achieved_sources(attempt: dict) -> list[str]:
     return sources
 
 
-def verdict(expected: list[str], achieved: list[str], correlation_available: bool) -> str:
+def verdict(expected: list[str], achieved: list[str], correlation_available: bool,
+            alerts_truncated: bool = False) -> str:
     if not correlation_available:
         return "unknown"
     if not achieved:
-        return "not_detected"
+        # Alertas cortados no teto: a ausência de correspondência pode ser um
+        # falso negativo (os mais antigos ficaram de fora) -> não se afirma.
+        return "unknown" if alerts_truncated else "not_detected"
     return "detected" if all(s in achieved for s in expected) else "partial"
 
 
@@ -98,6 +101,7 @@ def build_attack_registry(
     incidents: list[dict] | None = None,
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
     correlation_available: bool = True,
+    alerts_truncated: bool = False,
 ) -> dict:
     """Registo dos ataques lançados, do mais recente para o mais antigo.
 
@@ -145,7 +149,8 @@ def build_attack_registry(
             "operator": normalize_operator(entry.get("operator")),
             "expected": {"detection": expected, "source": expected_source, "event_ids": list(scenario.event_ids)},
             "actual": {
-                "verdict": verdict(expected, achieved, ok),
+                "verdict": verdict(expected, achieved, ok, alerts_truncated),
+                "correlation_reason": "alerts_truncated" if ok and alerts_truncated and not achieved else None,
                 "achieved": achieved,
                 "detected_by": attempt["detected_by"] if ok else None,
                 "detected_by_network": attempt["detected_by_network"] if ok else None,

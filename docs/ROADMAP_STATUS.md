@@ -69,4 +69,4 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
   backfill); o autor das ações manuais é fixo (`analyst`).
 - Live SOC (R2): saúde do SIEM só pesquisa a última hora (sem alertas -> `stale`); taxa limitada aos 500 alertas mais recentes (`truncated` -> "≥"); Manager e Indexer são consultados em série (até ~30 s se ambos em timeout).
 - Numeração: os planos antigos usam "Fase N"; este roadmap usa "R<n>".
-- Attack Registry (R4): só lê o log (sem rota de escrita; operador/esperado só à nascença via `attack_scenarios.py --operator/--source/--expect`); ataques sem `id` não ligam a incidentes; o esperado por omissão é regra+ML (rede só se o log o disser); janela de alertas até 720 h e teto de 1000 alertas (`alerts_truncated`); sem allowlist de targets (R5).
+- Attack Registry (R4): só lê o log (sem rota de escrita; operador/esperado só à nascença via `attack_scenarios.py --operator/--source/--expect`); ataques sem `id` não ligam a incidentes; o esperado por omissão é regra+ML (rede só se o log o disser); janela de alertas até 720 h e teto de 1000 alertas (`alerts_truncated`: ataques sem correspondência ficam `unknown`); sem allowlist de targets (R5).

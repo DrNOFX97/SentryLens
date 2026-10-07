@@ -238,7 +238,7 @@ Exemplo de `GET /api/incidents?hours=168` (valores ilustrativos):
       "id": "INC-20261007-001",
       "status": "NEW",
       "severity": "high",
-      "asset": "192.168.1.84",
+      "asset": "192.0.2.10",
       "created_at": "2026-10-07T09:22:30+00:00",
       "first_evidence_at": "2026-10-07T08:41:12+00:00",
       "last_evidence_at": "2026-10-07T09:19:48+00:00",
@@ -293,7 +293,11 @@ evidence_count}]`. Detalhes em [DATA_MODEL.md](DATA_MODEL.md#registo-de-ataque-r
 network_capture_configured}`. Se o Indexer ou o modelo ML falharem a resposta é
 `200` com `available: false` e `error_code` estável (`indexer_unavailable`,
 `ml_model_unavailable`, `attack_outside_alert_window`); os vereditos ficam
-`unknown` (nunca "não detetado"). `incidents_available: false` se a base de
+`unknown` (nunca "não detetado"). Com `alerts_truncated: true` os ataques sem
+correspondência ficam também `unknown`, com `actual.correlation_reason =
+"alerts_truncated"` (`null` nos restantes); `detected`/`partial` mantêm-se. Com
+ids duplicados no log, o detalhe devolve o ataque mais antigo.
+`incidents_available: false` se a base de
 incidentes falhar. Exemplo ilustrativo (IPs de documentação):
 
 ```json

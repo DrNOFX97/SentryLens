@@ -90,7 +90,7 @@ function atkCorrelationNote(data) {
     parts.push(`⚠️ Correlação indisponível (${ATK_ERROR_LABELS[c.error_code] || "erro interno"}): o veredito fica «Desconhecido».`);
   }
   if (c.alerts_truncated) {
-    parts.push("⚠️ Atingido o teto de alertas pedidos ao Indexer: ataques antigos podem aparecer como não detetados por truncagem.");
+    parts.push("⚠️ Atingido o teto de alertas pedidos ao Indexer: ataques sem correspondência ficam «Desconhecido» (os alertas mais antigos foram cortados).");
   }
   if (data.incidents_available === false) parts.push("⚠️ Base de incidentes indisponível: a coluna «Incidentes» está incompleta.");
   const sk = data.skipped || {};
@@ -192,14 +192,19 @@ function atkShowDetailError(message) {
   el.textContent = message ? `⚠️ ${message}` : "";
 }
 
+let atkSelectSeq = 0;
 async function selectAttack(id) {
+  const seq = ++atkSelectSeq;
   atkSelectedId = Number(id);
   atkShowDetailError("");
   document.querySelectorAll("#attacks-body tr[data-id]").forEach((tr) =>
     tr.classList.toggle("selected", tr.dataset.id === String(id)));
   try {
-    renderAttackDetail(await atkRequest(`/api/attacks/${encodeURIComponent(id)}`));
+    const detail = await atkRequest(`/api/attacks/${encodeURIComponent(id)}`);
+    if (seq !== atkSelectSeq) return;
+    renderAttackDetail(detail);
   } catch (err) {
+    if (seq !== atkSelectSeq) return;
     atkShowDetailError(err.message);
   }
 }
@@ -246,7 +251,11 @@ document.getElementById("attacks-body").addEventListener("keydown", (event) => {
   }
 });
 document.getElementById("atk-status-filter").addEventListener("change", () => { if (atkIsActive()) refreshAttacks(); });
-document.getElementById("atk-technique-filter").addEventListener("input", () => { if (atkIsActive()) refreshAttacks(); });
+let atkTechniqueTimer = null;
+document.getElementById("atk-technique-filter").addEventListener("input", () => {
+  clearTimeout(atkTechniqueTimer);
+  atkTechniqueTimer = setTimeout(() => { if (atkIsActive()) refreshAttacks(); }, 250);
+});
 periodSelect.addEventListener("change", () => { if (atkIsActive()) refreshAttacks(); });
 
 // Ciclo de vida: só pede dados com uma das abas ativa e o separador visível.

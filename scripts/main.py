@@ -980,7 +980,7 @@ async def _build_attack_registry(attack_log: list, hours: int | None) -> tuple[d
         model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
     except _OutsideAlertWindow:
         correlation["error_code"] = "attack_outside_alert_window"
-    except (FileNotFoundError, OSError):
+    except Exception:  # FileNotFoundError, OSError, ValueError, UnpicklingError, ...
         logger.exception("Attack Registry: modelo ML indisponível")
         correlation["error_code"] = "ml_model_unavailable"
     else:
@@ -1006,6 +1006,7 @@ async def _build_attack_registry(attack_log: list, hours: int | None) -> tuple[d
     registry = build_attack_registry(
         attack_log, SCENARIOS, ml_results, network_detections=network_dets, incidents=incidents,
         correlation_available=correlation["available"],
+        alerts_truncated=correlation["alerts_truncated"],
     )
     return registry, correlation, incidents_available
 
@@ -1068,9 +1069,11 @@ async def get_attack(attack_id: Annotated[str, Path(pattern=r"^[0-9]{1,9}$")]):
     registry, correlation, incidents_available = await _build_attack_registry(
         attack_log, hours if hours <= ATTACK_MAX_HOURS else None
     )
-    for attack in registry["attacks"]:
-        if attack["id"] == wanted:
-            return {"attack": attack, "correlation": correlation, "incidents_available": incidents_available}
+    # Ids duplicados: o detalhe é o primeiro por tempo (o mais antigo).
+    matches = [a for a in registry["attacks"] if a["id"] == wanted]
+    if matches:
+        attack = min(matches, key=lambda a: incident_engine_parse(a["timestamp"]) or datetime.max.replace(tzinfo=timezone.utc))
+        return {"attack": attack, "correlation": correlation, "incidents_available": incidents_available}
     raise HTTPException(status_code=404, detail="Ataque não encontrado")
 
 

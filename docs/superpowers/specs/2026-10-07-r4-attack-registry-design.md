@@ -42,7 +42,10 @@ que fosse detetado e o que **realmente** foi (regra/ML/rede), com referências
    `partial` (alguma), `not_detected` (nenhuma — explícito), `unknown`
    (correlação indisponível: Indexer/modelo ML em baixo). **Nunca** se afirma
    "não detetado" sem correlação feita. Se os alertas foram truncados (teto 1000),
-   a resposta traz `alerts_truncated` e o painel avisa.
+   a resposta traz `alerts_truncated`, o painel avisa e os ataques sem nenhuma
+   correspondência ficam `unknown` com `actual.correlation_reason =
+   "alerts_truncated"` (falso negativo provável: os alertas mais antigos foram
+   cortados); `detected`/`partial` mantêm-se se houver correspondência.
 8. **Evidência = referências**: `matched_event_ids`, `matched_alert_count`,
    `network_detection_types`, MTTD por fonte e `incidents[]` (`id`, `severity`,
    `status`, `evidence_count`) ligados via `attack_id` nos eventos `attack_linked`

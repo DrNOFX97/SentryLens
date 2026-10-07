@@ -9,6 +9,7 @@ Correr (a partir de scripts/):
 """
 
 import json
+import pickle
 import os
 import sys
 import tempfile
@@ -160,6 +161,10 @@ def run_pure() -> None:
           and len(h0["operator"]) <= 64)
     check("puro: tool/technique não-string caem para o cenário", h0["tool"] == "netexec" and h0["mitre_technique"] == "T1135")
     check("puro: ids duplicados assinalados", sum(1 for a in reg_h["attacks"] if a["duplicate_id"]) == 2)
+    check("puro: NEL/LS/PS removidos de operador", attack_registry.clean_text("ab c d") == "a b c d")
+    reg_tr = attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS, alerts_truncated=True)
+    check("puro: truncado -> sem deteção 'unknown', com deteção mantém-se",
+          {a["id"]: a["actual"]["verdict"] for a in reg_tr["attacks"]} == {1: "detected", 2: "unknown", 3: "partial", 4: "unknown"})
     check("puro: log vazio/None não lança", attack_registry.build_attack_registry([], SCENARIOS, [])["attacks"] == []
           and attack_registry.build_attack_registry(None, SCENARIOS, None)["attacks"] == [])
 
@@ -236,7 +241,42 @@ def run_routes() -> None:
     r = client.get("/api/attacks", headers=HEADERS)
     check("sem modelo ML: 200 com error_code ml_model_unavailable e sem caminho",
           r.status_code == 200 and r.json()["correlation"]["error_code"] == "ml_model_unavailable" and "segredo" not in r.text)
+    for exc in (ValueError("pickle corrompido C:\segredo"), pickle.UnpicklingError("segredo"), RuntimeError("segredo")):
+        def _corrupt(_dir, _exc=exc):
+            raise _exc
+        main.ml_anomalies.load_model = _corrupt
+        r = client.get("/api/attacks", headers=HEADERS)
+        check(f"modelo ML corrompido ({type(exc).__name__}): 200 com ml_model_unavailable, sem fuga",
+              r.status_code == 200 and r.json()["correlation"]["error_code"] == "ml_model_unavailable" and "segredo" not in r.text)
     main.ml_anomalies.load_model = lambda _dir: (object(), object())
+
+    # --- alertas truncados: sem correspondência -> 'unknown' (não 'not_detected') ---
+    main.ATTACK_ALERTS_SIZE = 1  # get_recent_alerts devolve 1 alerta -> truncado
+    r = client.get("/api/attacks", headers=HEADERS)
+    by_id = {a["id"]: a for a in r.json()["attacks"]}
+    check("truncado: correlation.alerts_truncated=true", r.json()["correlation"]["alerts_truncated"] is True)
+    check("truncado: sem deteção -> 'unknown' com correlation_reason=alerts_truncated",
+          by_id[2]["actual"]["verdict"] == "unknown" and by_id[2]["actual"]["correlation_reason"] == "alerts_truncated"
+          and by_id[4]["actual"]["verdict"] == "unknown")
+    check("truncado: detected/partial mantêm-se",
+          by_id[1]["actual"]["verdict"] == "detected" and by_id[3]["actual"]["verdict"] == "partial"
+          and by_id[1]["actual"]["correlation_reason"] is None)
+    check("truncado: detalhe também 'unknown'",
+          client.get("/api/attacks/2", headers=HEADERS).json()["attack"]["actual"]["verdict"] == "unknown")
+    main.ATTACK_ALERTS_SIZE = 1000
+
+    # --- ids duplicados: detalhe = o mais antigo ---
+    dup_path = os.path.join(tmp.name, "dup.jsonl")
+    write_log(dup_path, [
+        {"id": 20, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(100), "status": "launched", "operator": "recente"},
+        {"id": 20, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(5000), "status": "launched", "operator": "antigo"},
+        {"id": 20, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(3000), "status": "launched", "operator": "meio"},
+    ])
+    good_log, main.ATTACK_LOG_PATH = main.ATTACK_LOG_PATH, dup_path
+    r = client.get("/api/attacks/20", headers=HEADERS)
+    check("ids duplicados: detalhe devolve o mais antigo", r.status_code == 200
+          and r.json()["attack"]["operator"] == "antigo" and r.json()["attack"]["duplicate_id"] is True)
+    main.ATTACK_LOG_PATH = good_log
 
     # --- base de incidentes em baixo ---
     import sqlite3

@@ -14,9 +14,9 @@ por correspondência de timestamp.
 
 Uso:
     python attack_scenarios.py --list
-    python attack_scenarios.py --target 192.168.1.20 --scenario brute_force_rdp
-    python attack_scenarios.py --target 192.168.1.20 --all
-    python attack_scenarios.py --target 192.168.1.20 --scenario lateral_movement_schtasks \
+    python attack_scenarios.py --target 192.0.2.20 --scenario brute_force_rdp
+    python attack_scenarios.py --target 192.0.2.20 --all
+    python attack_scenarios.py --target 192.0.2.20 --scenario lateral_movement_schtasks \
         --user administrator --password "Sup3rS3cret!"
 """
 
@@ -257,7 +257,7 @@ def _self_check() -> None:
     """Verificação rápida e determinística do formato de log e do
     mapeamento MITRE (sem lançar nada)."""
     fixed_time = datetime(2026, 9, 12, 14, 30, 0, tzinfo=timezone.utc)
-    entry = format_log_entry("brute_force_rdp", "192.168.1.20", "hydra", "launched", {"returncode": 0}, now=fixed_time)
+    entry = format_log_entry("brute_force_rdp", "192.0.2.20", "hydra", "launched", {"returncode": 0}, now=fixed_time)
     assert entry["timestamp"] == "2026-09-12T14:30:00+00:00", entry["timestamp"]
     assert entry["scenario"] == "brute_force_rdp"
     assert set(entry.keys()) == {"timestamp", "scenario", "target", "tool", "status", "details"}
@@ -278,7 +278,7 @@ def _self_check() -> None:
     tmp_log = Path(tempfile.gettempdir()) / "attack_scenarios_selfcheck.jsonl"
     if tmp_log.exists():
         tmp_log.unlink()
-    fake_args = SimpleNamespace(target="192.168.1.20", user="administrator", password=None,
+    fake_args = SimpleNamespace(target="192.0.2.20", user="administrator", password=None,
                                wordlist=None, timeout=60)
     scenario = SCENARIOS["smb_enum"]
 

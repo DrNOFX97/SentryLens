@@ -6,7 +6,7 @@ Replay, Model…) estão por definir nas fases R3–R14.
 ## Ataque — linha de `scripts/attack_log.jsonl`
 
 ```json
-{"scenario":"brute_force_rdp","target":"192.168.1.169","timestamp":"2026-10-06T10:24:08Z",
+{"scenario":"brute_force_rdp","target":"192.0.2.10","timestamp":"2026-10-06T10:24:08Z",
  "status":"launched","id":3,"technique":"T1110","tool":"hydra"}
 ```
 
@@ -36,7 +36,8 @@ evento `attack_linked` tem o mesmo `attack_id`. Não é persistido: calcula-se a
 cada pedido. Campos em [API.md](API.md#️-attack-registry-r4). Regras:
 `expected.detection` vem do log ou, sem ele, `["rule","ml"]`; `actual.verdict`
 é `detected` (todas as fontes esperadas viram), `partial`, `not_detected` ou
-`unknown` (correlação indisponível). Ataques sem `id` têm `id: null` e não
+`unknown` (correlação indisponível, ou sem correspondência com alertas truncados:
+`actual.correlation_reason = "alerts_truncated"`). Ataques sem `id` têm `id: null` e não
 ligam a incidentes; ids duplicados levam `duplicate_id: true`.
 
 ## Alerta enriquecido — `main._enrich_alert`
