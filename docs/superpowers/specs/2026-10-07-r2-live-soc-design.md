@@ -37,7 +37,7 @@ função pura `siem_health.build_siem_health_report(...)` (módulo novo,
 testável sem Wazuh). Resposta (HTTP 200 mesmo com componentes em baixo):
 
 ```
-{ "generated_at", "manager": {"status": "ok|unavailable", "error"?},
+{ "generated_at", "status": "ok|degraded|down", "stale": bool, "truncated": bool, "manager": {"status": "ok|unavailable", "error"?},
   "indexer": {"status": ..., "error"?},
   "agents": {"active","disconnected","never_connected","pending","total"} | null,
   "last_alert_at": iso|null, "ingestion_lag_seconds": float|null,
@@ -50,6 +50,16 @@ mostra "Indisponível"; Indexer ok mas sem alertas na última hora ->
 taxa = alertas na janela de 5 min / 5 (`null` se o Indexer está em baixo).
 Atraso de ingestão = agora − timestamp do alerta mais recente (limitado à
 última hora, porque só essa janela é pesquisada).
+
+Revisão de segurança (correções):
+- `error` de cada componente é um **código estável** (`timeout`/`unreachable`),
+  nunca texto de exceção (podia expor host/URL/portas); o detalhe só vai para o log.
+- Campo agregado `status`: `ok` | `degraded` (um componente em baixo ou
+  `stale`) | `down` (ambos). HTTP 200 não significa saudável. `stale: true`
+  quando o Indexer está ok mas o último alerta tem > 300 s (ou não há nenhum na
+  última hora). A UI mostra `status` num banner proeminente.
+- `truncated: true` quando o Indexer devolveu o limite pedido (500, os mais
+  recentes por `@timestamp` desc): a taxa é um mínimo e a UI mostra "≥" e aviso.
 
 Refresh: ao abrir a aba e depois a cada 30 s, **só se a aba Live SOC estiver
 ativa e o documento visível** (`document.visibilityState`).

@@ -768,3 +768,21 @@ tr.rb-stale td { font-style: italic; }
 /* Em coluna (mobile) a margin auto do .container desliga o stretch e a pagina
    crescia ate à largura das tabelas; assim as tabelas fazem scroll no painel. */
 @media (max-width: 900px) { .app-shell > .container { width: 100%; } }
+
+/* ===== Live SOC (Roadmap v2, R2) ===== */
+.ls-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.ls-toolbar button { padding: 8px 12px; border: none; border-radius: 6px; background: var(--cyan-600); color: #fff; font-weight: 600; cursor: pointer; }
+.ls-toolbar button:hover { background: var(--cyan-700); }
+.ls-conn { font-size: 13px; font-weight: 600; }
+.ls-conn-live { color: #1e8449; }
+.ls-conn-fallback { color: #b9770e; }
+.ls-conn-wait { color: #888; }
+.card .value.ls-state { font-size: 16px; }
+.card .value.ls-small { font-size: 16px; }
+.card .value.ls-ok { color: #1e8449; }
+.card .value.ls-down { color: #e74c3c; }
+.ls-banner { padding: 10px 14px; border-radius: 8px; font-weight: 700; margin-bottom: 12px; color: #fff; }
+.ls-banner-ok { background: #1e8449; }
+.ls-banner-degraded { background: #b9770e; }
+.ls-banner-down { background: #c0392b; }
+.ls-banner-wait { background: #7f8c8d; }

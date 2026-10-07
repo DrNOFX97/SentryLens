@@ -74,7 +74,7 @@
     <details class="nav-group" open>
       <summary>Wazuh</summary>
       <button class="nav-item" data-tab="agents">🖥️ Agentes</button>
-      <button class="nav-item is-planned" data-planned="R2" data-label="SIEM Health">❤️ SIEM Health<span class="nav-badge">R2</span></button>
+      <button class="nav-item" data-tab="live-soc">📡 Live SOC</button>
     </details>
     <details class="nav-group" open>
       <summary>Identidade (IAM)</summary>
@@ -791,6 +791,37 @@
     </div>
 
     <!-- ===== Secção planeada (sem dados reais ainda) ===== -->
+    <!-- ===== Live SOC (Roadmap v2, R2): feed ao vivo + saude do SIEM ===== -->
+    <div class="tab-content" id="tab-live-soc">
+      <section class="panel">
+        <h2>❤️ Saúde do SIEM</h2>
+        <div class="ls-banner ls-banner-wait" id="ls-status" role="status">Estado do SIEM: a verificar...</div>
+        <p class="panel-note" id="ls-health-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Wazuh Manager</h3><div class="value ls-state" id="ls-manager">—</div></div>
+          <div class="card"><h3>Wazuh Indexer</h3><div class="value ls-state" id="ls-indexer">—</div></div>
+          <div class="card"><h3>Agentes Ativos</h3><div class="value" id="ls-agents-active">—</div></div>
+          <div class="card"><h3>Agentes Desligados</h3><div class="value" id="ls-agents-down">—</div></div>
+          <div class="card"><h3>Atraso de Ingestão</h3><div class="value ls-small" id="ls-lag">—</div></div>
+          <div class="card"><h3>Taxa de Alertas</h3><div class="value" id="ls-rate">—</div></div>
+        </section>
+      </section>
+      <section class="panel">
+        <h2>📡 Alertas ao vivo</h2>
+        <div class="ls-toolbar">
+          <span class="ls-conn ls-conn-wait" id="ls-conn">● A ligar...</span>
+          <button id="ls-pause-btn" type="button">⏸ Pausar</button>
+          <span id="ls-pending" class="panel-note"></span>
+        </div>
+        <div class="table-scroll">
+          <table id="ls-feed-table">
+            <thead><tr><th>Hora</th><th>Severidade</th><th>Agente</th><th>Evento</th></tr></thead>
+            <tbody id="ls-feed-body"><tr><td colspan="4" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
     <div class="tab-content" id="tab-planned">
       <section class="panel planned-panel">
         <h2 id="planned-title">Secção planeada</h2>
@@ -813,5 +844,6 @@
   <script src="app.js"></script>
   <script src="redblue.js"></script>
   <script src="incidents.js"></script>
+  <script src="live_soc.js"></script>
 </body>
 </html>

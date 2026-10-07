@@ -124,7 +124,7 @@ function connectWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg && msg.type === "new_alert") {
         refreshDashboard();
-        document.dispatchEvent(new CustomEvent("sentrylens:new-alert"));
+        document.dispatchEvent(new CustomEvent("sentrylens:new-alert", { detail: msg.alert }));
       }
     } catch (err) {
       console.error("Mensagem WebSocket inválida:", err);

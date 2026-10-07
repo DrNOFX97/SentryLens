@@ -42,6 +42,7 @@ ALLOWED_FILES = {
     "/app.js": "app.js",
     "/redblue.js": "redblue.js",
     "/incidents.js": "incidents.js",
+    "/live_soc.js": "live_soc.js",
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",
