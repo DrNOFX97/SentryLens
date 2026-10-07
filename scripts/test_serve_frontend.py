@@ -112,6 +112,8 @@ def run() -> None:
         # --- whitelist continua intacta ---
         status, _, _ = get(port, "/index.html")
         check("/index.html continua a ser servido", status == 200)
+        status, headers, _ = get(port, "/incidents.js")
+        check("/incidents.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, _, _ = get(port, "/scripts/.env")
         check("/scripts/.env continua a dar 404", status == 404)
         status, _, _ = get(port, "/.env")

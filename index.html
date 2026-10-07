@@ -49,7 +49,7 @@
     <details class="nav-group" open>
       <summary>SOC</summary>
       <button class="nav-item" data-tab="alerts">🚨 Alertas</button>
-      <button class="nav-item is-planned" data-planned="R3" data-label="Incidentes">🧩 Incidentes<span class="nav-badge">R3</span></button>
+      <button class="nav-item" data-tab="incidents">🧩 Incidentes</button>
       <button class="nav-item is-planned" data-planned="R3" data-label="Investigações">🔎 Investigações<span class="nav-badge">R3</span></button>
     </details>
     <details class="nav-group" open>
@@ -719,6 +719,77 @@
       </section>
     </div>
 
+    <!-- ===== Incidentes (Roadmap v2, R3) ===== -->
+    <div class="tab-content" id="tab-incidents">
+      <section class="panel" id="incidents-panel">
+        <h2>🧩 Incidentes</h2>
+        <p class="panel-note">
+          Agrupamento automático de deteções (alertas Wazuh e rede) por ativo, com estado e timeline.
+          Só dados reais: ataques sem nenhuma deteção não geram incidente (ver Red vs Blue).
+        </p>
+        <section class="kpi-grid" id="incidents-kpi-grid">
+          <div class="card"><h3>Abertos</h3><div class="value" id="kpi-inc-open">—</div></div>
+          <div class="card critical"><h3>Altos/Críticos Abertos</h3><div class="value" id="kpi-inc-high">—</div></div>
+          <div class="card"><h3>MTTD Médio</h3><div class="value" id="kpi-inc-mttd">—</div></div>
+          <div class="card"><h3>Total na Janela</h3><div class="value" id="kpi-inc-total">—</div></div>
+        </section>
+        <div class="filter-row">
+          <label for="inc-status-filter">Estado:</label>
+          <select id="inc-status-filter">
+            <option value="">Todos</option>
+            <option value="NEW">Novo</option>
+            <option value="INVESTIGATING">Em investigação</option>
+            <option value="CONTAINED">Contido</option>
+            <option value="RESOLVED">Resolvido</option>
+            <option value="CLOSED">Fechado</option>
+          </select>
+          <label for="inc-severity-filter">Severidade:</label>
+          <select id="inc-severity-filter">
+            <option value="">Todas</option>
+            <option value="critical">Crítico</option>
+            <option value="high">Alto</option>
+            <option value="medium">Médio</option>
+            <option value="low">Baixo</option>
+            <option value="info">Info</option>
+          </select>
+          <button id="inc-backfill-btn" type="button">📥 Importar histórico</button>
+        </div>
+        <div id="inc-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="incidents-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Severidade</th><th>Estado</th><th>Ativo</th>
+                <th>Primeira evidência</th><th>Última evidência</th><th>Evidências</th><th>MITRE / ataque</th>
+              </tr>
+            </thead>
+            <tbody id="incidents-body">
+              <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="incident-detail-panel" hidden>
+        <h2 id="inc-detail-title">Incidente</h2>
+        <div id="inc-detail-error" class="panel-error-banner" hidden></div>
+        <div id="inc-detail-meta" class="inc-meta"></div>
+        <div class="inc-actions" id="inc-actions"></div>
+        <label for="inc-note-input" class="inc-note-label">Nota (obrigatória para fechar um incidente novo):</label>
+        <textarea id="inc-note-input" rows="2" maxlength="2000"></textarea>
+        <button id="inc-note-btn" type="button">➕ Adicionar nota</button>
+        <h3>Evidências</h3>
+        <div class="table-scroll">
+          <table id="inc-evidence-table">
+            <thead><tr><th>Hora</th><th>Tipo</th><th>Severidade</th><th>Descrição</th></tr></thead>
+            <tbody id="inc-evidence-body"></tbody>
+          </table>
+        </div>
+        <h3>Timeline</h3>
+        <ol class="inc-timeline" id="inc-timeline"></ol>
+      </section>
+    </div>
+
     <!-- ===== Secção planeada (sem dados reais ainda) ===== -->
     <div class="tab-content" id="tab-planned">
       <section class="panel planned-panel">
@@ -741,5 +812,6 @@
   <script src="config.js"></script>
   <script src="app.js"></script>
   <script src="redblue.js"></script>
+  <script src="incidents.js"></script>
 </body>
 </html>

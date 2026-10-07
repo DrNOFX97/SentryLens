@@ -744,3 +744,27 @@ tr.row-gap { background: #fdebd0; }
 
 tr.rb-stale { opacity: 0.6; }
 tr.rb-stale td { font-style: italic; }
+
+/* ===== Incidentes (Roadmap v2, R3) ===== */
+.inc-row { cursor: pointer; }
+.inc-row:hover, .inc-row.selected { background: #eef7f9; }
+.inc-row:focus-visible { outline: 2px solid var(--cyan-600); outline-offset: -2px; }
+.inc-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e0e6ea; color: var(--ink-900); }
+.inc-status-NEW { background: #fdecc8; }
+.inc-status-INVESTIGATING { background: #d6ebf5; }
+.inc-status-CONTAINED { background: #e3d9f3; }
+.inc-status-RESOLVED { background: #d4efdf; }
+.inc-status-CLOSED { background: #e0e0e0; color: #666; }
+.inc-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 12px; font-size: 14px; }
+.inc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.inc-actions button, #inc-note-btn, #inc-backfill-btn { padding: 8px 12px; border: none; border-radius: 6px; background: var(--cyan-600); color: #fff; font-weight: 600; cursor: pointer; }
+.inc-actions button:hover, #inc-note-btn:hover, #inc-backfill-btn:hover { background: var(--cyan-700); }
+.inc-actions button:disabled, #inc-backfill-btn:disabled { opacity: 0.5; cursor: wait; }
+.inc-note-label { display: block; margin: 8px 0 4px; font-size: 13px; color: #666; }
+#inc-note-input { width: 100%; padding: 8px; border: 1px solid #ccd3d8; border-radius: 6px; font: inherit; margin-bottom: 8px; }
+.inc-timeline { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+.inc-timeline li { padding: 6px 0; border-bottom: 1px solid #eee; }
+.inc-timeline time { font-family: var(--font-mono); color: #888; margin-right: 6px; }
+/* Em coluna (mobile) a margin auto do .container desliga o stretch e a pagina
+   crescia ate à largura das tabelas; assim as tabelas fazem scroll no painel. */
+@media (max-width: 900px) { .app-shell > .container { width: 100%; } }
