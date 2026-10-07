@@ -216,6 +216,7 @@ def build_redblue_report(
             "detected_by": detected_by,
             "mttd_seconds": mttd_seconds,
             "matched_event_ids": sorted({result.get("windows_event_id") for _, result in matches}),
+            "matched_alert_count": len(matches),
             "detected_by_network": detected_by_network,
             "network_detection_types": sorted({det.get("type") for _, det in network_matches}),
             "mttd_network_seconds": mttd_network_seconds,

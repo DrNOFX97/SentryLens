@@ -22,6 +22,7 @@ Uso:
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -141,6 +142,25 @@ SCENARIOS: dict[str, Scenario] = {
 }
 
 
+EXPECTED_SOURCES = ("rule", "ml", "network")
+_LABEL_RE = re.compile(r"^[\w .@:-]{1,64}$")
+
+
+def _validated_label(value: str) -> str:
+    """Operador/origem: texto curto sem caracteres de controlo (R4, Attack Registry)."""
+    value = value.strip()
+    if not _LABEL_RE.match(value):
+        raise argparse.ArgumentTypeError("valor inválido (1-64 caracteres: letras, dígitos, espaço e . @ : _ -)")
+    return value
+
+
+def _validated_expected(value: str) -> list[str]:
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    if not items or any(item not in EXPECTED_SOURCES for item in items):
+        raise argparse.ArgumentTypeError(f"--expect aceita só {','.join(EXPECTED_SOURCES)} (separados por vírgula)")
+    return [s for s in EXPECTED_SOURCES if s in items]
+
+
 def format_log_entry(
     scenario_name: str,
     target: str,
@@ -148,10 +168,15 @@ def format_log_entry(
     status: str,
     details: dict | None = None,
     now: datetime | None = None,
+    operator: str | None = None,
+    source: str | None = None,
+    expected: list[str] | None = None,
 ) -> dict:
-    """Constrói a entrada de log (função pura, testável sem lançar ataques)."""
+    """Constrói a entrada de log (função pura, testável sem lançar ataques).
+    operator/source/expected (R4) são opcionais e só são gravados quando
+    fornecidos — o formato antigo não muda."""
     timestamp = (now or datetime.now(timezone.utc)).isoformat()
-    return {
+    entry = {
         "timestamp": timestamp,
         "scenario": scenario_name,
         "target": target,
@@ -159,6 +184,13 @@ def format_log_entry(
         "status": status,
         "details": details or {},
     }
+    if operator:
+        entry["operator"] = operator
+    if source:
+        entry["source"] = source
+    if expected:
+        entry["expected"] = list(expected)
+    return entry
 
 
 def append_attack_log(entry: dict, log_path: Path = DEFAULT_LOG_PATH) -> None:
@@ -167,15 +199,21 @@ def append_attack_log(entry: dict, log_path: Path = DEFAULT_LOG_PATH) -> None:
 
 
 def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = DEFAULT_LOG_PATH) -> dict:
+    meta = {"operator": getattr(args, "operator", None), "source": getattr(args, "source", None),
+            "expected": getattr(args, "expect", None)}
+
+    def _fmt(*a, **k):
+        return format_log_entry(*a, **meta, **k)
+
     command = scenario.build_command(args)
     if command is None:
-        entry = format_log_entry(scenario.name, args.target, scenario.tool, "skipped",
+        entry = _fmt(scenario.name, args.target, scenario.tool, "skipped",
                                   {"reason": "argumentos obrigatórios em falta (ex: --user/--password)"})
         append_attack_log(entry, log_path)
         return entry
 
     if shutil.which(command[0]) is None:
-        entry = format_log_entry(scenario.name, args.target, scenario.tool, "failed",
+        entry = _fmt(scenario.name, args.target, scenario.tool, "failed",
                                   {"reason": f"ferramenta '{command[0]}' não encontrada no PATH"})
         append_attack_log(entry, log_path)
         return entry
@@ -188,7 +226,7 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = 
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=args.timeout)
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-        entry = format_log_entry(
+        entry = _fmt(
             scenario.name, args.target, scenario.tool, "launched",
             {"returncode": result.returncode, "command": _redact_command_for_log(command),
              "duration_seconds": round(elapsed, 2)},
@@ -199,14 +237,14 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = 
         # timeout — regista-se como "launched" para o correlator a contar como
         # tentativa executada, não como falha/não-executada.
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-        entry = format_log_entry(scenario.name, args.target, scenario.tool, "launched",
+        entry = _fmt(scenario.name, args.target, scenario.tool, "launched",
                                   {"reason": "timeout", "timed_out": True,
                                    "command": _redact_command_for_log(command),
                                    "duration_seconds": round(elapsed, 2)},
                                   now=started)
     except Exception as exc:
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-        entry = format_log_entry(scenario.name, args.target, scenario.tool, "failed",
+        entry = _fmt(scenario.name, args.target, scenario.tool, "failed",
                                   {"reason": str(exc), "command": _redact_command_for_log(command),
                                    "duration_seconds": round(elapsed, 2)},
                                   now=started)
@@ -285,6 +323,9 @@ def main() -> None:
     parser.add_argument("--password", help="Password (cenários pós-comprometimento)")
     parser.add_argument("--wordlist", help="Wordlist para força bruta (default: rockyou.txt)")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout por cenário, em segundos")
+    parser.add_argument("--operator", type=_validated_label, help="Quem lança o ataque (registado no log, R4)")
+    parser.add_argument("--source", type=_validated_label, help="Origem do ataque, ex. máquina atacante (registado no log, R4)")
+    parser.add_argument("--expect", type=_validated_expected, help="Deteção esperada: rule,ml,network (registado no log, R4)")
     parser.add_argument("--log-path", default=str(DEFAULT_LOG_PATH), help="Caminho do ficheiro de log JSONL")
     args = parser.parse_args()
 

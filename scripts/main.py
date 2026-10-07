@@ -33,7 +33,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, StringConstraints
@@ -41,13 +41,14 @@ from pydantic import BaseModel, Field, StringConstraints
 import incident_ingest
 import ml_anomalies
 from admin_activity import build_admin_activity_report
+from attack_registry import build_attack_registry, summarize as summarize_attacks
 from attack_scenarios import SCENARIOS
 from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
 from event_catalog import classify_alert
 from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
 from history_store import append_alert_history, append_compliance_history
-from incident_engine import available_transitions
+from incident_engine import available_transitions, parse_timestamp as incident_engine_parse
 from incident_store import IncidentNotFound, IncidentStore, InvalidTransition
 from lifecycle import build_lifecycle_report
 from network_detections import detect_network_anomalies
@@ -949,6 +950,128 @@ async def add_incident_note(incident_id: str, body: IncidentNote):
     except IncidentNotFound:
         raise HTTPException(status_code=404, detail="Incidente não encontrado")
     return await _incident_detail(incident_id)
+
+
+# ---------------------------------------------------------------------------
+# Attack Registry (Roadmap v2, R4) — ver docs/superpowers/specs/2026-10-07-r4-attack-registry-design.md
+# ---------------------------------------------------------------------------
+
+AttackVerdict = Literal["detected", "partial", "not_detected", "unknown"]
+ATTACK_ALERTS_SIZE = 1000
+ATTACK_MAX_HOURS = 720
+
+
+class _OutsideAlertWindow(Exception):
+    pass
+
+
+async def _build_attack_registry(attack_log: list, hours: int | None) -> tuple[dict, dict, bool]:
+    """Junta o attack_log com alertas (regra+ML), rede e incidentes. Falhas do
+    Indexer/modelo ML não derrubam o registo: o veredito fica "unknown" e o
+    código de erro estável vai em correlation.error_code (detalhe só no log).
+    hours=None: ataque fora da janela de alertas suportada, sem correlação.
+    Devolve (registo, correlation, incidents_available)."""
+    correlation = {"available": False, "error_code": None, "alerts_fetched": 0,
+                   "alerts_truncated": False, "network_capture_configured": vm_ssh_client is not None}
+    ml_results: list[dict] = []
+    try:
+        if hours is None:
+            raise _OutsideAlertWindow
+        model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
+    except _OutsideAlertWindow:
+        correlation["error_code"] = "attack_outside_alert_window"
+    except (FileNotFoundError, OSError):
+        logger.exception("Attack Registry: modelo ML indisponível")
+        correlation["error_code"] = "ml_model_unavailable"
+    else:
+        try:
+            raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=ATTACK_ALERTS_SIZE)
+        except Exception:
+            logger.exception("Attack Registry: Wazuh Indexer indisponível")
+            correlation["error_code"] = "indexer_unavailable"
+        else:
+            ml_results = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)["results"]
+            correlation.update(available=True, alerts_fetched=len(raw_alerts),
+                               alerts_truncated=len(raw_alerts) >= ATTACK_ALERTS_SIZE)
+
+    incidents_available = True
+    incidents: list[dict] = []
+    try:
+        incidents = await run_in_threadpool(incident_store.list_incidents, None, None, None, 100000, 0)
+    except sqlite3.Error:
+        logger.exception("Attack Registry: base de incidentes indisponível")
+        incidents_available = False
+
+    network_dets = list(network_detection_buffer) if vm_ssh_client is not None else None
+    registry = build_attack_registry(
+        attack_log, SCENARIOS, ml_results, network_detections=network_dets, incidents=incidents,
+        correlation_available=correlation["available"],
+    )
+    return registry, correlation, incidents_available
+
+
+async def _read_attack_log() -> list:
+    try:
+        return await run_in_threadpool(load_attack_log, ATTACK_LOG_PATH)
+    except (OSError, UnicodeDecodeError):
+        logger.exception("Attack Registry: não foi possível ler o log de ataques")
+        raise HTTPException(status_code=500, detail="Erro interno ao ler o registo de ataques")
+
+
+@app.get("/api/attacks", dependencies=_REQUIRE_API_KEY)
+async def list_attacks(
+    hours: int = Query(168, ge=1, le=ATTACK_MAX_HOURS, description="Janela temporal (timestamp do ataque), em horas"),
+    technique: str | None = Query(None, pattern=r"^T\d{4}(\.\d{3})?$", description="Técnica MITRE, ex. T1110"),
+    status: AttackVerdict | None = Query(None, description="Veredito esperado-vs-real"),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Registo de ataques lançados, com esperado vs real e incidentes ligados."""
+    attack_log = await _read_attack_log()
+    registry, correlation, incidents_available = await _build_attack_registry(attack_log, hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    in_window = [
+        a for a in registry["attacks"]
+        if (ts := incident_engine_parse(a["timestamp"])) is not None and ts >= cutoff
+    ]
+    if technique:
+        in_window = [a for a in in_window if a["mitre_technique"] == technique]
+    summary = summarize_attacks(in_window)
+    if status:
+        in_window = [a for a in in_window if a["actual"]["verdict"] == status]
+    return {
+        "window_hours": hours,
+        "total": len(in_window),
+        "attacks": in_window[offset:offset + limit],
+        "summary": summary,
+        "skipped": registry["skipped"],
+        "correlation": correlation,
+        "incidents_available": incidents_available,
+    }
+
+
+@app.get("/api/attacks/{attack_id}", dependencies=_REQUIRE_API_KEY)
+async def get_attack(attack_id: Annotated[str, Path(pattern=r"^[0-9]{1,9}$")]):
+    """Detalhe de um ataque pelo id do log. 404 se não existir."""
+    attack_log = await _read_attack_log()
+    wanted = int(attack_id)
+    entry_ts = None
+    for entry in attack_log:
+        if isinstance(entry, dict) and entry.get("id") == wanted and not isinstance(entry.get("id"), bool):
+            parsed = incident_engine_parse(entry.get("timestamp"))
+            if parsed is not None and (entry_ts is None or parsed < entry_ts):
+                entry_ts = parsed
+    if entry_ts is None:
+        raise HTTPException(status_code=404, detail="Ataque não encontrado")
+    age_hours = (datetime.now(timezone.utc) - entry_ts).total_seconds() / 3600
+    hours = max(1, int(age_hours) + 2)
+    registry, correlation, incidents_available = await _build_attack_registry(
+        attack_log, hours if hours <= ATTACK_MAX_HOURS else None
+    )
+    for attack in registry["attacks"]:
+        if attack["id"] == wanted:
+            return {"attack": attack, "correlation": correlation, "incidents_available": incidents_available}
+    raise HTTPException(status_code=404, detail="Ataque não encontrado")
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
