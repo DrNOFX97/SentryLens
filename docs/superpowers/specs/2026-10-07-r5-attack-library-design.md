@@ -282,25 +282,55 @@ mão).
 8. Verificar cobertura contra `scripts/attack_log_round3.jsonl` (dados
    reais do Round 3) e documentar quaisquer cenários "sem entrada".
 
-## Decisões em aberto para o utilizador
+## Decisões em aberto para o utilizador — DECIDIDAS (2026-10-07, implementação R5)
 
-1. **Allowlist de alvos**: fica só documentada como convenção/dívida nesta
-   fase, ou deve a R5 já propor um ficheiro de allowlist lido por
-   `attack_scenarios.py` do lado da Kali (fora da API)? Isto muda se a
-   tarefa 1 do roadmap-ready plan inclui ou não esse ficheiro.
-2. **Risco automático vs manual**: a taxonomia `low/medium/high` fica
-   decidida à mão por entrada (como proposto), ou deve derivar de uma regra
-   (ex. de `replayable=false` → nunca `low`)? Muda o esforço de manter o
-   YAML atualizado.
-3. **Aviso vs erro para cenário sem entrada na biblioteca**: proposto como
-   aviso não-bloqueante (arranque continua); se preferires fail-fast total
-   (como o resto da validação), um cenário novo em `SCENARIOS` bloquearia o
-   arranque até a biblioteca ser atualizada.
-4. **Id da biblioteca**: proposto = `scenario_name` (string); se a R4 vier a
-   usar outro identificador (ex. um id numérico próprio de execução), pode
-   ser preciso um segundo campo de mapeamento — a confirmar quando a R4
-   estiver implementada.
-5. **Alcance dos `cleanup_steps`**: ficam só em texto descritivo (proposto),
-   ou deves querer já aqui uma estrutura mais rica (ex. passos com
-   categoria "manual"/"automatizável no futuro") para facilitar uma R13 que
-   venha a semi-automatizar cleanup?
+1. **Allowlist de alvos — DECIDIDO.** A R5 propõe e aplica a validação onde
+   os alvos entram de facto: `scripts/attack_scenarios.py` (CLI e
+   `run_scenario`), nunca na API (que continua só de leitura e não executa
+   nada). Default fail-closed: sem allowlist configurada, só loopback e os
+   blocos de documentação (`192.0.2.0/24`, `198.51.100.0/24`,
+   `203.0.113.0/24`, `2001:db8::/32`, RFC 5737/3849/4291) são aceites.
+   Allowlist real configurável via `ATTACK_TARGETS_PATH` (ou
+   `scripts/attack_targets.json`, gitignored) a partir do exemplo versionado
+   `scripts/attack_targets.example.json` (só IPs de documentação).
+   Hostnames nunca são resolvidos — só entram se constarem explicitamente em
+   `allowed_hosts` — e um ficheiro configurado ilegível/inválido é erro,
+   nunca ignorado em silêncio. `--allow-any-target` é o override explícito.
+   **Compatibilidade confirmada**: é uma mudança de comportamento — qualquer
+   fluxo anterior que já apontasse `--target` a um IP real do laboratório
+   (`192.168.x.x`) passa a ser recusado por omissão a partir desta versão;
+   documentado em `docs/SECURITY.md`, `README.md` e `CLAUDE.md` local, com a
+   flag explícita (`--allow-any-target` ou `ATTACK_TARGETS_PATH`) como
+   caminho de volta. Testes: `scripts/test_attack_targets.py`.
+2. **Risco automático vs manual — DECIDIDO.** Risco (`low/medium/high`)
+   continua decidido à mão por entrada, não calculado — mas o validador do
+   schema (`attack_library.validate_entry`) rejeita incoerências: uma
+   entrada com `replayable: false` nunca pode ter `risk: low`, e uma entrada
+   com `risk: low` tem de ter pelo menos um passo em `cleanup_steps`.
+3. **Aviso vs erro para cenário sem entrada na biblioteca — DECIDIDO.** Fica
+   como proposto: aviso não-bloqueante em stderr, o arranque continua. As 5
+   entradas atuais cobrem a totalidade de `attack_scenarios.SCENARIOS`, por
+   isso este caminho só é exercitado pelos testes (`test_attack_library.py`),
+   não pelo catálogo real hoje.
+4. **Id da biblioteca — DECIDIDO.** `id = scenario_name` (string), como
+   proposto. A integração com a R4 (`attack_registry.expected_detection`)
+   confirma que não foi preciso nenhum segundo campo de mapeamento: a R4 já
+   usa `scenario_name` como chave em `attack_log.jsonl`/`SCENARIOS`.
+5. **Alcance dos `cleanup_steps` — DECIDIDO.** Ficam só em texto descritivo
+   (`list[str]` de frases), como proposto — sem estrutura de
+   categoria/automação. Fica registado como dívida explícita para uma
+   eventual R13 (Attack Replay Lab) que venha a querer semi-automatizar
+   cleanup.
+
+**Ruling adicional (ambiguidade decidida pela implementação, não coberta
+pelas 5 decisões acima):** o critério de aceitação da spec ("cada ataque
+`launched` em `scripts/attack_log_round3.jsonl` tem o seu `scenario`
+coberto...") não se aplica literalmente a esse ficheiro — é um formato mais
+antigo, gerado antes do campo `scenario` existir (usa `technique`/`tool`
+sem `scenario`), já referido em `docs/ROADMAP_STATUS.md` R0 como dado
+histórico do Round 3 com `detected`/`mttd_seconds` auto-declarados pelo
+atacante. A verificação real de cobertura (12/12) foi feita contra
+`scripts/attack_log.jsonl` (o ficheiro que o backend lê em produção, via
+`ATTACK_LOG_PATH`); `attack_log_round3.jsonl` fica registado como achado
+lateral, sem entrada mapeável por `scenario`, no relatório de implementação
+(`.superpowers/sdd/r5-report.md`).
