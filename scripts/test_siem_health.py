@@ -97,7 +97,7 @@ check("atraso nunca negativo", build_siem_health_report(SUMMARY, None, [alert(-6
 check("rota sem API key -> 401", client.get("/api/siem/health").status_code == 401)
 
 main.manager_client = type("M", (), {"get_agents_summary": AsyncMock(return_value=SUMMARY)})()
-main.indexer_client = type("I", (), {"get_recent_alerts": AsyncMock(return_value=[alert(1)])})()
+main.indexer_client = type("I", (), {"get_recent_alerts": AsyncMock(return_value=[{"@timestamp": (datetime.now(timezone.utc) - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S.000+0000")}])})()
 resp = client.get("/api/siem/health", headers=HEADERS)
 body = resp.json()
 check("rota 200 com ambos ok", resp.status_code == 200 and body["manager"]["status"] == "ok" and body["indexer"]["status"] == "ok")
