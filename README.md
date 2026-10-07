@@ -348,6 +348,7 @@ Os painéis reais continuam a ser as 11 abas abaixo:
 | 🧠 **ML Anomalias** | Deteção por Isolation Forest lado a lado com a classificação por regras |
 | 🛡️ **Conformidade** | Veredito RGPD/NIS2/AI Act por alerta, resumo agregado, perfil da organização |
 | ⚔️ **Red vs Blue** | Correlação entre o log de ataques e os alertas (Fase 11, Onda 3) — 4 painéis, ver abaixo |
+| 📡 **Live SOC** | Feed de alertas ao vivo (WebSocket existente, pausar/retomar) e saúde do SIEM (R2, `live_soc.js`): estado Manager/Indexer, agentes, atraso de ingestão, taxa de alertas — ver [docs/API.md](docs/API.md#-saúde-do-siem-r2) |
 | 🧩 **Incidentes** | Gestão de incidentes (R3, `incidents.js`): agrupamento automático de alertas Wazuh e deteções de rede por ativo, estados NEW→CLOSED, timeline, notas e importação do histórico — ver [docs/API.md](docs/API.md#-incidentes-r3) |
 
 A aba **⚔️ Red vs Blue** vive em `redblue.js` (não edita `app.js`; reutiliza
@@ -430,6 +431,9 @@ python test_incident_engine.py        # regras puras de agrupamento, estados, at
 python test_incident_store.py         # SQLite, IDs diários, deduplicação, timeline append-only
 python test_incident_ingest.py        # ingest de alertas/deteções de rede + resumo ML
 python test_incidents_api.py          # /api/incidents/* (401/404/409/422/502, backfill)
+
+# Live SOC (R2):
+python test_siem_health.py            # saúde do SIEM pura + /api/siem/health (erros, stale, truncated)
 ```
 
 ### Particularidades
@@ -544,6 +548,7 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | GET | `/api/redblue/metrics` | Correlação Red vs Blue (Fase 11) — cobertura/MTTD por cenário de ataque — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/redblue/attack-log` | Log de ataques real (`attack_log.jsonl`) + mapeamento MITRE dos cenários (Fase 11, Onda 3) — resposta: `entries`, `total`, `scenarios`; exige `X-API-Key` |
 | GET | `/api/redblue/network` | Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — pacotes + deteções — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/siem/health` | Saúde do SIEM (R2): `status` ok/degraded/down, `stale`, `truncated`, agentes, atraso e taxa — sempre 200, ler `status` |
 | GET | `/api/incidents` | Incidentes + resumo (R3) — filtros `status`, `severity`, `hours`, `limit`, `offset` |
 | GET | `/api/incidents/{id}` | Detalhe do incidente: evidências, timeline, `ml_summary` (R3) |
 | POST | `/api/incidents/{id}/status` | Muda o estado `{status, note?}` (R3) |

@@ -15,7 +15,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 |---|---|---|---|
 | R0 | Fundação / auditoria | ✅ | Auditoria de 2026-10-06; correções abaixo; docs `ARCHITECTURE`, `DATA_MODEL`, `SECURITY` |
 | R1 | Sidebar SOC | ✅ | `index.html`, `app.js` (`activateTab`/`activatePlanned`), `style.css`; itens sem dados mostram "Sem dados" |
-| R2 | Live SOC | ⬜ | Reutiliza `/api/stats`, `/api/alerts`, `/ws/alerts` |
+| R2 | Live SOC | ✅ | Painel Live SOC (`live_soc.js`): feed ao vivo via o WebSocket existente + saúde do SIEM (`GET /api/siem/health`: `status` ok/degraded/down, `stale`, `truncated`) |
 | R3 | Gestão de incidentes | ✅ | Incidentes automáticos (alertas Wazuh + rede), estados, timeline, backfill, painel |
 | R4 | Attack Registry | 🟡 | `attack_log.jsonl` já tem `id/technique/tool` (ver R0); faltam operador, evidência, esperado vs real; usa `attack_id` em `incident_events` |
 | R5 | Attack Library | 🟡 | `attack_scenarios.SCENARIOS`; faltam cleanup, risco, sensores, replayable |
@@ -67,4 +67,5 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 - Incidentes (R3): a janela de 10 min (`INCIDENT_GAP_SECONDS`) pode fundir ataques
   distintos ao mesmo ativo; deteções de rede só existem em memória (ficam fora do
   backfill); o autor das ações manuais é fixo (`analyst`).
+- Live SOC (R2): saúde do SIEM só pesquisa a última hora (sem alertas -> `stale`); taxa limitada aos 500 alertas mais recentes (`truncated` -> "≥"); Manager e Indexer são consultados em série (até ~30 s se ambos em timeout).
 - Numeração: os planos antigos usam "Fase N"; este roadmap usa "R<n>".

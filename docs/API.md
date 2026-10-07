@@ -343,3 +343,19 @@ Um Event ID fora desta lista (ou `None`) recebe uma classificação por
 defeito segura (`severity: "info"`) — nunca rebenta o backend. Para
 adicionar um Event ID novo: acrescentar uma entrada a `CRITICAL_EVENTS`
 em `scripts/event_catalog.py`; não é preciso tocar em `main.py`.
+
+## 📡 Saúde do SIEM (R2)
+
+Exige `X-API-Key`. Responde **sempre 200** (decisão de design: o painel precisa de
+ver o estado parcial) — por isso quem monitoriza deve ler o campo `status`, não o
+código HTTP.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/siem/health` | — | `{generated_at, status, stale, truncated, manager{status,error?}, indexer{status,error?}, agents{active,disconnected,never_connected,pending,total}\|null, last_alert_at, ingestion_lag_seconds, alerts_per_minute, alerts_in_window, window_minutes}` | 401 |
+
+- `status`: `ok` \| `degraded` (um componente em baixo, ou `stale`) \| `down` (Manager e Indexer em baixo).
+- `error` por componente é um código estável (`timeout` \| `unreachable`); o detalhe da exceção só vai para o log do backend.
+- `stale`: Indexer ok mas o último alerta tem mais de 300 s (ou não há nenhum na última hora).
+- `truncated`: o Indexer devolveu o limite de 500 (os mais recentes) — `alerts_per_minute` é um mínimo.
+- Componente em baixo -> campos dependentes `null` (nunca valores inventados).
