@@ -40,7 +40,7 @@ A classificação de Event ID → nome amigável / severidade / recomendação
 | Persistência | JSONL (histórico bruto/conformidade) + SQLite (índice de consulta) |
 | Machine Learning | scikit-learn 1.5.2 (Isolation Forest) |
 | Frontend | HTML/CSS/JavaScript puro (sem framework nem build step), Chart.js |
-| Testes | 24 scripts standalone (`scripts/test_*.py`) — sem pytest, ver [Testes](#-testes) |
+| Testes | 26 scripts standalone (`scripts/test_*.py`) — sem pytest, ver [Testes](#-testes) |
 | SO alvo | Windows 10/11 (WMI/PowerShell para specs do sistema) |
 
 ---
@@ -85,7 +85,7 @@ Wazuh Manager/Indexer, que já têm os alertas processados.
 
 ## Funcionalidades
 
-- **Dashboard web com 13 abas** (inclui **🧩 Incidentes**, R3, e **🗂️ Attack Registry / 🕒 Attack Timeline**, R4) — ver tabela em [Servir o frontend](#3-servir-o-frontend).
+- **Dashboard web com 14 abas** (inclui **🧩 Incidentes**, R3, **🗂️ Attack Registry / 🕒 Attack Timeline**, R4, e **📚 Attack Library**, R5) — ver tabela em [Servir o frontend](#3-servir-o-frontend).
 - **Classificação de 23 Event IDs** do Windows Security Log em nome
   amigável + severidade + recomendação — ver
   [`docs/API.md`](docs/API.md#catálogo-de-event-ids-scriptsevent_catalogpy).
@@ -164,8 +164,9 @@ Dashboard cybersec/
 │   ├── redblue_correlator.py    ← correlação Red vs Blue (Fase 11)
 │   ├── incident_engine.py / incident_store.py / incident_ingest.py ← incidentes (R3)
 │   ├── attack_registry.py       ← registo de ataques, esperado vs real (R4)
+│   ├── attack_library.py / attack_library.yaml ← catálogo de referência de ataques, só leitura (R5)
 │   ├── system_monitor.py        ← specs/saúde da máquina local
-│   ├── test_*.py                ← 24 scripts de teste standalone (ver Testes)
+│   ├── test_*.py                ← 26 scripts de teste standalone (ver Testes)
 │   ├── requirements.txt         ← dependências Python do backend
 │   ├── .env / .env.example      ← credenciais reais (não versionar) / template
 │   ├── README.md                ← guia dos scripts de automação do laboratório
@@ -335,7 +336,7 @@ em vez de números inventados. Há deep links (`index.html#redblue`,
 `#planned:Incidentes`) e em ecrãs estreitos a sidebar abre pelo botão
 **☰ Menu**. Estado de cada fase em [docs/ROADMAP_STATUS.md](docs/ROADMAP_STATUS.md).
 
-Os painéis reais continuam a ser as 13 abas abaixo:
+Os painéis reais continuam a ser as 14 abas abaixo:
 
 | Aba | Conteúdo |
 |---|---|
@@ -352,6 +353,7 @@ Os painéis reais continuam a ser as 13 abas abaixo:
 | 📡 **Live SOC** | Feed de alertas ao vivo (WebSocket existente, pausar/retomar) e saúde do SIEM (R2, `live_soc.js`): estado Manager/Indexer, agentes, atraso de ingestão, taxa de alertas — ver [docs/API.md](docs/API.md#-saúde-do-siem-r2) |
 | 🧩 **Incidentes** | Gestão de incidentes (R3, `incidents.js`): agrupamento automático de alertas Wazuh e deteções de rede por ativo, estados NEW→CLOSED, timeline, notas e importação do histórico — ver [docs/API.md](docs/API.md#-incidentes-r3) |
 | 🗂️ **Attack Registry** / 🕒 **Attack Timeline** | Registo de ataques (R4, `attack_registry.js`): operador, esperado vs real (regra/ML/rede), evidência por referência e incidentes ligados; só leitura — ver [docs/API.md](docs/API.md#️-attack-registry-r4) |
+| 📚 **Attack Library** | Catálogo de referência dos cenários de ataque do laboratório (R5, `attack_library.js`): risco, pré-requisitos, sensores esperados, passos de limpeza, replayable; só leitura, nunca lança nada — ver [docs/API.md](docs/API.md#-attack-library-r5) |
 
 A aba **⚔️ Red vs Blue** vive em `redblue.js` (não edita `app.js`; reutiliza
 os seus globais) e usa uma janela fixa de 7 dias (168 h, o máximo de
@@ -390,7 +392,7 @@ passar a servir.
 
 Sem laboratório Wazuh ligado — tudo mockado (`AsyncMock` sobre
 `WazuhIndexerClient`/`WazuhManagerClient`). Sem framework (nem pytest):
-24 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
+26 scripts standalone em `scripts/`, cada um imprime `[OK]`/`[FALHOU]`
 por caso e sai com `sys.exit(1)` se algo falhar.
 
 ### Correr todos os testes
@@ -437,6 +439,10 @@ python test_incidents_api.py          # /api/incidents/* (401/404/409/422/502, b
 # Attack Registry (R4):
 python test_attack_registry.py        # módulo puro + /api/attacks (log antigo/corrompido, 404/422, não detetado, incidente ligado)
 
+# Attack Library (R5):
+python test_attack_library.py         # validação do YAML (fail-fast), merge com SCENARIOS, /api/attack-library (401/404/422)
+python test_attack_targets.py         # allowlist de alvos fail-closed em attack_scenarios.py
+
 # Live SOC (R2):
 python test_siem_health.py            # saúde do SIEM pura + /api/siem/health (erros, stale, truncated)
 ```
@@ -472,9 +478,13 @@ em `scripts/models/anomaly_model.pkl`.
 O projeto inclui um ciclo de teste com dados reais:
 
 1. **Definir cenários de ataque:** `scripts/attack_scenarios.py` — scanning, brute-force,
-   privilege escalation, etc. com timestamps e técnicas MITRE.
+   privilege escalation, etc. com timestamps e técnicas MITRE. Metadata de referência
+   (risco, pré-requisitos, sensores esperados, cleanup) em `scripts/attack_library.yaml`
+   — ver aba **📚 Attack Library** no dashboard.
 2. **Simular ataques no laboratório** via Kali (dentro da VM ou externa) — scripts de
-   ataque, port scans, SSH brute-force, etc.
+   ataque, port scans, SSH brute-force, etc. `--target` exige um alvo na allowlist
+   (R5, fail-closed: loopback/IPs de documentação por omissão — ver
+   `scripts/attack_targets.example.json` e `docs/SECURITY.md`).
 3. **Exportar snapshot de treino:** `scripts/export_snapshot.py` — gera snapshot de época
    (data/tipo/severidade) para treino.
 4. **Retreinar:** `python train_anomaly_model.py` com dados reais.
