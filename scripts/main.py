@@ -45,6 +45,7 @@ from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, 
 from attack_registry import build_attack_registry, summarize as summarize_attacks
 from attack_scenarios import SCENARIOS
 from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
+from detection_event import from_ml_anomaly, from_network_detection, from_rule_alert
 from event_catalog import classify_alert
 from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
@@ -911,6 +912,83 @@ async def get_redblue_attack_log():
             }
             for name, s in SCENARIOS.items()
         },
+    }
+
+
+DETECTIONS_DEFAULT_LIMIT = 50
+DETECTIONS_MAX_LIMIT = 200
+
+
+@app.get("/api/detections", dependencies=_REQUIRE_API_KEY)
+async def get_detections(
+    hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas"),
+    limit: int = Query(DETECTIONS_DEFAULT_LIMIT, ge=1, le=DETECTIONS_MAX_LIMIT, description="Máximo de eventos devolvidos"),
+):
+    """
+    Vista unificada recente dos 3 detetores independentes — regra/Wazuh
+    (event_catalog), ML (Isolation Forest) e rede (network_detections) —
+    normalizados por detection_event.py (R7, base comum dos 3 detetores).
+    Cada fonte é isolada: uma falha no Indexer ou a ausência do modelo ML
+    nunca derruba a rota (as outras duas fontes continuam a responder) —
+    fica "available: false" só nessa fonte, nunca 500 (mais permissivo
+    que /api/ml-anomalies ou /api/redblue/metrics, que têm uma única
+    fonte e por isso podem dar 502/503 — aqui há 3 fontes independentes,
+    uma em baixo não é motivo para apagar as outras duas). `ref` (o dado
+    bruto de origem) nunca é exposto aqui — já está disponível via
+    /api/alerts, /api/ml-anomalies e /api/network/detections. Ver
+    docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md
+    (ruling 7).
+    """
+    sources = {
+        "rule": {"available": False, "count": 0},
+        "ml": {"available": False, "count": 0},
+        "network": {"available": False, "count": 0},
+    }
+    events: list[dict] = []
+
+    raw_alerts: list[dict] = []
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=500)
+        sources["rule"]["available"] = True
+    except Exception:
+        logger.warning("GET /api/detections: Indexer indisponível para a fonte 'rule'", exc_info=True)
+
+    if sources["rule"]["available"]:
+        rule_events = [e for e in (from_rule_alert(a) for a in raw_alerts) if e is not None]
+        sources["rule"]["count"] = len(rule_events)
+        events.extend(rule_events)
+
+    try:
+        model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
+        ml_report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
+        sources["ml"]["available"] = True
+        ml_events = [e for e in (from_ml_anomaly(r) for r in ml_report["results"]) if e is not None]
+        sources["ml"]["count"] = len(ml_events)
+        events.extend(ml_events)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.warning("GET /api/detections: falha ao calcular anomalias ML", exc_info=True)
+
+    if vm_ssh_client is not None:
+        sources["network"]["available"] = True
+        network_events = [e for e in (from_network_detection(d) for d in network_detection_buffer) if e is not None]
+        sources["network"]["count"] = len(network_events)
+        events.extend(network_events)
+
+    events.sort(key=lambda e: e["ts"], reverse=True)
+    total = len(events)
+    truncated = total > limit
+    events = events[:limit]
+    for event in events:
+        event.pop("ref", None)
+
+    return {
+        "window_hours": hours,
+        "sources": sources,
+        "total": total,
+        "truncated": truncated,
+        "events": events,
     }
 
 
