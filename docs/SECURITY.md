@@ -21,6 +21,7 @@
   `test_serve_frontend.py`.
 - `scripts/.env`, `models/`, `historico/`, `attack_log.jsonl` fora do git.
 - `attack_scenarios.py` redige passwords nos logs de comando.
+- `/api/attacks*` (R4) é só leitura, sem path nem ficheiro vindos do cliente: `{id}` valida-se com `^[0-9]{1,9}$`, `technique` com regex, o log lê-se sempre de `ATTACK_LOG_PATH`; erros viram códigos estáveis (`indexer_unavailable`...) e o detalhe só vai para o log do servidor. `operator`/`source` são texto livre do log: o frontend escapa-os e a API limpa controlos e trunca a 64 caracteres. Não há rota POST: forjar ataques falsearia cobertura/MTTD.
 - Cada ataque lançado é registado com timestamp/target. **Não** está imposto em código que o target seja do laboratório (`--target` aceita qualquer valor): é convenção — allowlist de targets prevista em R4/R5.
 
 ## Riscos conhecidos

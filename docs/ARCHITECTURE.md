@@ -1,4 +1,4 @@
-# Arquitetura (estado em 2026-10-06)
+# Arquitetura (estado em 2026-10-07)
 
 ```
 Kali (attack_scenarios.py) ──► attack_log.jsonl ─┐
@@ -19,7 +19,7 @@ vive em módulos puros que recebem dados já obtidos (testáveis sem Wazuh):
 |---|---|
 | Ingestão Wazuh | `wazuh_client.py`, `event_catalog.py` |
 | Painéis | `lifecycle.py`, `rbac.py`, `admin_activity.py`, `compliance_evaluator.py` |
-| Red/Blue | `attack_scenarios.py`, `redblue_correlator.py` |
+| Red/Blue | `attack_scenarios.py`, `redblue_correlator.py`, `attack_registry.py` (R4, puro) |
 | Rede | `network_monitor.py`, `network_detections.py` |
 | ML | `feature_extractor.py` (partilhado treino/inferência), `ml_anomalies.py`, `train_anomaly_model.py` |
 | Persistência | `history_store.py` (JSONL), `history_index.py` (SQLite) |
@@ -37,14 +37,14 @@ não há `DetectionEvent` comum (R7).
 Estático, sem build. `index.html` tem a sidebar (grupos → itens). Cada item
 com `data-tab="x"` mostra `#tab-x`; itens `is-planned` (`data-planned="R<n>"`)
 mostram `#tab-planned` com "Sem dados". `app.js` expõe `activateTab(name)` e
-usa o hash da URL para deep links. `redblue.js` reutiliza os globais de `app.js`.
+usa o hash da URL para deep links. `attack_registry.js` (R4) serve os itens Attack Registry e Attack Timeline (um só pedido a `/api/attacks`, só com a aba visível). `redblue.js` reutiliza os globais de `app.js`.
 
 ## Persistência (fontes de verdade atuais)
 
 | Dado | Onde | Versionado |
 |---|---|---|
 | Alertas + conformidade (histórico) | `scripts/historico/**.jsonl` + `index.sqlite3` | não |
-| Log de ataques | `scripts/attack_log.jsonl` | não (`.gitignore`) |
+| Log de ataques | `scripts/attack_log.jsonl` (lido por `/api/attacks`, só leitura; mantém-se no `.gitignore` por poder ter IPs do lab) | não (`.gitignore`) |
 | Modelo ML | `scripts/models/*.pkl` | não |
 | Snapshots de treino | `scripts/snapshots/` | não |
 | Incidentes (R3) | `scripts/incidents.sqlite3` (evidências + timeline append-only) | não (`.gitignore`) |

@@ -1,4 +1,4 @@
-# Modelo de dados (estado em 2026-10-06)
+# Modelo de dados (estado em 2026-10-07)
 
 Só o que já existe. Entidades do Roadmap v2 (Incident, Detection, Vaccine,
 Replay, Model…) estão por definir nas fases R3–R14.
@@ -15,6 +15,10 @@ Replay, Model…) estão por definir nas fases R3–R14.
 - Opcionais (R0): `id` (→ `attack_id`), `technique` e `tool` — quando presentes
   prevalecem sobre os do cenário ao reportar MITRE/ferramenta.
 - `scenario` só determina os `event_ids` esperados para a correspondência.
+- Opcionais (R4): `operator` (≤64 car., default `unknown`), `source` (origem,
+  default `null`) e `expected` (lista ⊂ `rule|ml|network`), gravados por
+  `attack_scenarios.py --operator/--source/--expect`. Ficheiros antigos sem estes
+  campos continuam a ler-se. `details` (comando) nunca é exposto pela API.
 - Os registos podem não estar por ordem de tempo; o correlator ordena.
 
 ## Tentativa correlacionada — `build_redblue_report().attempts[]`
@@ -22,7 +26,18 @@ Replay, Model…) estão por definir nas fases R3–R14.
 `attack_id, scenario, target, tool, timestamp, mitre_tactic, mitre_technique,
 detected, detected_by (rule|ml|both|none), mttd_seconds, matched_event_ids,
 detected_by_network, network_detection_types, mttd_network_seconds,
-coverage_gap`.
+coverage_gap, matched_alert_count` (R4, aditivo).
+
+## Registo de ataque (R4)
+
+`attack_registry.build_attack_registry()` (puro) junta cada tentativa lançada
+(`parse_launched_attacks`) com `build_redblue_report` e com os incidentes cujo
+evento `attack_linked` tem o mesmo `attack_id`. Não é persistido: calcula-se a
+cada pedido. Campos em [API.md](API.md#️-attack-registry-r4). Regras:
+`expected.detection` vem do log ou, sem ele, `["rule","ml"]`; `actual.verdict`
+é `detected` (todas as fontes esperadas viram), `partial`, `not_detected` ou
+`unknown` (correlação indisponível). Ataques sem `id` têm `id: null` e não
+ligam a incidentes; ids duplicados levam `duplicate_id: true`.
 
 ## Alerta enriquecido — `main._enrich_alert`
 

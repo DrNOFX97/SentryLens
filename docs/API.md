@@ -209,6 +209,8 @@ Todas as rotas exigem `X-API-Key`.
 
 | Método | Rota | Parâmetros | Resposta | Erros |
 |---|---|---|---|---|
+| GET | `/api/attacks` | `hours`, `technique`, `status`, `limit`, `offset` | Registo de ataques, esperado vs real (R4) |
+| GET | `/api/attacks/{id}` | — | Detalhe de um ataque (R4) |
 | GET | `/api/incidents` | `status`, `severity`, `hours` (1–720, default 168, sobre a última evidência), `limit` (1–500, default 100), `offset` | `{window_hours, incidents[], summary}` | 401, 422 (parâmetro inválido), 500 |
 | GET | `/api/incidents/{id}` | — | Incidente + `evidence[]` + `timeline[]` + `ml_summary` + `available_transitions` | 401, 404, 500 |
 | POST | `/api/incidents/{id}/status` | corpo `{status, note?}` | Detalhe do incidente atualizado | 401, 404, 409 (transição inválida), 422 (falta a nota ao fechar um `NEW`), 500 |
@@ -266,6 +268,44 @@ inferidos.
 
 **Testes:** `scripts/test_incident_engine.py`, `test_incident_store.py`,
 `test_incident_ingest.py`, `test_incidents_api.py`.
+
+## 🗂️ Attack Registry (R4)
+
+Registo consultável dos ataques lançados (`scripts/attack_log.jsonl`), com o
+resultado **esperado vs real** e referências aos incidentes ligados. Só leitura:
+não há rotas de escrita (o log é escrito por `attack_scenarios.py`). Ambas as
+rotas exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/attacks` | `hours` (1–720, default 168, sobre o timestamp do ataque), `technique` (`T1110` ou `T1110.003`), `status` (`detected`, `partial`, `not_detected`, `unknown`), `limit` (1–500, default 200), `offset` | `{window_hours, total, attacks[], summary, skipped, correlation, incidents_available}` | 401, 422, 500 (log ilegível) |
+| GET | `/api/attacks/{id}` | `id`: 1–9 dígitos | `{attack, correlation, incidents_available}` | 401, 404, 422 (id malformado), 500 |
+
+Cada ataque: `id, duplicate_id, timestamp, scenario, mitre_tactic,
+mitre_technique (+technique_source), tool (+tool_source), source, target,
+operator, expected{detection[], source, event_ids[]}, actual{verdict, achieved[],
+detected_by, detected_by_network, coverage_gap, mttd_seconds,
+mttd_network_seconds}, evidence{matched_event_ids[], matched_alert_count,
+network_detection_types[], incident_count}, incidents[{id, severity, status,
+evidence_count}]`. Detalhes em [DATA_MODEL.md](DATA_MODEL.md#registo-de-ataque-r4).
+
+`correlation = {available, error_code, alerts_fetched, alerts_truncated,
+network_capture_configured}`. Se o Indexer ou o modelo ML falharem a resposta é
+`200` com `available: false` e `error_code` estável (`indexer_unavailable`,
+`ml_model_unavailable`, `attack_outside_alert_window`); os vereditos ficam
+`unknown` (nunca "não detetado"). `incidents_available: false` se a base de
+incidentes falhar. Exemplo ilustrativo (IPs de documentação):
+
+```json
+{"attack": {"id": 1, "timestamp": "2026-10-06T10:23:21+00:00", "scenario": "brute_force_rdp",
+  "mitre_technique": "T1110", "tool": "hydra", "target": "192.0.2.10", "operator": "alice",
+  "expected": {"detection": ["rule", "ml"], "source": "scenario_default", "event_ids": [4625, 4740]},
+  "actual": {"verdict": "detected", "achieved": ["rule", "ml"], "mttd_seconds": 20.0},
+  "incidents": [{"id": "INC-20261006-001", "severity": "high", "status": "NEW", "evidence_count": 2}]},
+ "correlation": {"available": true}, "incidents_available": true}
+```
+
+**Testes:** `scripts/test_attack_registry.py`.
 
 ## Tabela de endpoints
 

@@ -17,7 +17,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R1 | Sidebar SOC | ✅ | `index.html`, `app.js` (`activateTab`/`activatePlanned`), `style.css`; itens sem dados mostram "Sem dados" |
 | R2 | Live SOC | ✅ | Painel Live SOC (`live_soc.js`): feed ao vivo via o WebSocket existente + saúde do SIEM (`GET /api/siem/health`: `status` ok/degraded/down, `stale`, `truncated`) |
 | R3 | Gestão de incidentes | ✅ | Incidentes automáticos (alertas Wazuh + rede), estados, timeline, backfill, painel |
-| R4 | Attack Registry | 🟡 | `attack_log.jsonl` já tem `id/technique/tool` (ver R0); faltam operador, evidência, esperado vs real; usa `attack_id` em `incident_events` |
+| R4 | Attack Registry | ✅ | `attack_registry.py` + `GET /api/attacks[/{id}]` (esperado vs real, operador, evidência por referência, incidentes ligados); painéis Attack Registry e Attack Timeline (`attack_registry.js`) |
 | R5 | Attack Library | 🟡 | `attack_scenarios.SCENARIOS`; faltam cleanup, risco, sensores, replayable |
 | R6 | Network SOC | 🟡 | `network_monitor.py`, `network_detections.py`; falta PCAP/evidência |
 | R7 | Detection Engine (`DetectionEvent`) | ⬜ | Hoje 3 detetores independentes unidos só no correlator; base para `DetectionEvent` nos incidentes (R3) |
@@ -57,8 +57,8 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 
 ## Dívida conhecida (não corrigida em R0)
 
-- `attack_log.jsonl` está no `.gitignore` (estado de runtime) — o registo de
-  ataques não é versionado. Decisão a tomar em R4 (Attack Registry).
+- `attack_log.jsonl` mantém-se no `.gitignore` (decidido em R4: pode ter IPs/alvos
+  do lab); exemplos versionáveis só com IPs de documentação.
 - `attack_log_round3.jsonl` traz `detected`/`mttd_seconds` declarados pelo
   atacante, não medidos; o correlator ignora-os de propósito.
 - `_parse_timestamp` duplicado em vários módulos; `main.py` mistura rotas,
@@ -69,3 +69,4 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
   backfill); o autor das ações manuais é fixo (`analyst`).
 - Live SOC (R2): saúde do SIEM só pesquisa a última hora (sem alertas -> `stale`); taxa limitada aos 500 alertas mais recentes (`truncated` -> "≥"); Manager e Indexer são consultados em série (até ~30 s se ambos em timeout).
 - Numeração: os planos antigos usam "Fase N"; este roadmap usa "R<n>".
+- Attack Registry (R4): só lê o log (sem rota de escrita; operador/esperado só à nascença via `attack_scenarios.py --operator/--source/--expect`); ataques sem `id` não ligam a incidentes; o esperado por omissão é regra+ML (rede só se o log o disser); janela de alertas até 720 h e teto de 1000 alertas (`alerts_truncated`); sem allowlist de targets (R5).
