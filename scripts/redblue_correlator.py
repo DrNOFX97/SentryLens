@@ -20,6 +20,14 @@ não faz I/O nem chamadas de rede, só processa listas já obtidas. Nunca
 lança exceção sobre dados malformados — entradas inválidas são ignoradas
 ou desviadas para not_executed/unknown_scenario, nunca descartadas em
 silêncio.
+
+R7: o algoritmo de janelas/correspondência não muda (é o código mais
+sensível desta fase — alimenta attack_registry.py e os paineis Red vs Blue).
+A única integração com detection_event.py (base comum dos 3 detetores) é
+_network_detection_label(), usada só para rotular network_detection_types
+de forma partilhada com incident_engine.py, com fallback estritamente
+equivalente — ver docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md,
+ruling 4.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -41,6 +49,21 @@ def _parse_timestamp(raw_timestamp: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _network_detection_label(det: dict) -> str | None:
+    """Rótulo do tipo de uma deteção de rede já selecionada por
+    `network_matches` (R7): passa por detection_event.from_network_detection
+    para partilhar a mesma normalização que incident_engine.py usa, com
+    fallback para o campo `type` em bruto se o construtor rejeitar a
+    entrada (deteção malformada que o filtro de match, mais permissivo,
+    deixou passar) — nunca uma forma nova de perder uma deteção já
+    selecionada. Import local para evitar um ciclo de import com
+    detection_event.py (que importa `_parse_timestamp` deste módulo)."""
+    from detection_event import from_network_detection
+
+    event = from_network_detection(det)
+    return event["label"] if event is not None else det.get("type")
 
 
 def parse_launched_attacks(attack_log: list[dict], scenarios: dict) -> tuple[list, list, list, list]:
@@ -218,7 +241,7 @@ def build_redblue_report(
             "matched_event_ids": sorted({result.get("windows_event_id") for _, result in matches}),
             "matched_alert_count": len(matches),
             "detected_by_network": detected_by_network,
-            "network_detection_types": sorted({det.get("type") for _, det in network_matches}),
+            "network_detection_types": sorted({_network_detection_label(det) for _, det in network_matches}),
             "mttd_network_seconds": mttd_network_seconds,
             "coverage_gap": detected_by_network and detected_by == "none",
         })

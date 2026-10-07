@@ -352,6 +352,31 @@ def run() -> None:
         report10["by_scenario"]["smb_enum"]["detected_by_windows_only"] == 0,
     )
 
+    # --- Caso 16 (R7): network_detection_types continua igual ao tipo em bruto
+    # para deteções bem formadas (integração com detection_event.py, ver
+    # docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md, ruling 4) ---
+    attacks16 = [attack("smb_enum", "192.168.1.45", "2026-09-14T23:00:00+00:00")]
+    dets16 = [net_det("port_scan", "192.168.1.170", "192.168.1.45", "2026-09-14T23:00:05+00:00")]
+    report16 = build_redblue_report(attacks16, [], SCENARIOS, network_detections=dets16)
+    check(
+        "caso 16: network_detection_types continua ['port_scan'] (normalizado via detection_event)",
+        report16["attempts"][0]["network_detection_types"] == ["port_scan"],
+    )
+
+    # --- Caso 16b (R7): deteção sem 'type' que o filtro de match (mais
+    # permissivo que detection_event.from_network_detection) ainda deixa
+    # passar -> fallback para o valor em bruto (None), nunca uma exceção
+    # nem uma nova forma de perder a deteção já selecionada ---
+    attacks16b = [attack("smb_enum", "192.168.1.46", "2026-09-14T23:10:00+00:00")]
+    dets16b = [{"type": None, "src_ip": "192.168.1.170", "dst_ip": "192.168.1.46", "timestamp": "2026-09-14T23:10:05+00:00", "detail": {}}]
+    report16b = build_redblue_report(attacks16b, [], SCENARIOS, network_detections=dets16b)
+    a16b = report16b["attempts"][0]
+    check("caso 16b: detected_by_network continua True (deteção sem type ainda conta)", a16b["detected_by_network"] is True)
+    check(
+        "caso 16b: network_detection_types faz fallback para o type em bruto (None) sem lançar",
+        a16b["network_detection_types"] == [None],
+    )
+
     # =========================================================================
     # Parte 4: endpoints de rede (Fase 11, Onda 2)
     # =========================================================================
