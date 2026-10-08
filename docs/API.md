@@ -528,3 +528,15 @@ código HTTP.
 - `stale`: Indexer ok mas o último alerta tem mais de 300 s (ou não há nenhum na última hora).
 - `truncated`: o Indexer devolveu o limite de 500 (os mais recentes) — `alerts_per_minute` é um mínimo.
 - Componente em baixo -> campos dependentes `null` (nunca valores inventados).
+
+## 🧪 Triagem de incidentes via JEV (experimental)
+
+| Método | Rota | Resposta | Erros |
+|---|---|---|---|
+| POST | `/api/incidents/{id}/triage` | `{incident_id, advisory: true, model, answers: {is_compromise: {probability}, is_brute_force: {probability}, severity: {choice, confidence, probabilities}}}` | 401, 404, 502 (`jev_unreachable`/`jev_auth`/`jev_busy`/`jev_error`/`jev_bad_response`), 503 (`jev_disabled`) |
+
+**Opt-in e consultivo.** Desligado por omissão: exige `SENTRYLENS_JEV_ENABLED=true` e `TYPESAFE_API_KEY` (503 `jev_disabled` caso contrário). Só corre quando o analista a chama — nunca em segundo plano — e **nunca altera** o incidente nem a severidade das regras.
+
+**Dados enviados** (para `https://api.typesafe.ai/v1/systemone`, alojado nos EUA): só agregados — severidade do incidente, nº de evidências, duração, rótulos de evento com contagens, severidades e tipos de fonte. Nunca IPs, contas, hostnames nem payloads (`jev_client.build_state`). Políticas da TypeSafe (lidas 2026-10-08): não treinam com o input; sem prazo de retenção publicado (zero retention só enterprise). `confidence` mede a concentração da distribuição, não a probabilidade de acerto.
+
+**Testes:** `scripts/test_jev_client.py`, `scripts/test_incidents_triage_api.py`.

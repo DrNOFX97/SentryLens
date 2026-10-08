@@ -39,6 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, StringConstraints
 
 import incident_ingest
+import jev_client
 import ml_anomalies
 from admin_activity import build_admin_activity_report
 from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
@@ -1091,6 +1092,22 @@ async def change_incident_status(incident_id: str, body: StatusChange):
             raise HTTPException(status_code=422, detail="Fechar um incidente NEW exige uma nota (falso positivo)")
         raise HTTPException(status_code=409, detail="Transição de estado inválida")
     return await _incident_detail(incident_id)
+
+
+@app.post("/api/incidents/{incident_id}/triage", dependencies=_REQUIRE_API_KEY)
+async def triage_incident(incident_id: str):
+    """Triagem EXPERIMENTAL via JEV (TypeSafe AI), opt-in. Consultiva: não
+    altera o incidente. Envia ao serviço externo só um resumo agregado e
+    anonimizado (ver jev_client.build_state)."""
+    if not jev_client.jev_enabled():
+        raise HTTPException(status_code=503, detail="jev_disabled")
+    incident = await _incidents_call(incident_store.get_incident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    result = await jev_client.triage(incident)
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=result["error"])
+    return {"incident_id": incident_id, "advisory": True, **{k: v for k, v in result.items() if k != "ok"}}
 
 
 @app.post("/api/incidents/{incident_id}/notes", dependencies=_REQUIRE_API_KEY)
