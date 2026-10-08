@@ -64,6 +64,7 @@ header {
 
 .controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   font-size: 14px;
@@ -109,35 +110,110 @@ header {
   color: #ccc;
 }
 
-.tab-nav {
+/* ===== Shell com sidebar SOC (Roadmap v2, R1) ===== */
+.app-shell {
   display: flex;
-  gap: 4px;
-  background: #f4f5f7;
-  border-bottom: 1px solid #e0e0e0;
-  max-width: 1300px;
+  align-items: flex-start;
+  max-width: 1600px;
   margin: 0 auto;
-  padding: 0 20px;
+}
+
+.sidebar {
+  flex: 0 0 230px;
   position: sticky;
   top: 0;
-  z-index: 10;
-  overflow-x: auto;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--navy-950);
+  color: #c9d6e2;
+  padding: 10px 0 24px;
+  border-right: 1px solid var(--navy-800);
+  scrollbar-width: thin;
+  scrollbar-color: var(--navy-800) var(--navy-950);
 }
 
-.tab-btn {
+.nav-group > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 18px 6px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cyan-400);
+  user-select: none;
+}
+.nav-group > summary::-webkit-details-marker { display: none; }
+.nav-group > summary::after { content: "▾"; float: right; opacity: 0.6; }
+.nav-group:not([open]) > summary::after { content: "▸"; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
   background: none;
   border: none;
-  padding: 14px 18px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #888;
+  border-left: 3px solid transparent;
+  padding: 8px 18px 8px 22px;
+  text-align: left;
+  font: 500 13px/1.3 var(--font-body);
+  color: #c9d6e2;
   cursor: pointer;
-  border-bottom: 3px solid transparent;
-  white-space: nowrap;
-  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.nav-item:hover { background: var(--navy-800); color: #fff; }
+.nav-item:focus-visible { outline: 2px solid var(--cyan-400); outline-offset: -2px; }
+.nav-item.active {
+  background: var(--navy-800);
+  color: #fff;
+  border-left-color: var(--cyan-400);
+}
+.nav-item.is-planned { color: #7f93a6; }
+.nav-item.is-planned.active { color: #fff; }
+.nav-badge {
+  margin-left: auto;
+  font: 500 10px var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #9fb3c6;
 }
 
-.tab-btn:hover { color: var(--cyan-600); }
-.tab-btn.active { color: var(--cyan-600); border-bottom-color: var(--cyan-600); }
+.sidebar-toggle { display: none; }
+
+.app-shell > .container {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.planned-panel h2 { font-family: var(--font-display); margin-bottom: 8px; }
+.planned-note { margin-top: 10px; font-size: 13px; color: #666; }
+
+@media (max-width: 900px) {
+  .app-shell { flex-direction: column; align-items: stretch; }
+  .sidebar-toggle {
+    display: block;
+    margin: 10px 20px 0;
+    padding: 10px 14px;
+    background: var(--navy-950);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font: 600 14px var(--font-body);
+    text-align: left;
+    cursor: pointer;
+  }
+  .sidebar {
+    display: none;
+    position: static;
+    height: auto;
+    max-height: 70vh;
+    margin: 6px 20px 0;
+    border-radius: 6px;
+  }
+  .sidebar.open { display: block; }
+}
 
 .tab-content { display: none; }
 .tab-content.active { display: block; }
@@ -668,3 +744,72 @@ tr.row-gap { background: #fdebd0; }
 
 tr.rb-stale { opacity: 0.6; }
 tr.rb-stale td { font-style: italic; }
+
+/* ===== Incidentes (Roadmap v2, R3) ===== */
+.inc-row { cursor: pointer; }
+.inc-row:hover, .inc-row.selected { background: #eef7f9; }
+.inc-row:focus-visible { outline: 2px solid var(--cyan-600); outline-offset: -2px; }
+.inc-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e0e6ea; color: var(--ink-900); }
+.inc-status-NEW { background: #fdecc8; }
+.inc-status-INVESTIGATING { background: #d6ebf5; }
+.inc-status-CONTAINED { background: #e3d9f3; }
+.inc-status-RESOLVED { background: #d4efdf; }
+.inc-status-CLOSED { background: #e0e0e0; color: #666; }
+.inc-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 12px; font-size: 14px; }
+.inc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.inc-actions button, #inc-note-btn, #inc-backfill-btn { padding: 8px 12px; border: none; border-radius: 6px; background: var(--cyan-600); color: #fff; font-weight: 600; cursor: pointer; }
+.inc-actions button:hover, #inc-note-btn:hover, #inc-backfill-btn:hover { background: var(--cyan-700); }
+.inc-actions button:disabled, #inc-backfill-btn:disabled { opacity: 0.5; cursor: wait; }
+.inc-note-label { display: block; margin: 8px 0 4px; font-size: 13px; color: #666; }
+#inc-note-input { width: 100%; padding: 8px; border: 1px solid #ccd3d8; border-radius: 6px; font: inherit; margin-bottom: 8px; }
+.inc-timeline { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+.inc-timeline li { padding: 6px 0; border-bottom: 1px solid #eee; }
+.inc-timeline time { font-family: var(--font-mono); color: #888; margin-right: 6px; }
+/* Em coluna (mobile) a margin auto do .container desliga o stretch e a pagina
+   crescia ate à largura das tabelas; assim as tabelas fazem scroll no painel. */
+@media (max-width: 900px) { .app-shell > .container { width: 100%; } }
+
+/* ===== Live SOC (Roadmap v2, R2) ===== */
+.ls-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.ls-toolbar button { padding: 8px 12px; border: none; border-radius: 6px; background: var(--cyan-600); color: #fff; font-weight: 600; cursor: pointer; }
+.ls-toolbar button:hover { background: var(--cyan-700); }
+.ls-conn { font-size: 13px; font-weight: 600; }
+.ls-conn-live { color: #1e8449; }
+.ls-conn-fallback { color: #b9770e; }
+.ls-conn-wait { color: #888; }
+.card .value.ls-state { font-size: 16px; }
+.card .value.ls-small { font-size: 16px; }
+.card .value.ls-ok { color: #1e8449; }
+.card .value.ls-down { color: #e74c3c; }
+.ls-banner { padding: 10px 14px; border-radius: 8px; font-weight: 700; margin-bottom: 12px; color: #fff; }
+.ls-banner-ok { background: #1e8449; }
+.ls-banner-degraded { background: #b9770e; }
+.ls-banner-down { background: #c0392b; }
+.ls-banner-wait { background: #7f8c8d; }
+
+/* ===== Attack Registry / Timeline (Roadmap v2, R4) ===== */
+.atk-row { cursor: pointer; }
+.atk-row:hover, .atk-row.selected { background: #eef7f9; }
+.atk-row:focus-visible { outline: 2px solid var(--cyan-600); outline-offset: -2px; }
+.atk-verdict { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e0e6ea; color: var(--ink-900); }
+.atk-verdict-detected { background: #d4efdf; }
+.atk-verdict-partial { background: #fdecc8; }
+.atk-verdict-not_detected { background: #f8d7da; }
+.atk-verdict-unknown { background: #e0e0e0; color: #666; }
+#atk-technique-filter { padding: 6px 8px; border: 1px solid #ccd3d8; border-radius: 6px; font: inherit; width: 8em; max-width: 100%; }
+#nse-date-filter { padding: 6px 8px; border: 1px solid #ccd3d8; border-radius: 6px; font: inherit; width: 9em; max-width: 100%; }
+.atk-evidence { margin: 8px 0 0; padding-left: 20px; font-size: 14px; overflow-wrap: anywhere; }
+.atk-timeline { list-style: none; margin: 8px 0 0; padding: 0 0 0 12px; border-left: 2px solid #ccd3d8; font-size: 14px; }
+.atk-timeline li { position: relative; padding: 8px 0 8px 12px; border-bottom: 1px solid #eee; overflow-wrap: anywhere; }
+.atk-timeline li::before { content: ""; position: absolute; left: -19px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: var(--cyan-600); }
+.atk-timeline li.empty-state::before { display: none; }
+.atk-timeline time { font-family: var(--font-mono); color: #888; margin-right: 6px; }
+
+/* ===== Attack Library (Roadmap v2, R5) ===== */
+.alib-risk { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e0e6ea; color: var(--ink-900); }
+.alib-risk-low { background: #d4efdf; }
+.alib-risk-medium { background: #fdecc8; }
+.alib-risk-high { background: #f8d7da; }
+.alib-replayable { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.alib-replayable-yes { background: #d4efdf; }
+.alib-replayable-no { background: #e0e0e0; color: #666; }

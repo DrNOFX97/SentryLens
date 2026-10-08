@@ -222,9 +222,49 @@ def run_loop_survives_ssh_error() -> None:
     asyncio.run(_run())
 
 
+def run_on_new_detections_tests() -> None:
+    async def _run() -> None:
+        manager = NetworkConnectionManager()
+        packet_buffer: deque = deque(maxlen=PACKET_BUFFER_MAX)
+        detection_buffer: deque = deque(maxlen=5000)
+        offset_state = {"offset": 0}
+        seen_detections: set = set()
+        received: list = []
+
+        linhas_scan = "".join(
+            f"{1758812770 + i}.0,192.168.1.170,192.168.1.21,6,66,50000,{4000 + i},,\n" for i in range(16)
+        )
+        await _poll_once(
+            FakeSSHClient([(linhas_scan, 400)]), manager, packet_buffer, offset_state, seen_detections,
+            "/var/log/sentrylens/network.csv", detection_buffer, on_new_detections=received.extend,
+        )
+        check("on_new_detections recebeu o port_scan novo", any(d["type"] == "port_scan" for d in received))
+
+        received.clear()
+        await _poll_once(
+            FakeSSHClient([("", 400)]), manager, packet_buffer, offset_state, seen_detections,
+            "/var/log/sentrylens/network.csv", detection_buffer, on_new_detections=received.extend,
+        )
+        check("on_new_detections não é chamado sem deteções novas (dedup)", received == [])
+
+        def explode(_detections):
+            raise RuntimeError("boom")
+
+        packet_buffer2: deque = deque(maxlen=PACKET_BUFFER_MAX)
+        new_packets, new_detections = await _poll_once(
+            FakeSSHClient([(linhas_scan, 400)]), manager, packet_buffer2, {"offset": 0}, set(),
+            "/var/log/sentrylens/network.csv", deque(maxlen=5000), on_new_detections=explode,
+        )
+        check("erro em on_new_detections não derruba o polling",
+              len(new_packets) == 16 and any(d["type"] == "port_scan" for d in new_detections))
+
+    asyncio.run(_run())
+
+
 def run() -> None:
     run_parse_tests()
     run_poll_once_tests()
+    run_on_new_detections_tests()
     run_detection_buffer_survives_now_moving_on()
     run_loop_survives_ssh_error()
 

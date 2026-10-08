@@ -20,6 +20,14 @@ não faz I/O nem chamadas de rede, só processa listas já obtidas. Nunca
 lança exceção sobre dados malformados — entradas inválidas são ignoradas
 ou desviadas para not_executed/unknown_scenario, nunca descartadas em
 silêncio.
+
+R7: o algoritmo de janelas/correspondência não muda (é o código mais
+sensível desta fase — alimenta attack_registry.py e os paineis Red vs Blue).
+A única integração com detection_event.py (base comum dos 3 detetores) é
+_network_detection_label(), usada só para rotular network_detection_types
+de forma partilhada com incident_engine.py, com fallback estritamente
+equivalente — ver docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md,
+ruling 4.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -41,6 +49,67 @@ def _parse_timestamp(raw_timestamp: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _network_detection_label(det: dict) -> str | None:
+    """Rótulo do tipo de uma deteção de rede já selecionada por
+    `network_matches` (R7): passa por detection_event.from_network_detection
+    para partilhar a mesma normalização que incident_engine.py usa, com
+    fallback para o campo `type` em bruto se o construtor rejeitar a
+    entrada (deteção malformada que o filtro de match, mais permissivo,
+    deixou passar) — nunca uma forma nova de perder uma deteção já
+    selecionada. Import local para evitar um ciclo de import com
+    detection_event.py (que importa `_parse_timestamp` deste módulo)."""
+    from detection_event import from_network_detection
+
+    event = from_network_detection(det)
+    return event["label"] if event is not None else det.get("type")
+
+
+def parse_launched_attacks(attack_log: list[dict], scenarios: dict) -> tuple[list, list, list, list]:
+    """Separa o attack_log em (tentativas, not_executed, unknown_scenario,
+    invalid_entries). `tentativas` = [(datetime, entrada)] ordenadas por
+    tempo: só entradas com status "launched", cenário conhecido e timestamp
+    válido. Partilhada com incident_engine para a regra nunca divergir."""
+    parsed_attacks: list[tuple[datetime, dict]] = []
+    not_executed: list[dict] = []
+    unknown_scenario: list[dict] = []
+    invalid_entries: list[dict] = []
+    for entry in attack_log or []:
+        if not isinstance(entry, dict):
+            invalid_entries.append(entry)
+            continue
+        if entry.get("status") != "launched":
+            not_executed.append(entry)
+            continue
+        scenario_name = entry.get("scenario")
+        if scenario_name not in scenarios:
+            unknown_scenario.append(entry)
+            continue
+        ts = _parse_timestamp(entry.get("timestamp"))
+        if ts is None:
+            invalid_entries.append(entry)
+            continue
+        parsed_attacks.append((ts, entry))
+
+    parsed_attacks.sort(key=lambda item: item[0])
+    return parsed_attacks, not_executed, unknown_scenario, invalid_entries
+
+
+def attack_windows(
+    parsed_attacks: list[tuple[datetime, dict]], window_seconds: int = DEFAULT_WINDOW_SECONDS
+) -> list[tuple[datetime, datetime, dict]]:
+    """Janela de correlação de cada tentativa: `window_seconds` a partir do
+    início, cortada pelo início da tentativa seguinte (o que vier primeiro)."""
+    windows: list[tuple[datetime, datetime, dict]] = []
+    for i, (ts, entry) in enumerate(parsed_attacks):
+        window_end = ts + timedelta(seconds=window_seconds)
+        if i + 1 < len(parsed_attacks):
+            next_ts = parsed_attacks[i + 1][0]
+            if next_ts < window_end:
+                window_end = next_ts
+        windows.append((ts, window_end, entry))
+    return windows
 
 
 def build_redblue_report(
@@ -94,28 +163,9 @@ def build_redblue_report(
         detected_by_windows_only (só Windows, sem rede),
         detected_by_both_sources (as duas) e detected_by_neither (nenhuma).
     """
-    parsed_attacks: list[tuple[datetime, dict]] = []
-    not_executed: list[dict] = []
-    unknown_scenario: list[dict] = []
-    invalid_entries: list[dict] = []
-    for entry in attack_log or []:
-        if not isinstance(entry, dict):
-            invalid_entries.append(entry)
-            continue
-        if entry.get("status") != "launched":
-            not_executed.append(entry)
-            continue
-        scenario_name = entry.get("scenario")
-        if scenario_name not in scenarios:
-            unknown_scenario.append(entry)
-            continue
-        ts = _parse_timestamp(entry.get("timestamp"))
-        if ts is None:
-            invalid_entries.append(entry)
-            continue
-        parsed_attacks.append((ts, entry))
-
-    parsed_attacks.sort(key=lambda item: item[0])
+    parsed_attacks, not_executed, unknown_scenario, invalid_entries = parse_launched_attacks(
+        attack_log, scenarios
+    )
 
     parsed_alerts: list[tuple[datetime, dict]] = []
     for result in ml_results or []:
@@ -132,16 +182,10 @@ def build_redblue_report(
         parsed_network.append((ts, det))
 
     attempts: list[dict] = []
-    for i, (ts, entry) in enumerate(parsed_attacks):
+    for ts, window_end, entry in attack_windows(parsed_attacks, window_seconds):
         scenario_name = entry["scenario"]
         scenario = scenarios[scenario_name]
         target = entry.get("target")
-
-        window_end = ts + timedelta(seconds=window_seconds)
-        if i + 1 < len(parsed_attacks):
-            next_ts = parsed_attacks[i + 1][0]
-            if next_ts < window_end:
-                window_end = next_ts
 
         matches = [
             (alert_ts, result)
@@ -177,18 +221,27 @@ def build_redblue_report(
             round((network_matches[0][0] - ts).total_seconds(), 2) if network_matches else None
         )
 
+        # A técnica/ferramenta realmente executada (quando o log as regista)
+        # prevalece sobre a do cenário: vários ataques reais partilham o
+        # mesmo cenário aproximado (Round 3 colapsou 12 técnicas em 5
+        # cenários), e atribuir-lhes a técnica do cenário reportava MITRE
+        # errado. A correspondência de alertas continua a usar os event_ids
+        # do cenário.
         attempts.append({
+            "attack_id": entry.get("id"),
             "scenario": scenario_name,
             "target": target,
+            "tool": entry.get("tool") or scenario.tool,
             "timestamp": entry.get("timestamp"),
             "mitre_tactic": scenario.mitre_tactic,
-            "mitre_technique": scenario.mitre_technique,
+            "mitre_technique": entry.get("technique") or scenario.mitre_technique,
             "detected": detected,
             "detected_by": detected_by,
             "mttd_seconds": mttd_seconds,
             "matched_event_ids": sorted({result.get("windows_event_id") for _, result in matches}),
+            "matched_alert_count": len(matches),
             "detected_by_network": detected_by_network,
-            "network_detection_types": sorted({det.get("type") for _, det in network_matches}),
+            "network_detection_types": sorted({_network_detection_label(det) for _, det in network_matches}),
             "mttd_network_seconds": mttd_network_seconds,
             "coverage_gap": detected_by_network and detected_by == "none",
         })

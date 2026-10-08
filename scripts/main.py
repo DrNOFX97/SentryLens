@@ -18,9 +18,11 @@ import json
 import logging
 import os
 import secrets
+import sqlite3
 import sys
 from collections import Counter, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Literal
 
 # Windows redirects stdout/stderr para o codepage da consola por omissão,
 # o que corrompe os acentos nos logs (ex: "Violações" -> "Viola��es") quando
@@ -29,26 +31,44 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8")
 
+import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, StringConstraints
 
+import incident_ingest
+import jev_client
 import ml_anomalies
 from admin_activity import build_admin_activity_report
+from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
+from attack_registry import build_attack_registry, summarize as summarize_attacks
 from attack_scenarios import SCENARIOS
 from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
+from detection_event import from_ml_anomaly, from_network_detection, from_rule_alert
 from event_catalog import classify_alert
 from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
-from history_store import append_alert_history, append_compliance_history
+from history_store import (
+    NETWORK_EVIDENCE_MAX_LIMIT,
+    append_alert_history,
+    append_compliance_history,
+    append_network_detections_history,
+    read_network_detection_history,
+)
+from incident_engine import available_transitions, parse_timestamp as incident_engine_parse
+from incident_store import IncidentNotFound, IncidentStore, InvalidTransition
 from lifecycle import build_lifecycle_report
 from network_detections import detect_network_anomalies
 from network_monitor import NetworkConnectionManager, PACKET_BUFFER_MAX, network_poll_loop
+from network_soc import build_evidence_report, summarize_detections, summarize_packets
 from nis2_lookup import lookup_nis2_classification
 from org_profile import get_org_profile
 from rbac import build_privileges_report, load_rbac_baseline
 from redblue_correlator import build_redblue_report
 from report_generator import generate_html_report, render_compliance_section
+from siem_health import ALERTS_FETCH_SIZE, build_siem_health_report
 from ssh_client import VMSSHClient
 from system_monitor import (
     THRESHOLDS,
@@ -99,6 +119,12 @@ ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", os.path.join(os.path.dirname(__file__),
 # pelo endpoint /api/redblue/metrics (Fase 11).
 ATTACK_LOG_PATH = os.getenv("ATTACK_LOG_PATH", os.path.join(os.path.dirname(__file__), "attack_log.jsonl"))
 
+# Attack Library (R5): catálogo de referência só-leitura (scripts/attack_library.yaml).
+# Validação fail-fast e síncrona no arranque — um YAML inválido/incoerente
+# impede o processo de arrancar em vez de servir uma biblioteca corrompida
+# (ver attack_library.py e docs/superpowers/specs/2026-10-07-r5-attack-library-design.md).
+load_attack_library()
+
 # SSH para a VM Wazuh (Fase 11, Onda 2) — só usado pela captura de rede via
 # tshark. Funcionalidade opcional: sem VM_SSH_HOST definido,
 # /api/redblue/network e /ws/network ficam "não configurados" em vez de
@@ -114,6 +140,12 @@ NETWORK_CAPTURE_REMOTE_PATH = os.getenv("NETWORK_CAPTURE_REMOTE_PATH", "/var/log
 SENTRYLENS_HISTORY_DIR = os.getenv(
     "SENTRYLENS_HISTORY_DIR", os.path.join(os.path.dirname(__file__), "historico")
 )
+
+# Base de dados dos incidentes (R3) — separada do índice de histórico, que é
+# uma cache reconstruível; aqui há estado e notas do analista.
+INCIDENTS_DB_PATH = os.getenv("INCIDENTS_DB_PATH", os.path.join(os.path.dirname(__file__), "incidents.sqlite3"))
+# Teto de alertas por corrida de POST /api/incidents/backfill (o Indexer limita a 10000).
+BACKFILL_MAX_ALERTS = 5000
 
 # O CORS (configurado mais abaixo) já restringe as origens a loopback, mas
 # isso não chega sozinho — foi por não haver autenticação nenhuma nos
@@ -198,6 +230,7 @@ packet_buffer: deque = deque(maxlen=PACKET_BUFFER_MAX)
 # pacotes (janela curta) já ter avançado para além dele.
 network_detection_buffer: deque = deque(maxlen=5000)
 vm_ssh_client = VMSSHClient(VM_SSH_HOST, VM_SSH_USER, VM_SSH_KEY_PATH) if VM_SSH_HOST else None
+incident_store = IncidentStore(INCIDENTS_DB_PATH)
 
 
 def _extract_windows_event_id(alert: dict) -> int | None:
@@ -311,6 +344,28 @@ def _persist_new_alerts(alerts: list[dict]) -> None:
         )
 
 
+def _ingest_incident_alerts(raw_alerts: list[dict]) -> None:
+    """Callback de alert_poll_loop (R3): agrupa alertas brutos novos em incidentes."""
+    counts = incident_ingest.ingest_raw_alerts(incident_store, raw_alerts, ATTACK_LOG_PATH, SCENARIOS)
+    if counts["opened"] or counts["attached"]:
+        logger.info("Incidentes (alertas): %s", counts)
+
+
+def _ingest_incident_detections(detections: list[dict]) -> None:
+    """
+    Callback de network_poll_loop (R3/R6): agrupa deteções de rede novas em
+    incidentes e persiste-as em JSONL (R6, history_store.
+    append_network_detections_history) — resolve a dívida registada em R0
+    ("deteções de rede só existem em memória, perdem-se no restart"). Sem
+    segundo poller: reaproveita o mesmo callback que já corre a cada
+    deteção nova.
+    """
+    counts = incident_ingest.ingest_network_detections(incident_store, detections, ATTACK_LOG_PATH, SCENARIOS)
+    if counts["opened"] or counts["attached"]:
+        logger.info("Incidentes (rede): %s", counts)
+    append_network_detections_history(detections, SENTRYLENS_HISTORY_DIR)
+
+
 @app.on_event("startup")
 async def _start_system_monitor() -> None:
     """Lança o loop de monitorização em background, sem bloquear o arranque do servidor."""
@@ -321,6 +376,7 @@ async def _start_system_monitor() -> None:
             ws_manager,
             _enrich_alert,
             on_new_alerts=_persist_new_alerts,
+            on_new_raw_alerts=_ingest_incident_alerts,
         )
     )
     if vm_ssh_client is not None:
@@ -328,6 +384,7 @@ async def _start_system_monitor() -> None:
             network_poll_loop(
                 vm_ssh_client, network_ws_manager, packet_buffer, NETWORK_CAPTURE_REMOTE_PATH,
                 network_detection_buffer,
+                on_new_detections=_ingest_incident_detections,
             )
         )
 
@@ -360,6 +417,35 @@ async def get_agents():
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Manager: {e}")
+
+
+def _siem_error_code(component: str, exc: Exception) -> str:
+    """Código estável para o cliente; o detalhe (pode ter host/URL) só vai para o log."""
+    logging.getLogger("sentrylens.siem_health").warning(
+        "Falha ao contactar %s: %s: %s", component, type(exc).__name__, exc
+    )
+    return "timeout" if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)) else "unreachable"
+
+
+@app.get("/api/siem/health", dependencies=_REQUIRE_API_KEY)
+async def get_siem_health():
+    """
+    Saúde do SIEM (R2): estado Manager/Indexer, agentes, atraso de ingestão e
+    taxa de alertas. Cada componente é consultado em separado — se um estiver
+    em baixo, responde 200 com esse componente "unavailable" e os campos
+    dependentes a null (nunca números inventados).
+    """
+    agents_summary, manager_error = None, None
+    try:
+        agents_summary = await manager_client.get_agents_summary()
+    except Exception as e:
+        manager_error = _siem_error_code("Manager", e)
+    alerts, indexer_error = None, None
+    try:
+        alerts = await indexer_client.get_recent_alerts(hours=1, size=ALERTS_FETCH_SIZE)
+    except Exception as e:
+        indexer_error = _siem_error_code("Indexer", e)
+    return build_siem_health_report(agents_summary, manager_error, alerts, indexer_error)
 
 
 @app.get("/api/alerts", dependencies=_REQUIRE_API_KEY)
@@ -754,6 +840,56 @@ async def get_redblue_network():
     }
 
 
+@app.get("/api/network/live-traffic", dependencies=_REQUIRE_API_KEY)
+async def get_network_live_traffic():
+    """
+    Painel "Live Traffic" (R6): resumo agregado do buffer de pacotes ao
+    vivo — protocolos, "top talkers" e portas mais vistos. Mesma fonte que
+    /api/redblue/network ("packets"), sem reimplementar a captura; só
+    sumariza. Sem VM_SSH_HOST -> configured=False com zeros/listas vazias,
+    nunca 500.
+    """
+    packets = list(packet_buffer) if vm_ssh_client is not None else []
+    return {"configured": vm_ssh_client is not None, **summarize_packets(packets)}
+
+
+@app.get("/api/network/detections", dependencies=_REQUIRE_API_KEY)
+async def get_network_detections_panel():
+    """
+    Painel "Network Detections" (R6): deteções "agora" (recomputadas sobre
+    a janela curta mais recente do buffer) vs histórico acumulado desde o
+    arranque — mesma fonte de dados que /api/redblue/network
+    ("detections"/"detection_history"), resumida para um painel dedicado.
+    """
+    if vm_ssh_client is None:
+        return {"configured": False, **summarize_detections([], [])}
+    packets = list(packet_buffer)
+    return {
+        "configured": True,
+        **summarize_detections(detect_network_anomalies(packets), list(network_detection_buffer)),
+    }
+
+
+@app.get("/api/network/evidence", dependencies=_REQUIRE_API_KEY)
+async def get_network_evidence(
+    date: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="AAAA-MM-DD; omitido = hoje (UTC)"),
+    limit: int = Query(100, ge=1, le=NETWORK_EVIDENCE_MAX_LIMIT),
+):
+    """
+    Painel "PCAP / Evidence" (R6): lê as deteções de rede já persistidas em
+    JSONL (history_store.append_network_detection_history, ligado ao
+    callback on_new_detections de network_poll_loop) — resolve a dívida de
+    R0 ("deteções de rede só existem em memória"). Nunca é uma captura
+    PCAP/payload real — ver network_soc.build_evidence_report e a nota
+    fixa na própria resposta. Independente de VM_SSH_HOST: lê ficheiro,
+    pode ter dados de uma sessão anterior mesmo com a captura desligada
+    agora. `limit` é sempre capeado no servidor (<=500), independentemente
+    do que o pedido pedir.
+    """
+    entries = read_network_detection_history(SENTRYLENS_HISTORY_DIR, date_str=date, limit=limit)
+    return build_evidence_report(entries, configured=vm_ssh_client is not None)
+
+
 @app.get("/api/redblue/attack-log", dependencies=_REQUIRE_API_KEY)
 async def get_redblue_attack_log():
     """
@@ -778,6 +914,359 @@ async def get_redblue_attack_log():
             for name, s in SCENARIOS.items()
         },
     }
+
+
+DETECTIONS_DEFAULT_LIMIT = 50
+DETECTIONS_MAX_LIMIT = 200
+
+
+@app.get("/api/detections", dependencies=_REQUIRE_API_KEY)
+async def get_detections(
+    hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas"),
+    limit: int = Query(DETECTIONS_DEFAULT_LIMIT, ge=1, le=DETECTIONS_MAX_LIMIT, description="Máximo de eventos devolvidos"),
+):
+    """
+    Vista unificada recente dos 3 detetores independentes — regra/Wazuh
+    (event_catalog), ML (Isolation Forest) e rede (network_detections) —
+    normalizados por detection_event.py (R7, base comum dos 3 detetores).
+    Cada fonte é isolada: uma falha no Indexer ou a ausência do modelo ML
+    nunca derruba a rota (as outras duas fontes continuam a responder) —
+    fica "available: false" só nessa fonte, nunca 500 (mais permissivo
+    que /api/ml-anomalies ou /api/redblue/metrics, que têm uma única
+    fonte e por isso podem dar 502/503 — aqui há 3 fontes independentes,
+    uma em baixo não é motivo para apagar as outras duas). `ref` (o dado
+    bruto de origem) nunca é exposto aqui — já está disponível via
+    /api/alerts, /api/ml-anomalies e /api/network/detections. Ver
+    docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md
+    (ruling 7).
+    """
+    sources = {
+        "rule": {"available": False, "count": 0},
+        "ml": {"available": False, "count": 0},
+        "network": {"available": False, "count": 0},
+    }
+    events: list[dict] = []
+
+    raw_alerts: list[dict] = []
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=500)
+        sources["rule"]["available"] = True
+    except Exception:
+        logger.warning("GET /api/detections: Indexer indisponível para a fonte 'rule'", exc_info=True)
+
+    if sources["rule"]["available"]:
+        rule_events = [e for e in (from_rule_alert(a) for a in raw_alerts) if e is not None]
+        sources["rule"]["count"] = len(rule_events)
+        events.extend(rule_events)
+
+    try:
+        model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
+        ml_report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
+        sources["ml"]["available"] = True
+        ml_events = [e for e in (from_ml_anomaly(r) for r in ml_report["results"]) if e is not None]
+        sources["ml"]["count"] = len(ml_events)
+        events.extend(ml_events)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.warning("GET /api/detections: falha ao calcular anomalias ML", exc_info=True)
+
+    if vm_ssh_client is not None:
+        sources["network"]["available"] = True
+        network_events = [e for e in (from_network_detection(d) for d in network_detection_buffer) if e is not None]
+        sources["network"]["count"] = len(network_events)
+        events.extend(network_events)
+
+    events.sort(key=lambda e: e["ts"], reverse=True)
+    total = len(events)
+    truncated = total > limit
+    events = events[:limit]
+    for event in events:
+        event.pop("ref", None)
+
+    return {
+        "window_hours": hours,
+        "sources": sources,
+        "total": total,
+        "truncated": truncated,
+        "events": events,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Incidentes (Roadmap v2, R3) — ver docs/superpowers/specs/2026-10-06-r3-incidentes-design.md
+# ---------------------------------------------------------------------------
+
+IncidentStatus = Literal["NEW", "INVESTIGATING", "CONTAINED", "RESOLVED", "CLOSED"]
+IncidentSeverity = Literal["info", "low", "medium", "high", "critical"]
+
+
+class StatusChange(BaseModel):
+    status: IncidentStatus
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class IncidentNote(BaseModel):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+class BackfillRequest(BaseModel):
+    days: int = Field(default=7, ge=1, le=90)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _incidents_call(func, *args):
+    """Corre uma operação da base de incidentes fora do event loop. Erros SQLite
+    viram 500 genérico: nunca expõem caminhos nem SQL."""
+    try:
+        return await run_in_threadpool(func, *args)
+    except sqlite3.Error:
+        logger.exception("Falha na base de dados de incidentes")
+        raise HTTPException(status_code=500, detail="Erro interno ao aceder à base de incidentes")
+
+
+async def _incident_detail(incident_id: str) -> dict | None:
+    incident = await _incidents_call(incident_store.get_incident, incident_id)
+    if incident is None:
+        return None
+    raw_alerts = [e["payload"] for e in incident["evidence"] if e["kind"] == "wazuh_alert"]
+    incident["ml_summary"] = await run_in_threadpool(incident_ingest.ml_summary, raw_alerts, ML_MODEL_DIR)
+    for evidence in incident["evidence"]:
+        if evidence["kind"] == "wazuh_alert":
+            evidence["alert"] = _enrich_alert(evidence["payload"])
+            del evidence["payload"]
+    incident["available_transitions"] = list(available_transitions(incident["status"]))
+    return incident
+
+
+@app.get("/api/incidents", dependencies=_REQUIRE_API_KEY)
+async def list_incidents(
+    status: IncidentStatus | None = Query(None),
+    severity: IncidentSeverity | None = Query(None),
+    hours: int = Query(168, ge=1, le=720, description="Janela temporal (última evidência), em horas"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    incidents = await _incidents_call(incident_store.list_incidents, status, severity, since, limit, offset)
+    summary = await _incidents_call(incident_store.summary, since)
+    return {"window_hours": hours, "incidents": incidents, "summary": summary}
+
+
+@app.post("/api/incidents/backfill", dependencies=_REQUIRE_API_KEY)
+async def backfill_incidents(body: BackfillRequest):
+    """Reprocessa os alertas do Wazuh Indexer (retenção de 90 dias) com a mesma
+    função pura do ingest em tempo real. Idempotente. Deteções de rede só
+    existem em memória, por isso não entram."""
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(hours=body.days * 24, size=BACKFILL_MAX_ALERTS)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+    counts = await _incidents_call(
+        incident_ingest.ingest_raw_alerts, incident_store, raw_alerts, ATTACK_LOG_PATH, SCENARIOS
+    )
+    counts["fetched"] = len(raw_alerts)
+    counts["truncated"] = len(raw_alerts) >= BACKFILL_MAX_ALERTS
+    return counts
+
+
+@app.get("/api/incidents/{incident_id}", dependencies=_REQUIRE_API_KEY)
+async def get_incident(incident_id: str):
+    incident = await _incident_detail(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return incident
+
+
+@app.post("/api/incidents/{incident_id}/status", dependencies=_REQUIRE_API_KEY)
+async def change_incident_status(incident_id: str, body: StatusChange):
+    try:
+        await _incidents_call(incident_store.set_status, incident_id, body.status, body.note, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    except InvalidTransition as e:
+        if e.reason == "nota_obrigatoria":
+            raise HTTPException(status_code=422, detail="Fechar um incidente NEW exige uma nota (falso positivo)")
+        raise HTTPException(status_code=409, detail="Transição de estado inválida")
+    return await _incident_detail(incident_id)
+
+
+@app.post("/api/incidents/{incident_id}/triage", dependencies=_REQUIRE_API_KEY)
+async def triage_incident(incident_id: str):
+    """Triagem EXPERIMENTAL via JEV (TypeSafe AI), opt-in. Consultiva: não
+    altera o incidente. Envia ao serviço externo só um resumo agregado e
+    anonimizado (ver jev_client.build_state)."""
+    if not jev_client.jev_enabled():
+        raise HTTPException(status_code=503, detail="jev_disabled")
+    incident = await _incidents_call(incident_store.get_incident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    result = await jev_client.triage(incident)
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=result["error"])
+    return {"incident_id": incident_id, "advisory": True, **{k: v for k, v in result.items() if k != "ok"}}
+
+
+@app.post("/api/incidents/{incident_id}/notes", dependencies=_REQUIRE_API_KEY)
+async def add_incident_note(incident_id: str, body: IncidentNote):
+    try:
+        await _incidents_call(incident_store.add_note, incident_id, body.text, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return await _incident_detail(incident_id)
+
+
+# ---------------------------------------------------------------------------
+# Attack Registry (Roadmap v2, R4) — ver docs/superpowers/specs/2026-10-07-r4-attack-registry-design.md
+# ---------------------------------------------------------------------------
+
+AttackVerdict = Literal["detected", "partial", "not_detected", "unknown"]
+ATTACK_ALERTS_SIZE = 1000
+ATTACK_MAX_HOURS = 720
+
+
+class _OutsideAlertWindow(Exception):
+    pass
+
+
+async def _build_attack_registry(attack_log: list, hours: int | None) -> tuple[dict, dict, bool]:
+    """Junta o attack_log com alertas (regra+ML), rede e incidentes. Falhas do
+    Indexer/modelo ML não derrubam o registo: o veredito fica "unknown" e o
+    código de erro estável vai em correlation.error_code (detalhe só no log).
+    hours=None: ataque fora da janela de alertas suportada, sem correlação.
+    Devolve (registo, correlation, incidents_available)."""
+    correlation = {"available": False, "error_code": None, "alerts_fetched": 0,
+                   "alerts_truncated": False, "network_capture_configured": vm_ssh_client is not None}
+    ml_results: list[dict] = []
+    try:
+        if hours is None:
+            raise _OutsideAlertWindow
+        model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
+    except _OutsideAlertWindow:
+        correlation["error_code"] = "attack_outside_alert_window"
+    except Exception:  # FileNotFoundError, OSError, ValueError, UnpicklingError, ...
+        logger.exception("Attack Registry: modelo ML indisponível")
+        correlation["error_code"] = "ml_model_unavailable"
+    else:
+        try:
+            raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=ATTACK_ALERTS_SIZE)
+        except Exception:
+            logger.exception("Attack Registry: Wazuh Indexer indisponível")
+            correlation["error_code"] = "indexer_unavailable"
+        else:
+            ml_results = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)["results"]
+            correlation.update(available=True, alerts_fetched=len(raw_alerts),
+                               alerts_truncated=len(raw_alerts) >= ATTACK_ALERTS_SIZE)
+
+    incidents_available = True
+    incidents: list[dict] = []
+    try:
+        incidents = await run_in_threadpool(incident_store.list_incidents, None, None, None, 100000, 0)
+    except sqlite3.Error:
+        logger.exception("Attack Registry: base de incidentes indisponível")
+        incidents_available = False
+
+    network_dets = list(network_detection_buffer) if vm_ssh_client is not None else None
+    registry = build_attack_registry(
+        attack_log, SCENARIOS, ml_results, network_detections=network_dets, incidents=incidents,
+        correlation_available=correlation["available"],
+        alerts_truncated=correlation["alerts_truncated"],
+    )
+    return registry, correlation, incidents_available
+
+
+async def _read_attack_log() -> list:
+    try:
+        return await run_in_threadpool(load_attack_log, ATTACK_LOG_PATH)
+    except (OSError, UnicodeDecodeError):
+        logger.exception("Attack Registry: não foi possível ler o log de ataques")
+        raise HTTPException(status_code=500, detail="Erro interno ao ler o registo de ataques")
+
+
+@app.get("/api/attacks", dependencies=_REQUIRE_API_KEY)
+async def list_attacks(
+    hours: int = Query(168, ge=1, le=ATTACK_MAX_HOURS, description="Janela temporal (timestamp do ataque), em horas"),
+    technique: str | None = Query(None, pattern=r"^T\d{4}(\.\d{3})?$", description="Técnica MITRE, ex. T1110"),
+    status: AttackVerdict | None = Query(None, description="Veredito esperado-vs-real"),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Registo de ataques lançados, com esperado vs real e incidentes ligados."""
+    attack_log = await _read_attack_log()
+    registry, correlation, incidents_available = await _build_attack_registry(attack_log, hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    in_window = [
+        a for a in registry["attacks"]
+        if (ts := incident_engine_parse(a["timestamp"])) is not None and ts >= cutoff
+    ]
+    if technique:
+        in_window = [a for a in in_window if a["mitre_technique"] == technique]
+    summary = summarize_attacks(in_window)
+    if status:
+        in_window = [a for a in in_window if a["actual"]["verdict"] == status]
+    return {
+        "window_hours": hours,
+        "total": len(in_window),
+        "attacks": in_window[offset:offset + limit],
+        "summary": summary,
+        "skipped": registry["skipped"],
+        "correlation": correlation,
+        "incidents_available": incidents_available,
+    }
+
+
+@app.get("/api/attacks/{attack_id}", dependencies=_REQUIRE_API_KEY)
+async def get_attack(attack_id: Annotated[str, Path(pattern=r"^[0-9]{1,9}$")]):
+    """Detalhe de um ataque pelo id do log. 404 se não existir."""
+    attack_log = await _read_attack_log()
+    wanted = int(attack_id)
+    entry_ts = None
+    for entry in attack_log:
+        if isinstance(entry, dict) and entry.get("id") == wanted and not isinstance(entry.get("id"), bool):
+            parsed = incident_engine_parse(entry.get("timestamp"))
+            if parsed is not None and (entry_ts is None or parsed < entry_ts):
+                entry_ts = parsed
+    if entry_ts is None:
+        raise HTTPException(status_code=404, detail="Ataque não encontrado")
+    age_hours = (datetime.now(timezone.utc) - entry_ts).total_seconds() / 3600
+    hours = max(1, int(age_hours) + 2)
+    registry, correlation, incidents_available = await _build_attack_registry(
+        attack_log, hours if hours <= ATTACK_MAX_HOURS else None
+    )
+    # Ids duplicados: o detalhe é o primeiro por tempo (o mais antigo).
+    matches = [a for a in registry["attacks"] if a["id"] == wanted]
+    if matches:
+        attack = min(matches, key=lambda a: incident_engine_parse(a["timestamp"]) or datetime.max.replace(tzinfo=timezone.utc))
+        return {"attack": attack, "correlation": correlation, "incidents_available": incidents_available}
+    raise HTTPException(status_code=404, detail="Ataque não encontrado")
+
+
+# ---------------------------------------------------------------------------
+# Attack Library (Roadmap v2, R5) — ver docs/superpowers/specs/2026-10-07-r5-attack-library-design.md
+# Catálogo de referência só-leitura: nunca lança ataques, nenhum campo contém
+# um comando executável. Só GET — sem rotas de escrita nesta fase.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/attack-library", dependencies=_REQUIRE_API_KEY)
+async def list_attack_library():
+    """Catálogo de ataques do laboratório (metadata editorial + MITRE/Event IDs
+    já existentes em attack_scenarios.SCENARIOS). Só leitura."""
+    return build_attack_library()
+
+
+@app.get("/api/attack-library/{library_id}", dependencies=_REQUIRE_API_KEY)
+async def get_attack_library_item(
+    library_id: Annotated[str, Path(pattern=ATTACK_LIBRARY_ID_RE.pattern)],
+):
+    """Detalhe de uma entrada da biblioteca pelo id (= scenario_name). 404 com
+    código estável se não existir."""
+    entry = get_attack_library_entry(library_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="entry_not_found")
+    return entry
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)

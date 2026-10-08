@@ -15,7 +15,7 @@ Correr:
 import sys
 
 from attack_scenarios import SCENARIOS
-from redblue_correlator import build_redblue_report
+from redblue_correlator import attack_windows, build_redblue_report, parse_launched_attacks
 
 failures: list[str] = []
 
@@ -92,6 +92,38 @@ def run() -> None:
     report7 = build_redblue_report(attacks7, [], SCENARIOS)
     check("caso 7: cenário desconhecido vai para unknown_scenario", len(report7["unknown_scenario"]) == 1)
     check("caso 7: cenário desconhecido não entra em attempts", report7["attempts"] == [])
+
+    # --- Caso 7b: técnica/ferramenta/id do próprio log prevalecem sobre o cenário ---
+    entry_real = attack("brute_force_rdp", "192.168.1.27", "2026-09-14T17:00:00+00:00")
+    entry_real.update({"id": 6, "technique": "T1003", "tool": "mimikatz"})
+    report7b = build_redblue_report([entry_real], [], SCENARIOS)
+    a7b = report7b["attempts"][0]
+    check("caso 7b: mitre_technique do log prevalece (T1003, não T1110)", a7b["mitre_technique"] == "T1003")
+    check("caso 7b: tool e attack_id do log expostos", a7b["tool"] == "mimikatz" and a7b["attack_id"] == 6)
+    check("caso 7b: sem technique no log cai para o cenário",
+          build_redblue_report([attack("brute_force_rdp", "192.168.1.28", "2026-09-14T18:00:00+00:00")],
+                               [], SCENARIOS)["attempts"][0]["mitre_technique"] == "T1110")
+
+    # --- Caso 7c: helpers partilhados com incident_engine ---
+    mixed = [
+        attack("smb_enum", "192.168.1.30", "2026-09-14T19:00:30+00:00"),
+        attack("smb_enum", "192.168.1.30", "2026-09-14T19:00:00+00:00"),
+        attack("smb_enum", "192.168.1.30", "2026-09-14T19:30:00+00:00", status="skipped"),
+        attack("cenario_inexistente", "192.168.1.30", "2026-09-14T19:01:00+00:00"),
+        attack("smb_enum", "192.168.1.30", "nao-e-data"),
+        "lixo",
+    ]
+    parsed, not_exec, unknown, invalid = parse_launched_attacks(mixed, SCENARIOS)
+    check("parse_launched_attacks: 2 tentativas válidas ordenadas por tempo",
+          [e["timestamp"] for _, e in parsed] == ["2026-09-14T19:00:00+00:00", "2026-09-14T19:00:30+00:00"])
+    check("parse_launched_attacks: skipped/desconhecido/inválidos separados",
+          len(not_exec) == 1 and len(unknown) == 1 and len(invalid) == 2)
+    windows = attack_windows(parsed, 300)
+    check("attack_windows: janela do 1º cortada pelo início do 2º",
+          (windows[0][1] - windows[0][0]).total_seconds() == 30)
+    check("attack_windows: última janela tem a duração completa",
+          (windows[1][1] - windows[1][0]).total_seconds() == 300)
+    check("attack_windows: devolve a entrada original", windows[0][2] is parsed[0][1])
 
     # --- Caso 8: entradas vazias -> estrutura vazia bem formada, nunca lança ---
     empty_report = build_redblue_report([], [], SCENARIOS)
@@ -318,6 +350,31 @@ def run() -> None:
     check(
         "caso 15: by_scenario['smb_enum'].detected_by_windows_only == 0 (reaproveitando o caso 10)",
         report10["by_scenario"]["smb_enum"]["detected_by_windows_only"] == 0,
+    )
+
+    # --- Caso 16 (R7): network_detection_types continua igual ao tipo em bruto
+    # para deteções bem formadas (integração com detection_event.py, ver
+    # docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md, ruling 4) ---
+    attacks16 = [attack("smb_enum", "192.168.1.45", "2026-09-14T23:00:00+00:00")]
+    dets16 = [net_det("port_scan", "192.168.1.170", "192.168.1.45", "2026-09-14T23:00:05+00:00")]
+    report16 = build_redblue_report(attacks16, [], SCENARIOS, network_detections=dets16)
+    check(
+        "caso 16: network_detection_types continua ['port_scan'] (normalizado via detection_event)",
+        report16["attempts"][0]["network_detection_types"] == ["port_scan"],
+    )
+
+    # --- Caso 16b (R7): deteção sem 'type' que o filtro de match (mais
+    # permissivo que detection_event.from_network_detection) ainda deixa
+    # passar -> fallback para o valor em bruto (None), nunca uma exceção
+    # nem uma nova forma de perder a deteção já selecionada ---
+    attacks16b = [attack("smb_enum", "192.168.1.46", "2026-09-14T23:10:00+00:00")]
+    dets16b = [{"type": None, "src_ip": "192.168.1.170", "dst_ip": "192.168.1.46", "timestamp": "2026-09-14T23:10:05+00:00", "detail": {}}]
+    report16b = build_redblue_report(attacks16b, [], SCENARIOS, network_detections=dets16b)
+    a16b = report16b["attempts"][0]
+    check("caso 16b: detected_by_network continua True (deteção sem type ainda conta)", a16b["detected_by_network"] is True)
+    check(
+        "caso 16b: network_detection_types faz fallback para o type em bruto (None) sem lançar",
+        a16b["network_detection_types"] == [None],
     )
 
     # =========================================================================

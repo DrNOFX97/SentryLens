@@ -39,17 +39,86 @@
     </div>
   </header>
 
-  <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="overview">📊 Visão Geral</button>
-    <button class="tab-btn" data-tab="alerts">🚨 Alertas</button>
-    <button class="tab-btn" data-tab="agents">🖥️ Agentes</button>
-    <button class="tab-btn" data-tab="system">⚙️ Sistema</button>
-    <button class="tab-btn" data-tab="lifecycle">📋 Ciclo de Vida</button>
-    <button class="tab-btn" data-tab="privileges">🔑 Privilégios</button>
-    <button class="tab-btn" data-tab="admin-activity">👤 Contas Admin</button>
-    <button class="tab-btn" data-tab="ml-anomalies">🧠 ML Anomalias</button>
-    <button class="tab-btn" data-tab="compliance">🛡️ Conformidade</button>
-    <button class="tab-btn" data-tab="redblue">⚔️ Red vs Blue</button>
+  <div class="app-shell">
+    <button class="sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="false">☰ Menu</button>
+    <nav class="sidebar" id="sidebar" aria-label="Navegação principal">
+    <details class="nav-group" open>
+      <summary>Visão Geral</summary>
+      <button class="nav-item active" aria-current="page" data-tab="overview">📊 Overview</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>SOC</summary>
+      <button class="nav-item" data-tab="alerts">🚨 Alertas</button>
+      <button class="nav-item" data-tab="incidents">🧩 Incidentes</button>
+      <button class="nav-item is-planned" data-planned="R3" data-label="Investigações">🔎 Investigações<span class="nav-badge">R3</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Red Team</summary>
+      <button class="nav-item" data-tab="redblue">⚔️ Red vs Blue</button>
+      <button class="nav-item" data-tab="attack-library">📚 Attack Library</button>
+      <button class="nav-item" data-tab="attack-registry">🗂️ Attack Registry</button>
+      <button class="nav-item" data-tab="attack-timeline">🕒 Attack Timeline</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Blue Team</summary>
+      <button class="nav-item" data-tab="detections">🎯 Detections</button>
+      <button class="nav-item is-planned" data-planned="R21" data-label="Response">🛠️ Response<span class="nav-badge">R21</span></button>
+      <button class="nav-item is-planned" data-planned="R21" data-label="Playbooks">📘 Playbooks<span class="nav-badge">R21</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Network</summary>
+      <button class="nav-item" data-tab="live-traffic">📡 Live Traffic</button>
+      <button class="nav-item" data-tab="network-detections">🚦 Network Detections</button>
+      <button class="nav-item" data-tab="pcap-evidence">🧪 PCAP / Evidence</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Wazuh</summary>
+      <button class="nav-item" data-tab="agents">🖥️ Agentes</button>
+      <button class="nav-item" data-tab="live-soc">📡 Live SOC</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Identidade (IAM)</summary>
+      <button class="nav-item" data-tab="lifecycle">📋 Ciclo de Vida</button>
+      <button class="nav-item" data-tab="privileges">🔑 Privilégios</button>
+      <button class="nav-item" data-tab="admin-activity">👤 Contas Admin</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>ML</summary>
+      <button class="nav-item" data-tab="ml-anomalies">🧠 Anomalias</button>
+      <button class="nav-item is-planned" data-planned="R9" data-label="Models">📦 Models<span class="nav-badge">R9</span></button>
+      <button class="nav-item is-planned" data-planned="R10" data-label="Training">🏋️ Training<span class="nav-badge">R10</span></button>
+      <button class="nav-item is-planned" data-planned="R9" data-label="Evaluation">📐 Evaluation<span class="nav-badge">R9</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Vaccines</summary>
+      <button class="nav-item is-planned" data-planned="R11" data-label="Candidates">💉 Candidates<span class="nav-badge">R11</span></button>
+      <button class="nav-item is-planned" data-planned="R12" data-label="Validation">✅ Validation<span class="nav-badge">R12</span></button>
+      <button class="nav-item is-planned" data-planned="R11" data-label="Approved">🏷️ Approved<span class="nav-badge">R11</span></button>
+      <button class="nav-item is-planned" data-planned="R14" data-label="Regression">🔁 Regression<span class="nav-badge">R14</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>MITRE ATT&amp;CK</summary>
+      <button class="nav-item is-planned" data-planned="R16" data-label="Coverage">🗺️ Coverage<span class="nav-badge">R16</span></button>
+      <button class="nav-item is-planned" data-planned="R16" data-label="Techniques">🧬 Techniques<span class="nav-badge">R16</span></button>
+      <button class="nav-item is-planned" data-planned="R16" data-label="Gaps">🕳️ Gaps<span class="nav-badge">R16</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Métricas</summary>
+      <button class="nav-item is-planned" data-planned="R8" data-label="MTTD / MTTR">⏱️ MTTD / MTTR<span class="nav-badge">R8</span></button>
+      <button class="nav-item is-planned" data-planned="R8" data-label="Detection Coverage">📈 Detection Coverage<span class="nav-badge">R8</span></button>
+      <button class="nav-item is-planned" data-planned="R8" data-label="Detection Rate">🎯 Detection Rate<span class="nav-badge">R8</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Relatórios</summary>
+      <button class="nav-item" data-tab="compliance">🛡️ Conformidade</button>
+      <button class="nav-item is-planned" data-planned="R19" data-label="Security Reports">📄 Security Reports<span class="nav-badge">R19</span></button>
+      <button class="nav-item is-planned" data-planned="R20" data-label="Executive">📊 Executive<span class="nav-badge">R20</span></button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Sistema</summary>
+      <button class="nav-item" data-tab="system">⚙️ Sistema</button>
+      <button class="nav-item is-planned" data-planned="R22" data-label="Settings">🔧 Settings<span class="nav-badge">R22</span></button>
+    </details>
   </nav>
 
   <main class="container">
@@ -606,6 +675,10 @@
       <section class="panel" id="redblue-network-panel">
         <h2>🌐 Rede em Tempo Real</h2>
         <p class="panel-note" id="redblue-network-note">A carregar...</p>
+        <p class="panel-note">Este painel é a vista de correlação (pacotes do buffer + deteções recomputadas,
+          a mesma fonte usada por <code>/api/redblue/metrics</code>). Para resumos dedicados e para o histórico
+          persistido de deteções (sobrevive a um restart do backend), ver as abas
+          <strong>Network → Live Traffic / Network Detections / PCAP Evidence</strong> na sidebar.</p>
         <section class="kpi-grid">
           <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="kpi-rb-packets">—</div></div>
           <div class="card"><h3>Deteções Atuais</h3><div class="value" id="kpi-rb-detections">—</div></div>
@@ -650,7 +723,364 @@
       </section>
     </div>
 
+    <!-- ===== Incidentes (Roadmap v2, R3) ===== -->
+    <div class="tab-content" id="tab-incidents">
+      <section class="panel" id="incidents-panel">
+        <h2>🧩 Incidentes</h2>
+        <p class="panel-note">
+          Agrupamento automático de deteções (alertas Wazuh e rede) por ativo, com estado e timeline.
+          Só dados reais: ataques sem nenhuma deteção não geram incidente (ver Red vs Blue).
+        </p>
+        <section class="kpi-grid" id="incidents-kpi-grid">
+          <div class="card"><h3>Abertos</h3><div class="value" id="kpi-inc-open">—</div></div>
+          <div class="card critical"><h3>Altos/Críticos Abertos</h3><div class="value" id="kpi-inc-high">—</div></div>
+          <div class="card"><h3>MTTD Médio</h3><div class="value" id="kpi-inc-mttd">—</div></div>
+          <div class="card"><h3>Total na Janela</h3><div class="value" id="kpi-inc-total">—</div></div>
+        </section>
+        <div class="filter-row">
+          <label for="inc-status-filter">Estado:</label>
+          <select id="inc-status-filter">
+            <option value="">Todos</option>
+            <option value="NEW">Novo</option>
+            <option value="INVESTIGATING">Em investigação</option>
+            <option value="CONTAINED">Contido</option>
+            <option value="RESOLVED">Resolvido</option>
+            <option value="CLOSED">Fechado</option>
+          </select>
+          <label for="inc-severity-filter">Severidade:</label>
+          <select id="inc-severity-filter">
+            <option value="">Todas</option>
+            <option value="critical">Crítico</option>
+            <option value="high">Alto</option>
+            <option value="medium">Médio</option>
+            <option value="low">Baixo</option>
+            <option value="info">Info</option>
+          </select>
+          <button id="inc-backfill-btn" type="button">📥 Importar histórico</button>
+        </div>
+        <div id="inc-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="incidents-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Severidade</th><th>Estado</th><th>Ativo</th>
+                <th>Primeira evidência</th><th>Última evidência</th><th>Evidências</th><th>MITRE / ataque</th>
+              </tr>
+            </thead>
+            <tbody id="incidents-body">
+              <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="incident-detail-panel" hidden>
+        <h2 id="inc-detail-title">Incidente</h2>
+        <div id="inc-detail-error" class="panel-error-banner" hidden></div>
+        <div id="inc-detail-meta" class="inc-meta"></div>
+        <div class="inc-actions" id="inc-actions"></div>
+        <label for="inc-note-input" class="inc-note-label">Nota (obrigatória para fechar um incidente novo):</label>
+        <textarea id="inc-note-input" rows="2" maxlength="2000"></textarea>
+        <button id="inc-note-btn" type="button">➕ Adicionar nota</button>
+        <h3>Evidências</h3>
+        <div class="table-scroll">
+          <table id="inc-evidence-table">
+            <thead><tr><th>Hora</th><th>Tipo</th><th>Severidade</th><th>Descrição</th></tr></thead>
+            <tbody id="inc-evidence-body"></tbody>
+          </table>
+        </div>
+        <h3>Timeline</h3>
+        <ol class="inc-timeline" id="inc-timeline"></ol>
+      </section>
+    </div>
+
+    <!-- ===== Attack Library (Roadmap v2, R5) ===== -->
+    <div class="tab-content" id="tab-attack-library">
+      <section class="panel" id="attack-library-panel">
+        <h2>📚 Attack Library</h2>
+        <p class="panel-note">
+          Catálogo de referência dos cenários de ataque do laboratório (técnica/ferramenta/Event IDs,
+          risco, pré-requisitos, sensores esperados e passos de limpeza). Só leitura — não lança nada;
+          lançar um cenário continua a fazer-se manualmente com <code>attack_scenarios.py</code> na Kali.
+        </p>
+        <div class="filter-row">
+          <label for="alib-risk-filter">Risco:</label>
+          <select id="alib-risk-filter">
+            <option value="">Todos</option>
+            <option value="low">Baixo</option>
+            <option value="medium">Médio</option>
+            <option value="high">Alto</option>
+          </select>
+          <label for="alib-sensor-filter">Sensor esperado:</label>
+          <select id="alib-sensor-filter">
+            <option value="">Todos</option>
+            <option value="rule">Regra</option>
+            <option value="ml">ML</option>
+            <option value="network">Rede</option>
+          </select>
+        </div>
+        <div id="alib-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="alib-table">
+            <thead>
+              <tr>
+                <th>Cenário</th><th>Nome</th><th>MITRE</th><th>Ferramenta</th>
+                <th>Risco</th><th>Sensores esperados</th><th>Replayable</th><th>Duração</th>
+              </tr>
+            </thead>
+            <tbody id="alib-body">
+              <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="attack-library-detail-panel" hidden>
+        <h2 id="alib-detail-title">Cenário</h2>
+        <div id="alib-detail-meta" class="inc-meta"></div>
+        <h3>Pré-requisitos</h3>
+        <p id="alib-detail-prereqs"></p>
+        <h3>Passos de limpeza</h3>
+        <ul class="atk-evidence" id="alib-detail-cleanup"></ul>
+        <h3>Replayable</h3>
+        <p id="alib-detail-replayable"></p>
+      </section>
+    </div>
+
+    <!-- ===== Attack Registry / Attack Timeline (Roadmap v2, R4) ===== -->
+    <div class="tab-content" id="tab-attack-registry">
+      <section class="panel" id="attack-registry-panel">
+        <h2>🗂️ Attack Registry</h2>
+        <p class="panel-note">
+          Ataques lançados (log da Kali), o que se esperava detetar e o que foi realmente detetado
+          (regra, ML, rede), com os incidentes ligados. Só dados reais; sem correlação disponível
+          o veredito é «Desconhecido», nunca «Não detetado».
+        </p>
+        <section class="kpi-grid" id="atk-kpi-grid">
+          <div class="card"><h3>Ataques</h3><div class="value" id="kpi-atk-total">—</div></div>
+          <div class="card"><h3>Detetados</h3><div class="value" id="kpi-atk-detected">—</div></div>
+          <div class="card"><h3>Parciais</h3><div class="value" id="kpi-atk-partial">—</div></div>
+          <div class="card critical"><h3>Não detetados</h3><div class="value" id="kpi-atk-missed">—</div></div>
+        </section>
+        <div class="filter-row">
+          <label for="atk-status-filter">Veredito:</label>
+          <select id="atk-status-filter">
+            <option value="">Todos</option>
+            <option value="detected">Detetado</option>
+            <option value="partial">Parcial</option>
+            <option value="not_detected">Não detetado</option>
+            <option value="unknown">Desconhecido</option>
+          </select>
+          <label for="atk-technique-filter">Técnica MITRE:</label>
+          <input id="atk-technique-filter" type="text" maxlength="9" placeholder="T1110" autocomplete="off">
+        </div>
+        <div id="atk-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="attacks-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Hora</th><th>Cenário</th><th>MITRE</th><th>Ferramenta</th>
+                <th>Alvo</th><th>Operador</th><th>Esperado</th><th>Real</th><th>Incidentes</th>
+              </tr>
+            </thead>
+            <tbody id="attacks-body">
+              <tr><td colspan="10" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="attack-detail-panel" hidden>
+        <h2 id="atk-detail-title">Ataque</h2>
+        <div id="atk-detail-error" class="panel-error-banner" hidden></div>
+        <div id="atk-detail-meta" class="inc-meta"></div>
+        <h3>Esperado vs real</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Fonte</th><th>Esperada</th><th>Observada</th></tr></thead>
+            <tbody id="atk-detail-compare"></tbody>
+          </table>
+        </div>
+        <h3>Evidência (referências)</h3>
+        <ul class="atk-evidence" id="atk-detail-evidence"></ul>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-attack-timeline">
+      <section class="panel" id="attack-timeline-panel">
+        <h2>🕒 Attack Timeline</h2>
+        <p class="panel-note">
+          Linha temporal dos ataques lançados (mais antigo primeiro), com o veredito esperado vs real.
+          Usa os filtros do Attack Registry e a janela do seletor de período.
+        </p>
+        <ol class="atk-timeline" id="atk-timeline">
+          <li class="empty-state">A carregar...</li>
+        </ol>
+      </section>
+    </div>
+
+    <!-- ===== Live SOC (Roadmap v2, R2): feed ao vivo + saude do SIEM ===== -->
+    <div class="tab-content" id="tab-live-soc">
+      <section class="panel">
+        <h2>❤️ Saúde do SIEM</h2>
+        <div class="ls-banner ls-banner-wait" id="ls-status" role="status">Estado do SIEM: a verificar...</div>
+        <p class="panel-note" id="ls-health-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Wazuh Manager</h3><div class="value ls-state" id="ls-manager">—</div></div>
+          <div class="card"><h3>Wazuh Indexer</h3><div class="value ls-state" id="ls-indexer">—</div></div>
+          <div class="card"><h3>Agentes Ativos</h3><div class="value" id="ls-agents-active">—</div></div>
+          <div class="card"><h3>Agentes Desligados</h3><div class="value" id="ls-agents-down">—</div></div>
+          <div class="card"><h3>Atraso de Ingestão</h3><div class="value ls-small" id="ls-lag">—</div></div>
+          <div class="card"><h3>Taxa de Alertas</h3><div class="value" id="ls-rate">—</div></div>
+        </section>
+      </section>
+      <section class="panel">
+        <h2>📡 Alertas ao vivo</h2>
+        <div class="ls-toolbar">
+          <span class="ls-conn ls-conn-wait" id="ls-conn">● A ligar...</span>
+          <button id="ls-pause-btn" type="button">⏸ Pausar</button>
+          <span id="ls-pending" class="panel-note"></span>
+        </div>
+        <div class="table-scroll">
+          <table id="ls-feed-table">
+            <thead><tr><th>Hora</th><th>Severidade</th><th>Agente</th><th>Evento</th></tr></thead>
+            <tbody id="ls-feed-body"><tr><td colspan="4" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Network SOC: Live Traffic / Network Detections / PCAP Evidence (Roadmap v2, R6) ===== -->
+    <div class="tab-content" id="tab-live-traffic">
+      <section class="panel" id="live-traffic-panel">
+        <h2>📡 Live Traffic</h2>
+        <p class="panel-note" id="nst-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="nst-total">—</div></div>
+          <div class="card"><h3>Janela (início)</h3><div class="value ls-small" id="nst-window-start">—</div></div>
+          <div class="card"><h3>Janela (fim)</h3><div class="value ls-small" id="nst-window-end">—</div></div>
+        </section>
+        <h3 class="rb-subtitle">Protocolos</h3>
+        <div class="table-scroll">
+          <table id="nst-protocol-table">
+            <thead><tr><th>Protocolo</th><th>Pacotes</th></tr></thead>
+            <tbody id="nst-protocol-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <h3 class="rb-subtitle">Top talkers (origem)</h3>
+        <div class="table-scroll">
+          <table id="nst-talkers-table">
+            <thead><tr><th>IP de origem</th><th>Pacotes</th></tr></thead>
+            <tbody id="nst-talkers-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <h3 class="rb-subtitle">Portas de destino mais vistas</h3>
+        <div class="table-scroll">
+          <table id="nst-ports-table">
+            <thead><tr><th>Porta</th><th>Pacotes</th></tr></thead>
+            <tbody id="nst-ports-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-network-detections">
+      <section class="panel" id="network-detections-panel">
+        <h2>🚦 Network Detections</h2>
+        <p class="panel-note" id="nsd-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Deteções Agora</h3><div class="value" id="nsd-live-count">—</div></div>
+          <div class="card"><h3>Deteções Acumuladas</h3><div class="value" id="nsd-history-count">—</div></div>
+        </section>
+        <h3 class="rb-subtitle">Por tipo</h3>
+        <div class="table-scroll">
+          <table id="nsd-bytype-table">
+            <thead><tr><th>Tipo</th><th>Ocorrências</th></tr></thead>
+            <tbody id="nsd-bytype-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <h3 class="rb-subtitle">Mais recentes (até 50)</h3>
+        <div class="table-scroll">
+          <table id="nsd-recent-table">
+            <thead><tr><th>Data</th><th>Tipo</th><th>Origem</th><th>Destino</th><th>Detalhe</th></tr></thead>
+            <tbody id="nsd-recent-body"><tr><td colspan="5" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Detections: vista unificada regra/ML/rede (Roadmap v2, R7) ===== -->
+    <div class="tab-content" id="tab-detections">
+      <section class="panel" id="detections-panel">
+        <h2>🎯 Detections</h2>
+        <p class="panel-note" id="det-note">A carregar...</p>
+        <div class="filter-row">
+          <label for="det-hours-filter">Janela:</label>
+          <select id="det-hours-filter">
+            <option value="1">1 hora</option>
+            <option value="24" selected>24 horas</option>
+            <option value="168">7 dias</option>
+          </select>
+          <label for="det-source-filter">Fonte:</label>
+          <select id="det-source-filter">
+            <option value="">Todas</option>
+            <option value="rule">Regra (Wazuh)</option>
+            <option value="ml">ML</option>
+            <option value="network">Rede</option>
+          </select>
+        </div>
+        <section class="kpi-grid">
+          <div class="card"><h3>Total</h3><div class="value" id="det-total">—</div></div>
+          <div class="card"><h3>Regra</h3><div class="value" id="det-count-rule">—</div></div>
+          <div class="card"><h3>ML</h3><div class="value" id="det-count-ml">—</div></div>
+          <div class="card"><h3>Rede</h3><div class="value" id="det-count-network">—</div></div>
+        </section>
+        <div class="table-scroll">
+          <table id="det-table">
+            <thead><tr><th>Data</th><th>Fonte</th><th>Severidade</th><th>Ativo</th><th>Deteção</th><th>Detalhe</th></tr></thead>
+            <tbody id="det-body"><tr><td colspan="6" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-pcap-evidence">
+      <section class="panel" id="pcap-evidence-panel">
+        <h2>🧪 PCAP / Evidence</h2>
+        <p class="panel-note" id="nse-disclaimer">A carregar...</p>
+        <div class="filter-row">
+          <label for="nse-date-filter">Dia (AAAA-MM-DD):</label>
+          <input id="nse-date-filter" type="text" maxlength="10" placeholder="hoje" autocomplete="off">
+          <label for="nse-limit-filter">Limite:</label>
+          <select id="nse-limit-filter">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+          <button id="nse-reload-btn" type="button">Atualizar</button>
+        </div>
+        <div id="nse-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="nse-table">
+            <thead><tr><th>Data</th><th>Hora</th><th>Tipo</th><th>Origem</th><th>Destino</th><th>Detalhe</th></tr></thead>
+            <tbody id="nse-body"><tr><td colspan="6" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Secção planeada (sem dados reais ainda) ===== -->
+    <div class="tab-content" id="tab-planned">
+      <section class="panel planned-panel">
+        <h2 id="planned-title">Secção planeada</h2>
+        <p class="empty-state">Sem dados — ainda não implementado.</p>
+        <p class="planned-note">Prevista na fase <strong id="planned-phase">R?</strong> do Roadmap v2. Esta secção só mostrará dados reais quando existir a fonte de dados correspondente (ver <code>docs/ROADMAP_STATUS.md</code>).</p>
+      </section>
+    </div>
+
   </main>
+  </div>
 
   <footer>
     <p>SentryLens — Fase 2 do projeto CET. Ligação em tempo real ao Wazuh.</p>
@@ -659,7 +1089,14 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"
     integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
     crossorigin="anonymous"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
   <script src="redblue.js"></script>
+  <script src="incidents.js"></script>
+  <script src="live_soc.js"></script>
+  <script src="attack_registry.js"></script>
+  <script src="attack_library.js"></script>
+  <script src="network_soc.js"></script>
+  <script src="detections.js"></script>
 </body>
 </html>

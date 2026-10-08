@@ -14,9 +14,12 @@ scripts/system_alerts_history.json
 scripts/*.log
 scripts/*.log.err
 scripts/attack_log.jsonl
+scripts/attack_targets.json
 scripts/snapshots/
 scripts/models/
 scripts/historico/
+scripts/incidents.sqlite3
+scripts/incidents.sqlite3-journal
 
 # Estado local do Claude Code (não é conteúdo do projeto)
 .claude/
@@ -24,3 +27,10 @@ CLAUDE.md
 
 # Worktrees de execucao de planos (superpowers)
 .worktrees/
+
+# Logs de rondas Red Team (estado local, IPs do laboratorio)
+scripts/attack_log_round*.jsonl
+
+# Lixo local de ferramentas / pasta partilhada com a VM Kali
+.playwright-mcp/
+kali-share/

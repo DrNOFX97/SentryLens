@@ -73,7 +73,7 @@ O backend nunca fala diretamente com o agente: usa as APIs do Wazuh, que já tê
 
 ## Funcionalidades
 
-O dashboard tem 10 abas:
+O dashboard tem 17 abas:
 
 | Aba | Conteúdo |
 |---|---|
@@ -87,6 +87,11 @@ O dashboard tem 10 abas:
 | **ML Anomalias** | Isolation Forest lado a lado com a classificação por regras |
 | **Conformidade** | Veredito RGPD, NIS2 e AI Act por alerta |
 | **Red vs Blue** | Ataques simulados vs. deteções, e rede em tempo real |
+| **Live SOC** | Feed de alertas ao vivo e saúde do SIEM (Manager/Indexer, agentes, atraso de ingestão) |
+| **Incidentes** | Agrupamento automático de alertas e deteções de rede em incidentes, com estados, timeline e notas |
+| **Attack Registry / Attack Timeline** | Registo de ataques: esperado vs. real (regra/ML/rede) e incidentes ligados; só leitura |
+| **Attack Library** | Catálogo de referência dos cenários de ataque (risco, sensores esperados, limpeza); só leitura, nunca executa nada |
+| **Live Traffic / Network Detections / PCAP Evidence** | Resumos dedicados da captura de rede e evidência de metadados persistida (nunca payload nem PCAP real) |
 
 Também inclui:
 
@@ -95,6 +100,8 @@ Também inclui:
 - Histórico próprio em JSONL com índice SQLite, para além dos 90 dias do Wazuh Indexer.
 - Exportação de um relatório HTML autónomo (`GET /api/export/report`).
 - Autenticação por API key em todos os endpoints.
+- Vista unificada de deteções (`GET /api/detections`): regra, ML e rede num tipo comum (`DetectionEvent`).
+- Triagem experimental de incidentes via JEV (`POST /api/incidents/{id}/triage`): desligada por omissão e anonimizada.
 
 ---
 
@@ -251,7 +258,7 @@ Ver [`QUICKSTART.md`](QUICKSTART.md).
 
 ## Testes
 
-17 scripts standalone, sem pytest. Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
+31 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
 
 ```bash
 cd scripts
@@ -280,6 +287,12 @@ Todos os endpoints `/api/*` exigem o header `X-API-Key` e devolvem JSON (exceto 
 | GET | `/api/ml-anomalies` | Isolation Forest vs. regras |
 | GET | `/api/redblue/metrics` | Cobertura e MTTD por cenário de ataque |
 | GET | `/api/redblue/network` | Snapshot da captura de rede |
+| GET | `/api/detections` | Vista unificada recente dos detetores (regra/ML/rede) |
+| GET | `/api/incidents` | Incidentes (rotas `/api/incidents/*`) |
+| GET | `/api/attacks` | Registo de ataques, esperado vs. real |
+| GET | `/api/attack-library` | Catálogo de cenários de ataque |
+| GET | `/api/network/live-traffic` \| `detections` \| `evidence` | Resumos dedicados de rede |
+| GET | `/api/siem/health` | Saúde do SIEM |
 | GET | `/api/history/query` | Consulta ao histórico (índice SQLite) |
 | GET | `/api/export/report` | Relatório HTML autónomo |
 | WS | `/ws/alerts` | Alertas novos em tempo real |
@@ -312,9 +325,11 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 │   ├── network_monitor.py / network_detections.py   captura e deteção de rede
 │   ├── ml_anomalies.py / feature_extractor.py / train_anomaly_model.py   Machine Learning
 │   ├── attack_scenarios.py / redblue_correlator.py  Red vs Blue
+│   ├── incident_*.py, attack_registry.py, attack_library.py/.yaml   incidentes, registo e biblioteca de ataques
+│   ├── detection_event.py, network_soc.py, siem_health.py   deteções unificadas, painéis de rede, saúde do SIEM
 │   ├── history_store.py / history_index.py      histórico JSONL e índice SQLite
 │   ├── deploy/                                  serviço tshark e logrotate da VM
-│   └── test_*.py                                17 testes standalone
+│   └── test_*.py                                31 testes standalone
 └── docs/                                        API, ML e guia do laboratório
 ```
 

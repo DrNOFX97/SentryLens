@@ -23,7 +23,9 @@ internet.
    -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })   # PowerShell
    ```
 2. **Backend** — `SENTRYLENS_API_KEY=<key>` em `scripts/.env`.
-3. **Frontend** — mesma key na constante `API_KEY` em `app.js`.
+3. **Frontend** — automático: `scripts/serve_frontend.py` gera `/config.js` com a
+   `SENTRYLENS_API_KEY` de `scripts/.env` (só responde ao próprio origin do
+   dashboard e a Hosts de loopback). Não há nada a colar no `app.js`.
 
 **Fail-closed:** sem `SENTRYLENS_API_KEY` definida, ou com `X-API-Key`
 em falta/errado, a API devolve sempre `401`
@@ -198,6 +200,236 @@ o perfil fixo usado pela camada de conformidade.
 
 **Testes:** `scripts/test_nis2_lookup.py`.
 
+## 🧩 Incidentes (R3)
+
+Incidente = agrupamento automático de deteções (alertas Wazuh e deteções de
+rede) sobre o mesmo ativo, com estado e timeline. Persistido em
+`scripts/incidents.sqlite3` (ver [DATA_MODEL.md](DATA_MODEL.md#incidente-r3)).
+Todas as rotas exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/attacks` | `hours`, `technique`, `status`, `limit`, `offset` | Registo de ataques, esperado vs real (R4) |
+| GET | `/api/attacks/{id}` | — | Detalhe de um ataque (R4) |
+| GET | `/api/incidents` | `status`, `severity`, `hours` (1–720, default 168, sobre a última evidência), `limit` (1–500, default 100), `offset` | `{window_hours, incidents[], summary}` | 401, 422 (parâmetro inválido), 500 |
+| GET | `/api/incidents/{id}` | — | Incidente + `evidence[]` + `timeline[]` + `ml_summary` + `available_transitions` | 401, 404, 500 |
+| POST | `/api/incidents/{id}/status` | corpo `{status, note?}` | Detalhe do incidente atualizado | 401, 404, 409 (transição inválida), 422 (falta a nota ao fechar um `NEW`), 500 |
+| POST | `/api/incidents/{id}/notes` | corpo `{text}` (1–2000 caracteres) | Detalhe atualizado (evento `note_added`) | 401, 404, 422, 500 |
+| POST | `/api/incidents/backfill` | corpo `{days}` (1–90, default 7) | `{opened, attached, duplicate, ignored, invalid, fetched, truncated}` | 401, 422, 502 (Indexer indisponível), 500 |
+
+Transições de estado válidas: `NEW → INVESTIGATING | CLOSED` (nota
+obrigatória), `INVESTIGATING → CONTAINED | RESOLVED`, `CONTAINED → RESOLVED |
+INVESTIGATING`, `RESOLVED → CLOSED | INVESTIGATING`; `CLOSED` é final.
+
+O backfill reprocessa os alertas do Wazuh Indexer (máx. 5000 por corrida,
+`truncated: true` se atingir o teto) com a mesma função pura do ingest em
+tempo real e é idempotente por chave de evidência. Só cobre alertas Wazuh
+(as deteções de rede existem apenas em memória). `invalid` conta alertas sem
+`_id`, timestamp válido ou `agent.ip`. Erros de base de dados devolvem `500`
+genérico, sem caminhos nem SQL.
+
+Exemplo de `GET /api/incidents?hours=168` (valores ilustrativos):
+
+```json
+{
+  "window_hours": 168,
+  "incidents": [
+    {
+      "id": "INC-20261007-001",
+      "status": "NEW",
+      "severity": "high",
+      "asset": "192.0.2.10",
+      "created_at": "2026-10-07T09:22:30+00:00",
+      "first_evidence_at": "2026-10-07T08:41:12+00:00",
+      "last_evidence_at": "2026-10-07T09:19:48+00:00",
+      "updated_at": "2026-10-07T09:22:30+00:00",
+      "evidence_count": 62,
+      "techniques": ["T1110"],
+      "attack_ids": ["atk-0007"],
+      "mttd_seconds": 14.0,
+      "time_to_first_response_seconds": null
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "by_status": {"NEW": 1},
+    "by_severity": {"high": 1},
+    "open": 1,
+    "high_or_critical_open": 1,
+    "avg_mttd_seconds": 14.0,
+    "avg_time_to_first_response_seconds": null
+  }
+}
+```
+
+`techniques`/`attack_ids` vêm só de ataques do `attack_log.jsonl` ligados ao
+incidente; sem ataque ligado ficam vazios e `mttd_seconds` é `null` — nunca são
+inferidos.
+
+**Testes:** `scripts/test_incident_engine.py`, `test_incident_store.py`,
+`test_incident_ingest.py`, `test_incidents_api.py`.
+
+## 🗂️ Attack Registry (R4)
+
+Registo consultável dos ataques lançados (`scripts/attack_log.jsonl`), com o
+resultado **esperado vs real** e referências aos incidentes ligados. Só leitura:
+não há rotas de escrita (o log é escrito por `attack_scenarios.py`). Ambas as
+rotas exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/attacks` | `hours` (1–720, default 168, sobre o timestamp do ataque), `technique` (`T1110` ou `T1110.003`), `status` (`detected`, `partial`, `not_detected`, `unknown`), `limit` (1–500, default 200), `offset` | `{window_hours, total, attacks[], summary, skipped, correlation, incidents_available}` | 401, 422, 500 (log ilegível) |
+| GET | `/api/attacks/{id}` | `id`: 1–9 dígitos | `{attack, correlation, incidents_available}` | 401, 404, 422 (id malformado), 500 |
+
+Cada ataque: `id, duplicate_id, timestamp, scenario, mitre_tactic,
+mitre_technique (+technique_source), tool (+tool_source), source, target,
+operator, expected{detection[], source, event_ids[]}, actual{verdict, achieved[],
+detected_by, detected_by_network, coverage_gap, mttd_seconds,
+mttd_network_seconds}, evidence{matched_event_ids[], matched_alert_count,
+network_detection_types[], incident_count}, incidents[{id, severity, status,
+evidence_count}]`. Detalhes em [DATA_MODEL.md](DATA_MODEL.md#registo-de-ataque-r4).
+
+`correlation = {available, error_code, alerts_fetched, alerts_truncated,
+network_capture_configured}`. Se o Indexer ou o modelo ML falharem a resposta é
+`200` com `available: false` e `error_code` estável (`indexer_unavailable`,
+`ml_model_unavailable`, `attack_outside_alert_window`); os vereditos ficam
+`unknown` (nunca "não detetado"). Com `alerts_truncated: true` os ataques sem
+correspondência ficam também `unknown`, com `actual.correlation_reason =
+"alerts_truncated"` (`null` nos restantes); `detected`/`partial` mantêm-se. Com
+ids duplicados no log, o detalhe devolve o ataque mais antigo.
+`incidents_available: false` se a base de
+incidentes falhar. Exemplo ilustrativo (IPs de documentação):
+
+```json
+{"attack": {"id": 1, "timestamp": "2026-10-06T10:23:21+00:00", "scenario": "brute_force_rdp",
+  "mitre_technique": "T1110", "tool": "hydra", "target": "192.0.2.10", "operator": "alice",
+  "expected": {"detection": ["rule", "ml"], "source": "scenario_default", "event_ids": [4625, 4740]},
+  "actual": {"verdict": "detected", "achieved": ["rule", "ml"], "mttd_seconds": 20.0},
+  "incidents": [{"id": "INC-20261006-001", "severity": "high", "status": "NEW", "evidence_count": 2}]},
+ "correlation": {"available": true}, "incidents_available": true}
+```
+
+**Testes:** `scripts/test_attack_registry.py`.
+
+## 📚 Attack Library (R5)
+
+Catálogo de referência dos cenários de ataque do laboratório
+(`scripts/attack_library.yaml`, editorial, versionado), combinado em memória
+com `attack_scenarios.SCENARIOS` (técnica/tática MITRE, ferramenta, Event
+IDs — não duplicados no YAML). Só leitura: não existe nenhuma rota que lance
+um ataque; lançar continua a ser `attack_scenarios.py`, manual, na Kali.
+Ambas as rotas exigem `X-API-Key`. Validação fail-fast no arranque do
+backend: um `attack_library.yaml` em falta, mal formado ou incoerente impede
+o processo de arrancar (ver [SECURITY.md](SECURITY.md)).
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/attack-library` | — | `{entries[], total}` | 401 |
+| GET | `/api/attack-library/{id}` | `id`: `^[a-z_]{1,64}$` (= `scenario_name`) | Uma entrada | 401, 404 (`entry_not_found`), 422 (id malformado) |
+
+Cada entrada: `id, name, description, mitre_tactic, mitre_technique, tool,
+event_ids[], risk (low|medium|high), prerequisites, expected_sensors[]
+(⊂ rule|ml|network), cleanup_steps[] (frases descritivas, nunca comandos),
+replayable (bool), replayable_reason, duration_estimate
+(seconds|minutes)`. Detalhes em
+[DATA_MODEL.md](DATA_MODEL.md#biblioteca-de-ataques-r5). Nenhum campo expõe
+um comando executável (`build_command`/argv) — ver
+[SECURITY.md](SECURITY.md).
+
+Exemplo ilustrativo:
+
+```json
+{"id": "brute_force_rdp", "name": "Força bruta de RDP",
+ "description": "Tentativas de autenticação RDP com dicionário de passwords contra o alvo.",
+ "mitre_tactic": "Credential Access", "mitre_technique": "T1110", "tool": "hydra",
+ "event_ids": [4625, 4740], "risk": "medium",
+ "prerequisites": "Alvo com RDP exposto; sem credenciais prévias; wordlist disponível na máquina atacante.",
+ "expected_sensors": ["rule", "ml"],
+ "cleanup_steps": ["Desbloquear a conta atacada se a política de bloqueio a tiver bloqueado.", "..."],
+ "replayable": true, "replayable_reason": "Não altera estado persistente; cada corrida é independente (...).",
+ "duration_estimate": "minutes"}
+```
+
+Integração com a R4: `attack_registry.expected_detection()` usa
+`attack_library.get_expected_sensors(scenario_name)` como o default de
+"esperado" quando o `attack_log` não trouxer `expected` próprio — mesmo
+contrato observável de `/api/attacks` (campo `expected.source =
+"scenario_default"`), só muda a fonte do default (antes fixo no código,
+agora a biblioteca).
+
+**Testes:** `scripts/test_attack_library.py`.
+
+## 📡 Network SOC (R6)
+
+Três painéis dedicados de rede (sidebar: Live Traffic / Network Detections /
+PCAP Evidence), que reaproveitam os dados já recolhidos por
+`network_monitor.py`/`network_detections.py` — a mesma fonte que
+`GET /api/redblue/network` — sem reimplementar a captura. Módulo puro:
+`scripts/network_soc.py`. Todas `GET`, exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/network/live-traffic` | — | `{configured, total, window_start, window_end, by_protocol{}, top_talkers[], top_ports[]}` | 401 |
+| GET | `/api/network/detections` | — | `{configured, live_count, history_count, by_type{}, recent[]}` | 401 |
+| GET | `/api/network/evidence` | `date` (`AAAA-MM-DD`, opcional, default hoje UTC), `limit` (1–500, default 100) | `{configured, entries[], total, payload_capture: false, note}` | 401, 422 (`date`/`limit` fora do formato/intervalo) |
+
+`configured: false` (sem `VM_SSH_HOST`) devolve 200 com zeros/listas vazias
+nas duas primeiras rotas — nunca 500. `top_talkers`/`top_ports` são capados
+a 10 entradas, `recent` a 50 — nunca a lista completa do buffer.
+
+`GET /api/network/evidence` lê deteções de rede **já persistidas** em JSONL
+(`history_store.append_network_detection_history`, ligado ao mesmo callback
+que já alimenta os incidentes — sem segundo poller) — resolve a dívida
+registada em R0 ("deteções de rede só existem em memória, perdem-se no
+restart"). Independente de `VM_SSH_HOST`: continua a devolver dados de uma
+sessão anterior mesmo com a captura desligada agora. **Nunca é uma captura
+PCAP/payload real** — `payload_capture` é sempre `false` e `note` explica
+porquê (`network_monitor.py` só lê cabeçalhos tshark, nunca o conteúdo dos
+pacotes); ver [DATA_MODEL.md](DATA_MODEL.md) e
+[SECURITY.md](SECURITY.md). `limit` é sempre capeado no servidor (≤500),
+mesmo que o pedido peça mais.
+
+Frontend: `network_soc.js` (padrão `attack_registry.js`/`incidents.js`) —
+cada painel só pede dados com a sua aba ativa e o separador visível, sem
+abrir um 2º WebSocket. O painel de rede da aba Red vs Blue (`redblue.js`,
+`GET /api/redblue/network`) continua a existir tal como está — é a vista de
+correlação ao vivo que alimenta `/api/redblue/metrics` — com uma nota de
+link cruzado para estas 3 abas.
+
+**Testes:** `scripts/test_network_soc.py`.
+
+## 🎯 Detection Engine (R7)
+
+Vista unificada recente dos 3 detetores independentes (regra/Wazuh, ML,
+rede), normalizados pelo tipo comum `DetectionEvent`
+(`scripts/detection_event.py`) — ver
+[DATA_MODEL.md](DATA_MODEL.md#detectionevent-r7).
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/detections` | `hours` (1–168, default 24), `limit` (1–200, default 50) | `{window_hours, sources: {rule: {available, count}, ml: {available, count}, network: {available, count}}, total, truncated, events: [{source, severity, asset, ts, technique, confidence, label, description}]}` | 401, 422 (`hours`/`limit` fora do intervalo) |
+
+Cada fonte é isolada: uma falha no Wazuh Indexer (regra) ou a ausência do
+modelo ML treinado nunca derruba a rota — essa fonte fica
+`available: false`/`count: 0`, as outras duas continuam a responder
+normalmente (mais permissivo que `/api/ml-anomalies`/`/api/redblue/metrics`,
+de fonte única, que podem devolver 502/503). A fonte de rede usa
+`network_detection_buffer` (mesma fonte que `/api/redblue/metrics`), não o
+`packet_buffer` ao vivo. `events` vem ordenado por `ts` descendente, capado
+a `limit`; `truncated: true` se havia mais eventos do que `limit` entre as
+3 fontes. O dado bruto de origem (`ref`) nunca é exposto por esta rota — já
+está disponível via `/api/alerts`, `/api/ml-anomalies` e
+`/api/network/detections`.
+
+**Sem painel frontend nesta fase** — a sidebar mantém "Detections" como
+`data-planned="R7"` (decisão documentada em
+`docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md`, ruling
+6): o backend é o primeiro consumidor seguro de `detection_event.py`; a UI
+fica para uma fase seguinte.
+
+**Testes:** `scripts/test_detection_event.py` (construtores puros),
+`scripts/test_detections_api.py` (rota).
+
 ## Tabela de endpoints
 
 | Method | Endpoint | Parâmetros principais | Descrição |
@@ -209,7 +441,18 @@ o perfil fixo usado pela camada de conformidade.
 | GET | `/api/brute-force` | `hours`, `threshold` | Agrupa Event ID 4625 por utilizador-alvo |
 | GET | `/api/ml-anomalies` | `hours` (máx. 168) | Deteção por Isolation Forest vs. regras — ver [ML.md](ML.md) |
 | GET | `/api/redblue/metrics` | `hours` (máx. 168), `window_seconds` (30–3600) | Correlação Red vs Blue por cenário de ataque (Fase 11) — ver [ML.md](ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
+| GET | `/api/incidents` | `status`, `severity`, `hours`, `limit`, `offset` | Incidentes + resumo (R3) |
+| GET | `/api/incidents/{id}` | — | Detalhe: evidências, timeline, `ml_summary` (R3) |
+| POST | `/api/incidents/{id}/status` | `{status, note?}` | Muda o estado (R3) |
+| POST | `/api/incidents/{id}/notes` | `{text}` | Acrescenta nota à timeline (R3) |
+| POST | `/api/incidents/backfill` | `{days}` | Importa o histórico do Indexer (R3) |
 | GET | `/api/export/report` | `hours` | Relatório HTML autónomo (download) |
+| GET | `/api/network/live-traffic` | — | Resumo do buffer de pacotes ao vivo (R6) |
+| GET | `/api/network/detections` | — | Deteções "agora" vs histórico acumulado (R6) |
+| GET | `/api/network/evidence` | `date`, `limit` (≤500) | Deteções de rede persistidas em JSONL (R6) |
+| GET | `/api/detections` | `hours` (máx. 168), `limit` (≤200) | Vista unificada regra/ML/rede via `DetectionEvent` (R7) |
+| GET | `/api/attack-library` | — | Catálogo de referência dos cenários de ataque (R5) |
+| GET | `/api/attack-library/{id}` | — | Detalhe de uma entrada da biblioteca (R5) |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | `cae_principal` (obrig.), `cae_secundarios`, `nipc`, `colaboradores`, `faturacao_eur`, `excecao_conhecida` | Classificação NIS2 sugerida |
 | GET | `/api/history/query` | `date_from`, `date_to`, `severity`, `rgpd_estado`, `nis2_estado`, `ai_act_estado`, `limit` (máx. 1000) | Consulta o histórico via índice SQLite |
@@ -269,3 +512,31 @@ Um Event ID fora desta lista (ou `None`) recebe uma classificação por
 defeito segura (`severity: "info"`) — nunca rebenta o backend. Para
 adicionar um Event ID novo: acrescentar uma entrada a `CRITICAL_EVENTS`
 em `scripts/event_catalog.py`; não é preciso tocar em `main.py`.
+
+## 📡 Saúde do SIEM (R2)
+
+Exige `X-API-Key`. Responde **sempre 200** (decisão de design: o painel precisa de
+ver o estado parcial) — por isso quem monitoriza deve ler o campo `status`, não o
+código HTTP.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/siem/health` | — | `{generated_at, status, stale, truncated, manager{status,error?}, indexer{status,error?}, agents{active,disconnected,never_connected,pending,total}\|null, last_alert_at, ingestion_lag_seconds, alerts_per_minute, alerts_in_window, window_minutes}` | 401 |
+
+- `status`: `ok` \| `degraded` (um componente em baixo, ou `stale`) \| `down` (Manager e Indexer em baixo).
+- `error` por componente é um código estável (`timeout` \| `unreachable`); o detalhe da exceção só vai para o log do backend.
+- `stale`: Indexer ok mas o último alerta tem mais de 300 s (ou não há nenhum na última hora).
+- `truncated`: o Indexer devolveu o limite de 500 (os mais recentes) — `alerts_per_minute` é um mínimo.
+- Componente em baixo -> campos dependentes `null` (nunca valores inventados).
+
+## 🧪 Triagem de incidentes via JEV (experimental)
+
+| Método | Rota | Resposta | Erros |
+|---|---|---|---|
+| POST | `/api/incidents/{id}/triage` | `{incident_id, advisory: true, model, answers: {is_compromise: {probability}, is_brute_force: {probability}, severity: {choice, confidence, probabilities}}}` | 401, 404, 502 (`jev_unreachable`/`jev_auth`/`jev_busy`/`jev_error`/`jev_bad_response`), 503 (`jev_disabled`) |
+
+**Opt-in e consultivo.** Desligado por omissão: exige `SENTRYLENS_JEV_ENABLED=true` e `TYPESAFE_API_KEY` (503 `jev_disabled` caso contrário). Só corre quando o analista a chama — nunca em segundo plano — e **nunca altera** o incidente nem a severidade das regras.
+
+**Dados enviados** (para `https://api.typesafe.ai/v1/systemone`, alojado nos EUA): só agregados — severidade do incidente, nº de evidências, duração, rótulos de evento com contagens, severidades e tipos de fonte. Nunca IPs, contas, hostnames nem payloads (`jev_client.build_state`). Políticas da TypeSafe (lidas 2026-10-08): não treinam com o input; sem prazo de retenção publicado (zero retention só enterprise). `confidence` mede a concentração da distribuição, não a probabilidade de acerto.
+
+**Testes:** `scripts/test_jev_client.py`, `scripts/test_incidents_triage_api.py`.

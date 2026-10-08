@@ -53,6 +53,7 @@ async def _poll_once(
     hours: int = 1,
     size: int = 200,
     on_new_alerts=None,
+    on_new_raw_alerts=None,
 ) -> list[dict]:
     """
     Uma iteração do polling: busca alertas recentes, identifica os que ainda
@@ -70,6 +71,8 @@ async def _poll_once(
     disco pela Fase 9 — persistência de histórico). Erros no callback nunca
     derrubam o polling (mesmo padrão try/except do resto do módulo).
 
+    on_new_raw_alerts (opcional): igual, mas recebe os alertas BRUTOS novos (com _id, antes do enriquecimento) — usado pelos incidentes (R3), que precisam do alerta completo.
+
     Válvula de segurança simples: se seen_ids crescer demasiado (uptime
     muito longo), limpa-o por completo em vez de manter uma estrutura mais
     complexa tipo LRU — um raro re-broadcast pontual é inofensivo aqui (só
@@ -82,12 +85,14 @@ async def _poll_once(
         seen_ids.clear()
 
     new_alerts: list[dict] = []
+    new_raw: list[dict] = []
     for alert in alerts:
         alert_id = alert.get("_id")
         if alert_id is None or alert_id in seen_ids:
             continue
         seen_ids.add(alert_id)
         new_alerts.append(enrich_fn(alert))
+        new_raw.append(alert)
 
     if new_alerts and manager.active_connections:
         for enriched in new_alerts:
@@ -100,6 +105,13 @@ async def _poll_once(
         except Exception:
             logger.exception("Falha no callback on_new_alerts")
 
+    if new_raw and on_new_raw_alerts is not None:
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, on_new_raw_alerts, new_raw)
+        except Exception:
+            logger.exception("Falha no callback on_new_raw_alerts")
+
     return new_alerts
 
 
@@ -109,6 +121,7 @@ async def alert_poll_loop(
     enrich_fn,
     interval_seconds: int = 10,
     on_new_alerts=None,
+    on_new_raw_alerts=None,
 ) -> None:
     """
     Corre para sempre em background (mesmo padrão de _system_monitor_loop em
@@ -117,7 +130,7 @@ async def alert_poll_loop(
     seen_ids: set[str] = set()
     while True:
         try:
-            await _poll_once(indexer_client, manager, enrich_fn, seen_ids, on_new_alerts=on_new_alerts)
+            await _poll_once(indexer_client, manager, enrich_fn, seen_ids, on_new_alerts=on_new_alerts, on_new_raw_alerts=on_new_raw_alerts)
         except Exception:
             logger.exception("Falha ao fazer polling de alertas para o WebSocket")
         await asyncio.sleep(interval_seconds)

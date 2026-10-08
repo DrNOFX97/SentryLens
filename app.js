@@ -2,12 +2,12 @@
 // Consome a API FastAPI (backend/main.py) e preenche a interface
 
 const API_BASE = "http://localhost:8001";
-// Tem de corresponder ao valor de SENTRYLENS_API_KEY em scripts/.env — ver
-// README.md para como gerar e configurar. Fica visível no código-fonte
-// entregue ao browser; aceitável só porque o CORS já restringe a loopback
-// e isto é um dashboard de laboratório local, não uma app exposta à
-// internet.
-const API_KEY = "";
+// A chave vem de /config.js, gerado por scripts/serve_frontend.py a partir de
+// SENTRYLENS_API_KEY em scripts/.env (nunca vai para o repositório). Esse
+// endpoint só responde ao próprio origin do dashboard (ver serve_frontend.py).
+// Se config.js não existir (outro servidor estático), fica vazia e a API
+// responde 401 — o dashboard mostra "sem ligação", não falha em silêncio.
+const API_KEY = (window.SENTRYLENS_CONFIG && window.SENTRYLENS_CONFIG.apiKey) || "";
 
 // WebSocket de alertas em tempo real (/ws/alerts) — ver connectWebSocket()
 // mais abaixo. Autenticação vai por query param (não header) porque o
@@ -124,6 +124,7 @@ function connectWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg && msg.type === "new_alert") {
         refreshDashboard();
+        document.dispatchEvent(new CustomEvent("sentrylens:new-alert", { detail: msg.alert }));
       }
     } catch (err) {
       console.error("Mensagem WebSocket inválida:", err);
@@ -1253,23 +1254,78 @@ severityFilter.addEventListener("change", refreshDashboard);
 // Todos os dados são sempre carregados em background (refreshDashboard),
 // as abas só controlam o que está visível — evita reestruturar a lógica
 // assíncrona por causa da navegação.
-const tabButtons = document.querySelectorAll(".tab-btn");
+//
+// Navegação em sidebar (Roadmap v2, R1): itens com data-tab abrem um painel
+// real; itens com data-planned (is-planned) ainda não têm fonte de dados e
+// abrem o painel genérico #tab-planned com "Sem dados" — nunca dados
+// inventados.
+const navItems = document.querySelectorAll(".nav-item");
 const tabContents = document.querySelectorAll(".tab-content");
+const sidebarEl = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebar-toggle");
+const PLANNED_HASH_PREFIX = "planned:";
 
-function activateTab(tabName) {
-  tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.tab === tabName));
-  tabContents.forEach((c) => c.classList.toggle("active", c.id === `tab-${tabName}`));
+function setSidebarOpen(open) {
+  sidebarEl.classList.toggle("open", open);
+  sidebarToggle.setAttribute("aria-expanded", String(open));
+}
+
+function showTab(contentId, activeItem) {
+  navItems.forEach((b) => {
+    const isActive = b === activeItem;
+    b.classList.toggle("active", isActive);
+    if (isActive) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  tabContents.forEach((c) => c.classList.toggle("active", c.id === contentId));
+  if (activeItem) activeItem.closest("details")?.setAttribute("open", "");
+  setSidebarOpen(false);
   // Canvas nascem com tamanho 0 dentro de uma aba escondida (display:none);
   // o Chart.js não deteta sozinho quando ficam visíveis, por isso forçamos
   // um resize ao trocar de aba.
   Object.values(charts).forEach((chart) => chart.resize());
 }
 
-tabButtons.forEach((btn) => {
-  btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+function activateTab(tabName) {
+  const item = document.querySelector(`.nav-item[data-tab="${tabName}"]`);
+  if (!item) return;
+  showTab(`tab-${tabName}`, item);
+  history.replaceState(null, "", `#${tabName}`);
+}
+
+function activatePlanned(item) {
+  document.getElementById("planned-title").textContent = item.dataset.label;
+  document.getElementById("planned-phase").textContent = item.dataset.planned;
+  showTab("tab-planned", item);
+  history.replaceState(null, "", `#${PLANNED_HASH_PREFIX}${item.dataset.label}`);
+}
+
+navItems.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.planned) activatePlanned(btn);
+    else activateTab(btn.dataset.tab);
+  });
 });
 
+sidebarToggle.addEventListener("click", () => setSidebarOpen(!sidebarEl.classList.contains("open")));
+
 document.getElementById("system-summary-card").addEventListener("click", () => activateTab("system"));
+
+// Deep link: #redblue, #alerts, #planned:Incidentes… (sem hash válido fica
+// na Visão Geral, que já vem ativa no HTML).
+function applyHash() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  if (!hash) return;
+  if (hash.startsWith(PLANNED_HASH_PREFIX)) {
+    const label = hash.slice(PLANNED_HASH_PREFIX.length);
+    const item = [...navItems].find((b) => b.dataset.planned && b.dataset.label === label);
+    if (item) activatePlanned(item);
+  } else {
+    activateTab(hash);
+  }
+}
+window.addEventListener("hashchange", applyHash);
+applyHash();
 
 // Carrega ao abrir e liga o WebSocket de tempo real (/ws/alerts); o polling
 // fixo de 30s só volta a existir via startPollFallback() se a ligação

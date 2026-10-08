@@ -21,12 +21,24 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptsDir = $PSScriptRoot
-$PythonExe = "C:\Users\Fernando Nuno\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"
+$PythonExe = Join-Path $ScriptsDir ".venv\Scripts\python.exe"
 $Port = 5500
 $LogFile = Join-Path $ScriptsDir "frontend.log"
 
+if (-not (Test-Path $PythonExe)) {
+    Write-Error "Python do .venv nao encontrado em '$PythonExe'. Corre 'python -m venv .venv' dentro de scripts/ primeiro."
+    exit 1
+}
+
+$ServeScript = Join-Path $ScriptsDir "serve_frontend.py"
+
+# Start-Process -ArgumentList com um array NAO cita elementos com espacos
+# (bug conhecido do Windows PowerShell 5.1) — como o caminho do repo tem
+# um espaco ("Fernando Nuno"), isso partia o argumento a meio e o Python
+# recebia um caminho truncado como se fosse o script a correr. Por isso
+# aqui vai tudo numa unica string, com o caminho entre aspas.
 Start-Process -FilePath $PythonExe `
-    -ArgumentList (Join-Path $ScriptsDir "serve_frontend.py"), $Port `
+    -ArgumentList "`"$ServeScript`" $Port" `
     -WorkingDirectory $ScriptsDir `
     -WindowStyle Hidden `
     -RedirectStandardOutput $LogFile `
