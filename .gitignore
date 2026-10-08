@@ -27,3 +27,10 @@ CLAUDE.md
 
 # Worktrees de execucao de planos (superpowers)
 .worktrees/
+
+# Logs de rondas Red Team (estado local, IPs do laboratorio)
+scripts/attack_log_round*.jsonl
+
+# Lixo local de ferramentas / pasta partilhada com a VM Kali
+.playwright-mcp/
+kali-share/
