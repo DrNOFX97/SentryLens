@@ -166,8 +166,9 @@ Dashboard cybersec/
 │   ├── attack_registry.py       ← registo de ataques, esperado vs real (R4)
 │   ├── attack_library.py / attack_library.yaml ← catálogo de referência de ataques, só leitura (R5)
 │   ├── network_soc.py           ← resumos puros p/ Live Traffic/Network Detections/PCAP Evidence (R6)
+│   ├── detection_event.py       ← tipo comum DetectionEvent + 3 construtores puros (regra/ML/rede) (R7)
 │   ├── system_monitor.py        ← specs/saúde da máquina local
-│   ├── test_*.py                ← 27 scripts de teste standalone (ver Testes)
+│   ├── test_*.py                ← 29 scripts de teste standalone (ver Testes)
 │   ├── requirements.txt         ← dependências Python do backend
 │   ├── .env / .env.example      ← credenciais reais (não versionar) / template
 │   ├── README.md                ← guia dos scripts de automação do laboratório
@@ -453,6 +454,8 @@ python test_attack_library.py         # validação do YAML (fail-fast), merge c
 python test_attack_targets.py         # allowlist de alvos fail-closed em attack_scenarios.py
 
 # Network SOC (R6):
+python test_detection_event.py        # DetectionEvent: 3 construtores puros, nunca lançam (R7)
+python test_detections_api.py         # /api/detections: 401/422, fontes isoladas, ref nunca exposto (R7)
 python test_network_soc.py            # network_soc.py puro + persistência JSONL + /api/network/* (401/422, limit capeado, "restart")
 
 # Live SOC (R2):
@@ -593,6 +596,7 @@ parâmetros de cada endpoint e o catálogo de 23 Event IDs — em
 | GET | `/api/redblue/network` | Snapshot do buffer de rede ao vivo (Fase 11, Onda 2) — pacotes + deteções — ver [docs/ML.md](docs/ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/network/live-traffic` \| `/api/network/detections` | Resumos dedicados (Live Traffic/Network Detections, R6) sobre o mesmo buffer — ver [docs/API.md](docs/API.md#-network-soc-r6) |
 | GET | `/api/network/evidence` | Deteções de rede persistidas em JSONL (R6, PCAP/Evidence) — metadados só, nunca payload/PCAP real; `date`, `limit` (≤500) |
+| GET | `/api/detections` | Vista unificada recente dos 3 detetores (regra/ML/rede) via `DetectionEvent` (R7); `hours` (≤168), `limit` (≤200); uma fonte em baixo fica `available: false`, nunca 500 — ver [docs/API.md](docs/API.md#-detection-engine-r7) |
 | GET | `/api/siem/health` | Saúde do SIEM (R2): `status` ok/degraded/down, `stale`, `truncated`, agentes, atraso e taxa — sempre 200, ler `status` |
 | GET | `/api/incidents` | Incidentes + resumo (R3) — filtros `status`, `severity`, `hours`, `limit`, `offset` |
 | GET | `/api/incidents/{id}` | Detalhe do incidente: evidências, timeline, `ml_summary` (R3) |
