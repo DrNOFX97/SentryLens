@@ -72,6 +72,22 @@
   tshark); `payload_capture: false` é sempre explícito na resposta, nunca
   implícito.
 
+- **Detection Engine (R7)**: `GET /api/detections` é `GET`, exige
+  `X-API-Key`, e não expõe nada de novo — reaproveita exatamente os dados já
+  servidos por `/api/alerts`, `/api/ml-anomalies` e
+  `/api/network/detections`, só normalizados e combinados. `hours`
+  (`Query(..., ge=1, le=168)`) e `limit` (`Query(..., ge=1, le=200)`) nunca
+  ficam sem teto — sem paginação por cursor, pensado só para "vista recente",
+  não para varrer histórico. O dado bruto de origem (`ref` em
+  `DetectionEvent`) é explicitamente removido da resposta HTTP antes de
+  devolver (`event.pop("ref", None)` em `main.py`) — nunca viaja para o
+  cliente. Uma fonte em baixo (Indexer, modelo ML ausente, `VM_SSH_HOST` não
+  configurado) nunca derruba as outras: `available: false` isolado por
+  fonte, nunca 500 — superfície de erro mais previsível que
+  `/api/ml-anomalies`/`/api/redblue/metrics` (fonte única, podem dar
+  502/503). Sem painel frontend nesta fase (ver `docs/ROADMAP_STATUS.md`):
+  menos superfície nova no cliente para esta rota, por agora.
+
 ## Riscos conhecidos
 
 - API key na query string dos WebSockets pode aparecer em logs/histórico.

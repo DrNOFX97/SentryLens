@@ -24,13 +24,22 @@ vive em módulos puros que recebem dados já obtidos (testáveis sem Wazuh):
 | ML | `feature_extractor.py` (partilhado treino/inferência), `ml_anomalies.py`, `train_anomaly_model.py` |
 | Persistência | `history_store.py` (JSONL), `history_index.py` (SQLite) |
 | Incidentes | `incident_engine.py` (puro), `incident_store.py`, `incident_ingest.py` |
+| Deteção (R7) | `detection_event.py` (puro, tipo `DetectionEvent` comum) |
 | Relatórios | `report_generator.py`, `export_snapshot.py` |
 
 Detetores independentes hoje: **regra** (Wazuh/`event_catalog`), **ML**
 (Isolation Forest) e **rede** (`network_detections`). O correlator une-os por janela
 temporal + IP alvo e, desde o R3, os **incidentes** agrupam as três fontes por
-ativo (alertas Wazuh e deteções de rede como evidências, ML como resumo) — mas
-não há `DetectionEvent` comum (R7).
+ativo (alertas Wazuh e deteções de rede como evidências, ML como resumo).
+Desde o R7 há um `DetectionEvent` comum (`detection_event.py`, puro, 3
+construtores: `from_rule_alert`/`from_ml_anomaly`/`from_network_detection`) —
+`incident_engine.py` constrói as suas evidências sobre ele por dentro (sem
+mudar o shape externo) e `redblue_correlator.py` usa-o para rotular
+`network_detection_types` de forma partilhada; o algoritmo de
+janelas/correspondência do correlator não foi tocado (risco demasiado alto
+para esta fase — ver spec R7). `GET /api/detections` é o primeiro consumidor
+direto do tipo comum: vista unificada recente das 3 fontes, sem painel
+frontend ainda (dívida documentada, ver `docs/ROADMAP_STATUS.md`).
 
 ## Frontend
 

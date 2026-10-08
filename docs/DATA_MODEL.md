@@ -1,7 +1,54 @@
 # Modelo de dados (estado em 2026-10-07)
 
-Só o que já existe. Entidades do Roadmap v2 (Incident, Detection, Vaccine,
-Replay, Model…) estão por definir nas fases R3–R14.
+Só o que já existe. Entidades do Roadmap v2 ainda por definir: Vaccine,
+Replay, Model (fases R9–R14). `DetectionEvent` (R7) já está definido — ver
+abaixo.
+
+## `DetectionEvent` (R7) — `scripts/detection_event.py`
+
+Tipo comum que normaliza os 3 detetores independentes (regra/Wazuh, ML,
+rede) para a mesma forma. Não é persistido — calculado a pedido por
+`GET /api/detections` e usado internamente por `incident_engine.py`/
+`redblue_correlator.py` como base de construção (ver
+[ARCHITECTURE.md](ARCHITECTURE.md)).
+
+```
+{source, severity, asset, ts, technique, confidence, ref, label, description}
+  source       "rule" | "ml" | "network"
+  severity     info|low|medium|high|critical (rule/network) — o próprio
+               campo "severity" do resultado ML (ver ml_anomalies.py), para network
+  asset        IP do ativo afetado; None se não aplicável
+  ts           ISO-8601 com fuso
+  technique    sempre None nos 3 construtores por agora (ruling 2 da spec —
+               nenhuma das 3 fontes liga uma técnica MITRE a uma deteção
+               individual; isso só existe ao nível da tentativa de ataque,
+               em redblue_correlator)
+  confidence   sempre None nos 3 construtores por agora (ruling 2 — o
+               ml_score do Isolation Forest não é uma probabilidade
+               calibrada; inventar uma normalização seria um número com
+               aparência de rigor que não tem)
+  ref          apontador para o dado original (alerta bruto do Indexer /
+               item de ml_anomalies.results / deteção de rede), NUNCA cópia
+  label        rótulo curto (nome amigável do Event ID / "Anomalia ML
+               (Isolation Forest)" / tipo de deteção de rede)
+  description  texto mais longo opcional (recomendação / ml_score em bruto /
+               src_ip -> dst_ip)
+```
+
+Três construtores puros, nunca lançam exceção, entrada inválida → `None`:
+`from_rule_alert(raw)` (mesmo critério de validade que
+`incident_engine.evidence_from_raw_alert` usava: `@timestamp` válido +
+`agent.ip`), `from_ml_anomaly(result)` (só `ml_is_anomaly=True` vira
+evento — uma linha "normal" não é uma deteção), `from_network_detection(det)`
+(mesmo critério que `incident_engine.evidence_from_network_detection`
+usava: `timestamp`/`type` válidos, `dst_ip` ou `src_ip` como asset).
+
+`incident_engine.py` e `redblue_correlator.py` **não migraram** para expor
+`DetectionEvent` como o seu contrato externo — continuam com as suas
+formas próprias (evidência de incidente, "attempt" de correlação); usam
+`detection_event.py` só como base de construção interna, sem mudar nada
+observável de fora (ver
+`docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md`).
 
 ## Ataque — linha de `scripts/attack_log.jsonl`
 

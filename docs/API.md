@@ -398,6 +398,38 @@ link cruzado para estas 3 abas.
 
 **Testes:** `scripts/test_network_soc.py`.
 
+## 🎯 Detection Engine (R7)
+
+Vista unificada recente dos 3 detetores independentes (regra/Wazuh, ML,
+rede), normalizados pelo tipo comum `DetectionEvent`
+(`scripts/detection_event.py`) — ver
+[DATA_MODEL.md](DATA_MODEL.md#detectionevent-r7).
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/detections` | `hours` (1–168, default 24), `limit` (1–200, default 50) | `{window_hours, sources: {rule: {available, count}, ml: {available, count}, network: {available, count}}, total, truncated, events: [{source, severity, asset, ts, technique, confidence, label, description}]}` | 401, 422 (`hours`/`limit` fora do intervalo) |
+
+Cada fonte é isolada: uma falha no Wazuh Indexer (regra) ou a ausência do
+modelo ML treinado nunca derruba a rota — essa fonte fica
+`available: false`/`count: 0`, as outras duas continuam a responder
+normalmente (mais permissivo que `/api/ml-anomalies`/`/api/redblue/metrics`,
+de fonte única, que podem devolver 502/503). A fonte de rede usa
+`network_detection_buffer` (mesma fonte que `/api/redblue/metrics`), não o
+`packet_buffer` ao vivo. `events` vem ordenado por `ts` descendente, capado
+a `limit`; `truncated: true` se havia mais eventos do que `limit` entre as
+3 fontes. O dado bruto de origem (`ref`) nunca é exposto por esta rota — já
+está disponível via `/api/alerts`, `/api/ml-anomalies` e
+`/api/network/detections`.
+
+**Sem painel frontend nesta fase** — a sidebar mantém "Detections" como
+`data-planned="R7"` (decisão documentada em
+`docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md`, ruling
+6): o backend é o primeiro consumidor seguro de `detection_event.py`; a UI
+fica para uma fase seguinte.
+
+**Testes:** `scripts/test_detection_event.py` (construtores puros),
+`scripts/test_detections_api.py` (rota).
+
 ## Tabela de endpoints
 
 | Method | Endpoint | Parâmetros principais | Descrição |
@@ -418,6 +450,7 @@ link cruzado para estas 3 abas.
 | GET | `/api/network/live-traffic` | — | Resumo do buffer de pacotes ao vivo (R6) |
 | GET | `/api/network/detections` | — | Deteções "agora" vs histórico acumulado (R6) |
 | GET | `/api/network/evidence` | `date`, `limit` (≤500) | Deteções de rede persistidas em JSONL (R6) |
+| GET | `/api/detections` | `hours` (máx. 168), `limit` (≤200) | Vista unificada regra/ML/rede via `DetectionEvent` (R7) |
 | GET | `/api/attack-library` | — | Catálogo de referência dos cenários de ataque (R5) |
 | GET | `/api/attack-library/{id}` | — | Detalhe de uma entrada da biblioteca (R5) |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
