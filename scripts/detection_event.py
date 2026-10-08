@@ -14,21 +14,24 @@ módulo é a base de construção interna partilhada (ruling 3/4 da spec), não
 um novo contrato externo que os substitua.
 """
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from event_catalog import classify_alert
 from redblue_correlator import _parse_timestamp
 
-SOURCES = ("rule", "ml", "network")
+Source = Literal["rule", "ml", "network"]
+Severity = Literal["high", "medium", "low", "info"]
+
+SOURCES: tuple[Source, ...] = ("rule", "ml", "network")
 
 # Fonte única de verdade para a severidade de cada tipo de deteção de rede
 # (antes duplicado em incident_engine.py — ver ruling 3 da spec R7).
-NETWORK_SEVERITY = {"port_scan": "medium", "brute_force": "medium", "volume_spike": "low"}
+NETWORK_SEVERITY: dict[str, Severity] = {"port_scan": "medium", "brute_force": "medium", "volume_spike": "low"}
 
 
 class DetectionEvent(TypedDict):
-    source: str  # "rule" | "ml" | "network"
-    severity: str
+    source: Source
+    severity: Severity
     asset: str | None
     ts: str  # ISO-8601 com fuso
     technique: str | None  # sempre None nos 3 construtores por agora (ver spec, ruling 2)
@@ -39,7 +42,7 @@ class DetectionEvent(TypedDict):
 
 
 def _make(
-    source: str, severity: str, asset: str | None, ts: str, label: str, *,
+    source: Source, severity: Severity, asset: str | None, ts: str, label: str, *,
     technique: str | None = None, confidence: float | None = None,
     ref: object = None, description: str | None = None,
 ) -> DetectionEvent:
