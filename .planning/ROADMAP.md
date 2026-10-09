@@ -33,7 +33,13 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. `python model_registry.py adopt` copia (nunca move) o modelo legado para `models/v1/` com metadados marcados como "adotado" e a data de treino estimada pela data do ficheiro; os `.pkl` originais ficam intactos e a aba Models passa a mostrar a v1 como ativa.
   4. Um `.pkl` cujo SHA-256 não bate com o `metadata.json` é recusado antes de `joblib.load`, com um erro acionável; um `ACTIVE` com id inválido ou inexistente (por exemplo `../x`) é rejeitado e nunca resolve um caminho fora de `models/`; falhas de leitura chegam à API e ao dashboard como códigos estáveis, sem texto de exceção nem caminhos.
   5. Os itens "Models" e "Evaluation" da sidebar deixam de ser `data-planned` e abrem abas reais (`ml_models.js` servido pelo `serve_frontend.py`); a aba Models lista as versões, marca a ativa e o legado e mostra os metadados de cada uma, e a aba Evaluation já abre com o estado honesto "Sem avaliação" até à Fase 2.
-**Plans:** TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Tracer: registo em disco → `GET /api/ml/models` (API key) → abas Models e Evaluation reais (wave 1)
+- [ ] 01-02-PLAN.md — SHA-256 antes de `joblib.load`, legado "sem metadados", ids/ACTIVE validados, 503 com códigos, `loaded` (wave 2)
+- [ ] 01-03-PLAN.md — Aba Models: estados (legado, adotado, erros), avisos de ACTIVE/`loaded` e detalhe dos metadados (wave 2)
+- [ ] 01-04-PLAN.md — `python model_registry.py adopt` (cópia atómica para v1, ACTIVE só se não existir) e fluxo ponta a ponta (wave 3)
 **UI hint**: yes
 
 ### Phase 2: Avaliação ligada à versão
