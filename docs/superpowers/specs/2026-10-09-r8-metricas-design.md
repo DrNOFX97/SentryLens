@@ -128,3 +128,13 @@ Cada bloco traz `available` e `n`. Um valor sem amostra é `null`, nunca `0`.
 entregue no commit `f168fab`), `docs/DATA_MODEL.md` (definições de MTTR/FP/FN —
 hoje diz "MTTR ainda não existe"), `README.md` (endpoint, aba, testes) e
 `CLAUDE.md` (módulo `soc_metrics.py`, contagem de testes).
+
+## Ajustes ao ler o código (plano de 2026-10-09)
+
+1. **MTTD usa a deteção mais cedo de qualquer fonte** (`min(mttd_seconds, mttd_network_seconds)`), só para ataques realmente sinalizados — coerente com a taxa, que conta a rede.
+2. **"Detetado" = alguém sinalizou** (`detected_by != "none"` ou `detected_by_network`): o `detected` do correlator é verdadeiro para qualquer alerta correspondente, mesmo não sinalizado.
+3. **Não existe `partial`**: o correlator não tem esse veredito. O bloco `rate` tem `detected`/`not_detected`.
+4. **`unknown` passou a `excluded`**: contagem de `not_executed`, `unknown_scenario` e `invalid_entries`, fora do denominador.
+5. **Universo da cobertura** = cenários e técnicas lançados na janela (não o catálogo inteiro).
+6. **A rota filtra o log de ataques pela janela**: sem isso, um ataque anterior à janela apareceria como falso negativo.
+7. **`alerts_truncated`** (descoberto ao testar com dados reais): quando o Indexer devolve o teto de 1000 alertas, ataques antigos ficam sem os seus alertas e aparecem como não detetados (o `/api/redblue/metrics` tem o mesmo limite). O relatório sinaliza-o e os painéis avisam que os valores são limites inferiores.

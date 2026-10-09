@@ -101,6 +101,7 @@ Também inclui:
 - Exportação de um relatório HTML autónomo (`GET /api/export/report`).
 - Autenticação por API key em todos os endpoints.
 - Vista unificada de deteções (`GET /api/detections`): regra, ML e rede num tipo comum (`DetectionEvent`).
+- Métricas SOC (`GET /api/metrics`): MTTD, MTTR, cobertura e taxa de deteção, com FN/FP, em 3 painéis (MTTD / MTTR, Detection Coverage, Detection Rate). Sem dados mostram "Sem dados"; com alertas truncados avisam que os valores são limites inferiores.
 - Triagem experimental de incidentes via JEV (`POST /api/incidents/{id}/triage`): desligada por omissão e anonimizada.
 
 ---
@@ -258,7 +259,7 @@ Ver [`QUICKSTART.md`](QUICKSTART.md).
 
 ## Testes
 
-31 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
+33 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
 
 ```bash
 cd scripts
@@ -288,6 +289,7 @@ Todos os endpoints `/api/*` exigem o header `X-API-Key` e devolvem JSON (exceto 
 | GET | `/api/redblue/metrics` | Cobertura e MTTD por cenário de ataque |
 | GET | `/api/redblue/network` | Snapshot da captura de rede |
 | GET | `/api/detections` | Vista unificada recente dos detetores (regra/ML/rede) |
+| GET | `/api/metrics` | MTTD, MTTR, cobertura e taxa de deteção (FN/FP) |
 | GET | `/api/incidents` | Incidentes (rotas `/api/incidents/*`) |
 | GET | `/api/attacks` | Registo de ataques, esperado vs. real |
 | GET | `/api/attack-library` | Catálogo de cenários de ataque |
@@ -329,7 +331,7 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 │   ├── detection_event.py, network_soc.py, siem_health.py   deteções unificadas, painéis de rede, saúde do SIEM
 │   ├── history_store.py / history_index.py      histórico JSONL e índice SQLite
 │   ├── deploy/                                  serviço tshark e logrotate da VM
-│   └── test_*.py                                31 testes standalone
+│   └── test_*.py                                33 testes standalone
 └── docs/                                        API, ML e guia do laboratório
 ```
 
