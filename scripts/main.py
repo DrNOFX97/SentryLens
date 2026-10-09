@@ -1069,9 +1069,14 @@ async def get_metrics(
     exceção. Ver docs/superpowers/specs/2026-10-09-r8-metricas-design.md.
     """
     redblue_report = None
+    alerts_truncated = False
     try:
         model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
         raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
+        # Teto do fetch (newest-first): ataques antigos podem ficar sem os
+        # seus alertas e aparecer como falsos negativos — sinaliza-se, como
+        # /api/redblue/metrics faz com alerts_truncated.
+        alerts_truncated = len(raw_alerts) >= 1000
         ml_report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
         # Os alertas são só os da janela: um ataque mais antigo apareceria
         # como falso negativo. Entradas de timestamp inválido mantêm-se para
@@ -1099,7 +1104,7 @@ async def get_metrics(
     except HTTPException:
         logger.warning("GET /api/metrics: base de incidentes indisponível")
 
-    return soc_metrics.build_metrics_report(redblue_report, incidents, hours)
+    return soc_metrics.build_metrics_report(redblue_report, incidents, hours, alerts_truncated=alerts_truncated)
 
 
 @app.post("/api/incidents/backfill", dependencies=_REQUIRE_API_KEY)

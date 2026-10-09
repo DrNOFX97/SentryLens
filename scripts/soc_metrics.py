@@ -215,8 +215,13 @@ def build_metrics_report(
     window_hours: int,
     min_sample: int | None = None,
     now: datetime | None = None,
+    alerts_truncated: bool = False,
 ) -> dict:
-    """redblue_report/incidents = None significa "fonte indisponível" (≠ vazio)."""
+    """redblue_report/incidents = None significa "fonte indisponível" (≠ vazio).
+
+    alerts_truncated: o Indexer devolveu o teto de alertas, por isso ataques
+    antigos podem aparecer como não detetados — MTTD/cobertura/taxa passam a
+    ser limites inferiores (a rota sinaliza-o; o painel mostra o aviso)."""
     min_sample = min_sample if min_sample else _min_sample_from_env()
     generated_at = (now or datetime.now(timezone.utc)).isoformat()
 
@@ -242,6 +247,7 @@ def build_metrics_report(
         "window_hours": window_hours,
         "generated_at": generated_at,
         "min_sample": min_sample,
+        "alerts_truncated": bool(alerts_truncated),
         "mttd": mttd,
         "mttr": mttr,
         "coverage": coverage,

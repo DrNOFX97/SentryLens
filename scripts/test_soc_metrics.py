@@ -64,6 +64,10 @@ def run() -> None:
     check("relatório traz window_hours, min_sample e definições",
           r["window_hours"] == 168 and r["min_sample"] == 5 and set(r["definitions"]) >= {"mttd", "mttr", "fp", "fn"})
 
+    # --- truncagem dos alertas: a taxa passa a ser um limite inferior ---
+    check("alerts_truncated por omissao False", build_metrics_report(report([]), [], 168)["alerts_truncated"] is False)
+    check("alerts_truncated propaga-se", build_metrics_report(report([]), [], 168, alerts_truncated=True)["alerts_truncated"] is True)
+
     # --- fontes ok mas vazias ---
     r = build_metrics_report(report([]), [], 168, min_sample=5)
     check("vazio: mttd no_data", r["mttd"]["available"] is False and r["mttd"]["reason"] == "no_data")

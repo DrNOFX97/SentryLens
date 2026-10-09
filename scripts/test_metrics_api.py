@@ -106,6 +106,13 @@ def run() -> None:
     check("sem incidentes fechados: FP sem pct (amostra insuficiente)",
           body["rate"]["false_positives"]["closed_total"] == 0 and body["rate"]["false_positives"]["pct"] is None)
     check("window_hours = 168 por omissão", body["window_hours"] == 168)
+    check("alertas não truncados -> alerts_truncated False", body["alerts_truncated"] is False)
+
+    # --- 1000 alertas = teto do Indexer atingido: sinaliza truncagem ---
+    wire(store=make_store(tempfile.mkdtemp()))
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=[{"k": i} for i in range(1000)])
+    check("1000 alertas obtidos -> alerts_truncated True",
+          client.get("/api/metrics").json()["alerts_truncated"] is True)
 
     # --- Indexer em baixo: isola ---
     wire(indexer_error=True, store=make_store(tempfile.mkdtemp()))
