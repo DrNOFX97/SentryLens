@@ -104,9 +104,9 @@
     </details>
     <details class="nav-group" open>
       <summary>Métricas</summary>
-      <button class="nav-item is-planned" data-planned="R8" data-label="MTTD / MTTR">⏱️ MTTD / MTTR<span class="nav-badge">R8</span></button>
-      <button class="nav-item is-planned" data-planned="R8" data-label="Detection Coverage">📈 Detection Coverage<span class="nav-badge">R8</span></button>
-      <button class="nav-item is-planned" data-planned="R8" data-label="Detection Rate">🎯 Detection Rate<span class="nav-badge">R8</span></button>
+      <button class="nav-item" data-tab="mttd-mttr">⏱️ MTTD / MTTR</button>
+      <button class="nav-item" data-tab="detection-coverage">📈 Detection Coverage</button>
+      <button class="nav-item" data-tab="detection-rate">🎯 Detection Rate</button>
     </details>
     <details class="nav-group" open>
       <summary>Relatórios</summary>
@@ -1044,6 +1044,68 @@
       </section>
     </div>
 
+    <!-- ===== Métricas SOC (Roadmap v2, R8) ===== -->
+    <div class="tab-content" id="tab-mttd-mttr">
+      <section class="panel" id="mttd-mttr-panel">
+        <h2>⏱️ MTTD / MTTR</h2>
+        <p class="panel-note" id="met-mttd-note">A carregar...</p>
+        <p class="panel-note" id="met-mttr-note"></p>
+        <section class="kpi-grid">
+          <div class="card"><h3>MTTD (mediana)</h3><div class="value" id="met-mttd-median">—</div></div>
+          <div class="card"><h3>MTTD (p90)</h3><div class="value" id="met-mttd-p90">—</div></div>
+          <div class="card"><h3>MTTR (mediana)</h3><div class="value" id="met-mttr-median">—</div></div>
+          <div class="card"><h3>MTTR (p90)</h3><div class="value" id="met-mttr-p90">—</div></div>
+          <div class="card"><h3>1.ª resposta (mediana)</h3><div class="value" id="met-first-response">—</div></div>
+          <div class="card"><h3>Incidentes abertos</h3><div class="value" id="met-open-count">—</div></div>
+        </section>
+        <div class="table-scroll">
+          <table id="met-mttd-table">
+            <thead><tr><th>Cenário</th><th>n</th><th>Mediana</th><th>p90</th><th>Média</th></tr></thead>
+            <tbody id="met-mttd-body"><tr><td colspan="5" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <p class="panel-note" id="met-mttd-def"></p>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-detection-coverage">
+      <section class="panel" id="detection-coverage-panel">
+        <h2>📈 Detection Coverage</h2>
+        <p class="panel-note" id="met-cov-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Cenários cobertos</h3><div class="value" id="met-cov-scenarios">—</div></div>
+          <div class="card"><h3>Técnicas MITRE cobertas</h3><div class="value" id="met-cov-techniques">—</div></div>
+        </section>
+        <h3>Lacunas — cenários sem deteção</h3>
+        <ul id="met-gaps-scenarios"><li class="empty-state">A carregar...</li></ul>
+        <h3>Lacunas — técnicas sem deteção</h3>
+        <ul id="met-gaps-techniques"><li class="empty-state">A carregar...</li></ul>
+        <p class="panel-note" id="met-cov-def"></p>
+      </section>
+    </div>
+
+    <div class="tab-content" id="tab-detection-rate">
+      <section class="panel" id="detection-rate-panel">
+        <h2>🎯 Detection Rate</h2>
+        <p class="panel-note" id="met-rate-note">A carregar...</p>
+        <section class="kpi-grid">
+          <div class="card"><h3>Ataques lançados</h3><div class="value" id="met-rate-launched">—</div></div>
+          <div class="card"><h3>Detetados</h3><div class="value" id="met-rate-detected">—</div></div>
+          <div class="card"><h3>Taxa de deteção</h3><div class="value" id="met-rate-pct">—</div></div>
+          <div class="card"><h3>Falsos negativos</h3><div class="value" id="met-rate-fn">—</div></div>
+          <div class="card"><h3>Falsos positivos</h3><div class="value" id="met-rate-fp">—</div></div>
+        </section>
+        <div class="table-scroll">
+          <table id="met-rate-table">
+            <thead><tr><th>Fonte da deteção</th><th>Ataques</th></tr></thead>
+            <tbody id="met-rate-body"><tr><td colspan="2" class="empty-state">A carregar...</td></tr></tbody>
+          </table>
+        </div>
+        <p class="panel-note" id="met-rate-excluded"></p>
+        <p class="panel-note" id="met-rate-def"></p>
+      </section>
+    </div>
+
     <div class="tab-content" id="tab-pcap-evidence">
       <section class="panel" id="pcap-evidence-panel">
         <h2>🧪 PCAP / Evidence</h2>
@@ -1098,5 +1160,6 @@
   <script src="attack_library.js"></script>
   <script src="network_soc.js"></script>
   <script src="detections.js"></script>
+  <script src="metrics.js"></script>
 </body>
 </html>
