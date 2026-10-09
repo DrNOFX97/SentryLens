@@ -404,17 +404,19 @@ client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_K
 | A5 | Versões ordenadas da mais recente para a mais antiga | Pattern 7 | UX |
 | A6 | Unicode `v٣` (dígitos Unicode) é rejeitado por `[0-9]` em `fullmatch` | Pitfall 1 | `[0-9]` em `str` patterns é ASCII-estrito; testado só parcialmente (a impressão do caso falhou por codepage da consola, não pela regex) — incluir caso no teste |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`adopt` com `ACTIVE` já existente?**
    - Sabemos: critério 3 diz que depois de `adopt` a v1 aparece ativa.
    - Por esclarecer: o que fazer se já existir `ACTIVE` apontando outra versão (só possível se `v1` não existir mas `v2` sim).
-   - Recomendação: `adopt` escreve `ACTIVE` só se não existir; caso contrário avisa e deixa-o. Confirmar com o utilizador.
+   - RESOLVED: D-01 — `adopt` escreve `ACTIVE` só se não existir; caso contrário avisa e deixa-o.
 2. **Expor `loaded` (o que o processo tem em memória)?**
-   - Recomendação: sim, campo opcional barato (`_loaded_from`), para a aba não afirmar uma ativa diferente da que serve deteções. Senão, só documentar o reinício.
-3. **Legado oculto após adoção?** Recomendado ocultar (A2).
+   - RESOLVED: D-02 — expor `loaded` (versão em memória) no relatório.
+3. **Legado oculto após adoção?** RESOLVED: D-03 — oculto após adoção.
 4. **HMAC em vez de SHA-256 simples?** Fora de âmbito (REQUIREMENTS fixa SHA-256); ponto a registar como dívida de segurança se o modelo de ameaça incluir escrita local.
+   - RESOLVED: D-04 — HMAC fora de âmbito; registado como dívida de segurança nas ameaças T-01-09 e T-01-21.
 5. **Aba Evaluation na Fase 1:** a mesma fonte (`/api/ml/models`) alimenta-a com "Sem avaliação"; a Fase 2 pode separar em `ml_evaluation.js` (exigiria nova entrada na whitelist).
+   - RESOLVED: D-05 — Fase 1 não cria `ml_evaluation.js`; a aba Evaluation vive em `ml_models.js`.
 
 ## Environment Availability
 
