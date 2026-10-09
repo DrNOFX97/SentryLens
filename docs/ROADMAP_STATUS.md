@@ -1,5 +1,7 @@
 # Roadmap v2 — estado das fases (R0–R25)
 
+Estado de execução do R9 em `.planning/` (GSD: `ROADMAP.md`, `STATE.md`, `REQUIREMENTS.md`); as restantes fases continuam a ser seguidas aqui.
+
 Plano de evolução do SentryLens de dashboard técnico para laboratório SOC de
 aprendizagem contínua (ataque → deteção → incidente → vaccine → replay →
 regressão → ML). Usa o prefixo **R** para não colidir com as "Fases 1–11" do
@@ -22,7 +24,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R6 | Network SOC | ✅ | `network_monitor.py`, `network_detections.py` + `network_soc.py` (R6): 3 painéis reais (`GET /api/network/live-traffic[/detections/evidence]`); deteções de rede persistidas em JSONL (`history_store.append_network_detection_history`, resolve a dívida de R0); "PCAP/Evidence" é evidência de metadados, não PCAP real (sem payload capturado — ver `SECURITY.md`/`DATA_MODEL.md`) |
 | R7 | Detection Engine (`DetectionEvent`) | ✅ | `detection_event.py` (puro, 3 construtores) + `GET /api/detections` (vista unificada) + painel Detections (`detections.js`); `incident_engine.py`/`redblue_correlator.py` constroem sobre ele por dentro, sem mudar o contrato externo; `confidence` calibrado continua em dívida |
 | R8 | MTTD / MTTR / métricas | ✅ | `soc_metrics.py` (puro) + `GET /api/metrics` + 3 painéis (`metrics.js`: MTTD / MTTR, Detection Coverage, Detection Rate); mediana/p90/média, cobertura por cenário e técnica MITRE, taxa de deteção por fonte, FN/FP; definições formais em `DATA_MODEL.md`; `IncidentStore.list_for_metrics` (leitura) |
-| R9 | ML Intelligence | 🟡 | Isolation Forest + `feature_extractor` partilhado; falta model registry e avaliação |
+| R9 | ML Intelligence | 🟡 | Isolation Forest + `feature_extractor` partilhado. **Em curso (branch `roadmap-v2-r9-ml-registry`):** desenho aprovado (registo versionado `models/vN` + `ACTIVE`, avaliação por versão, SHA-256 antes de carregar o `.pkl`, `GET /api/ml/models`, abas Models e Evaluation); GSD inicializado em `.planning/` (3 fases, 16 requisitos); **nenhum código do R9 escrito ainda**, próximo passo `/gsd-plan-phase 1` |
 | R10 | ML Learning Loop | ⬜ | |
 | R11 | Vaccine Engine | ⬜ | |
 | R12 | Vaccine Lab | ⬜ | |
