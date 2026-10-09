@@ -212,4 +212,19 @@ incident_events(id PK AUTOINCREMENT, incident_id FK, ts, kind, actor, data)
 `mttd_seconds = timestamp do 1º alerta correspondente − timestamp do ataque`,
 dentro da janela (`window_seconds`, cortada pelo ataque seguinte). Campos
 `detected`/`mttd_seconds` auto-declarados em `attack_log_round3.jsonl` **não**
-são usados. MTTR ainda não existe (R8).
+são usados.
+
+## Definições de métricas em vigor (R8, `soc_metrics.py`)
+
+- **MTTD** = tempo entre o ataque lançado e a 1.ª deteção *sinalizada* (regra, ML
+  ou rede; a mais cedo). Um alerta correspondente mas não sinalizado não conta.
+- **MTTR** = `first_evidence_at` do incidente → a sua **última** passagem a
+  `RESOLVED`; só incidentes que chegaram a `RESOLVED` (ou `CLOSED` depois de
+  resolvidos). Os abertos contam-se à parte (`open_count`).
+- **FN** = ataque lançado sem qualquer deteção sinalizada.
+- **FP** = incidente fechado de `NEW` para `CLOSED` (a nota é obrigatória).
+  Taxa = FP / incidentes fechados, só com amostra ≥ `METRICS_MIN_SAMPLE`.
+- **Cobertura** = cenários/técnicas lançados na janela com pelo menos uma
+  deteção; lacuna = lançado e nunca detetado.
+- Sem amostra o valor é `null` (nunca 0). `alerts_truncated` = o teto de 1000
+  alertas do Indexer foi atingido (os valores são limites inferiores).

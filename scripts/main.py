@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, StringConstraints
 import incident_ingest
 import jev_client
 import ml_anomalies
+import soc_metrics
 from admin_activity import build_admin_activity_report
 from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
 from attack_registry import build_attack_registry, summarize as summarize_attacks
@@ -1054,6 +1055,56 @@ async def list_incidents(
     incidents = await _incidents_call(incident_store.list_incidents, status, severity, since, limit, offset)
     summary = await _incidents_call(incident_store.summary, since)
     return {"window_hours": hours, "incidents": incidents, "summary": summary}
+
+
+@app.get("/api/metrics", dependencies=_REQUIRE_API_KEY)
+async def get_metrics(
+    hours: int = Query(168, ge=1, le=168, description="Janela temporal em horas"),
+):
+    """
+    Métricas SOC (R8): MTTD, MTTR, cobertura e taxa de deteção (com FN/FP).
+    Cada fonte é isolada — Red vs Blue (Indexer + modelo ML + log de ataques)
+    e base de incidentes: uma em baixo nunca derruba a outra; o bloco
+    afetado fica reason="source_unavailable", nunca 5xx nem texto de
+    exceção. Ver docs/superpowers/specs/2026-10-09-r8-metricas-design.md.
+    """
+    redblue_report = None
+    alerts_truncated = False
+    try:
+        model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
+        raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
+        # Teto do fetch (newest-first): ataques antigos podem ficar sem os
+        # seus alertas e aparecer como falsos negativos — sinaliza-se, como
+        # /api/redblue/metrics faz com alerts_truncated.
+        alerts_truncated = len(raw_alerts) >= 1000
+        ml_report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
+        # Os alertas são só os da janela: um ataque mais antigo apareceria
+        # como falso negativo. Entradas de timestamp inválido mantêm-se para
+        # ficarem em invalid_entries (nunca descartadas em silêncio).
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        attack_log = [
+            entry for entry in load_attack_log(ATTACK_LOG_PATH)
+            if not isinstance(entry, dict)
+            or (ts := incident_engine_parse(entry.get("timestamp"))) is None
+            or ts >= cutoff
+        ]
+        network_dets = list(network_detection_buffer) if vm_ssh_client is not None else None
+        redblue_report = build_redblue_report(
+            attack_log, ml_report["results"], SCENARIOS, network_detections=network_dets,
+        )
+    except FileNotFoundError:
+        logger.warning("GET /api/metrics: modelo ML em falta — Red vs Blue indisponível")
+    except Exception:
+        logger.warning("GET /api/metrics: falha na fonte Red vs Blue", exc_info=True)
+
+    incidents = None
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    try:
+        incidents = await _incidents_call(incident_store.list_for_metrics, since)
+    except HTTPException:
+        logger.warning("GET /api/metrics: base de incidentes indisponível")
+
+    return soc_metrics.build_metrics_report(redblue_report, incidents, hours, alerts_truncated=alerts_truncated)
 
 
 @app.post("/api/incidents/backfill", dependencies=_REQUIRE_API_KEY)

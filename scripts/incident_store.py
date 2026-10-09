@@ -298,3 +298,15 @@ class IncidentStore:
             "avg_mttd_seconds": round(sum(mttds) / len(mttds), 2) if mttds else None,
             "avg_time_to_first_response_seconds": round(sum(ttfrs) / len(ttfrs), 2) if ttfrs else None,
         }
+
+    def list_for_metrics(self, since_iso: str | None = None) -> list[dict]:
+        """Incidentes da janela com a sua timeline reduzida às transições de
+        estado (R8: MTTR e falsos positivos). Só leitura; não carrega as
+        evidências (payloads) como get_incident."""
+        incidents = self.list_incidents(since_iso=since_iso, limit=100000)
+        with self._tx() as conn:
+            for incident in incidents:
+                incident["timeline"] = [
+                    e for e in self._timeline(conn, incident["id"]) if e["kind"] == "status_changed"
+                ]
+        return incidents

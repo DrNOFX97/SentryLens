@@ -124,6 +124,8 @@ def run() -> None:
         check("/network_soc.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/detections.js")
         check("/detections.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/metrics.js")
+        check("/metrics.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, _, _ = get(port, "/scripts/.env")
         check("/scripts/.env continua a dar 404", status == 404)
         status, _, _ = get(port, "/.env")

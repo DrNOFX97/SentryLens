@@ -47,6 +47,7 @@ ALLOWED_FILES = {
     "/attack_library.js": "attack_library.js",
     "/network_soc.js": "network_soc.js",
     "/detections.js": "detections.js",
+    "/metrics.js": "metrics.js",
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",
