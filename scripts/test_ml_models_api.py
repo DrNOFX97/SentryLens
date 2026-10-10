@@ -7,28 +7,40 @@ arbitrários e um metadata.json coerente com o schema 1 do SKELETON.md, com
 SHA-256 e size_bytes calculados a sério — assim continuam válidas quando o
 01-02 passar a verificar os hashes antes de carregar.
 
+A secção `carregamento_verificado` (01-02) usa pickles REAIS — treina um
+IsolationForest minúsculo e faz joblib.dump para BytesIO — porque o que se
+quer provar aí é que joblib.load recebe bytes que o registo já verificou, e
+isso só se prova com um ficheiro que o joblib consiga mesmo desserializar.
+
 Correr (a partir de scripts/):
     python test_ml_models_api.py
 """
 
 import hashlib
+import io
 import json
 import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
 
+import joblib
 from fastapi.testclient import TestClient
 
 import main
+import ml_anomalies
 import model_registry
+from feature_extractor import extract_features, vectorize
+from train_anomaly_model import train_model
 
 main.app.router.on_startup.clear()
 
 API_KEY = os.environ["SENTRYLENS_API_KEY"]
 HEADERS = {"X-API-Key": API_KEY}
+MODEL_FILE, SCALER_FILE = model_registry.ARTIFACT_FILES
 
 failures: list[str] = []
 
@@ -43,8 +55,8 @@ def make_version(root, vid, model_bytes=b"fake-model", scaler_bytes=b"fake-scale
     """Cria models/vN/ com os dois .pkl e um metadata.json válido (schema 1)."""
     version_dir = Path(root) / vid
     version_dir.mkdir(parents=True, exist_ok=True)
-    (version_dir / "isolation_forest.pkl").write_bytes(model_bytes)
-    (version_dir / "scaler.pkl").write_bytes(scaler_bytes)
+    (version_dir / MODEL_FILE).write_bytes(model_bytes)
+    (version_dir / SCALER_FILE).write_bytes(scaler_bytes)
     meta = {
         "schema_version": 1,
         "version": vid,
@@ -58,11 +70,11 @@ def make_version(root, vid, model_bytes=b"fake-model", scaler_bytes=b"fake-scale
         "dataset": {"name": None, "size": None, "attacks": None, "synthetic": None},
         "library_versions": None,
         "artifacts": {
-            "isolation_forest.pkl": {
+            MODEL_FILE: {
                 "sha256": hashlib.sha256(model_bytes).hexdigest(),
                 "size_bytes": len(model_bytes),
             },
-            "scaler.pkl": {
+            SCALER_FILE: {
                 "sha256": hashlib.sha256(scaler_bytes).hexdigest(),
                 "size_bytes": len(scaler_bytes),
             },
@@ -76,8 +88,25 @@ def make_version(root, vid, model_bytes=b"fake-model", scaler_bytes=b"fake-scale
     return version_dir
 
 
+def make_legacy(root, model_bytes=b"legacy-model", scaler_bytes=b"legacy-scaler") -> Path:
+    """Os dois .pkl soltos em models/ — o "legado", sem metadados."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / MODEL_FILE).write_bytes(model_bytes)
+    (root / SCALER_FILE).write_bytes(scaler_bytes)
+    return root
+
+
 def write_active(root, text, encoding="utf-8") -> None:
     (Path(root) / "ACTIVE").write_bytes(text.encode(encoding))
+
+
+def flip_byte(path) -> None:
+    """Troca um byte do .pkl in-place, mantendo o tamanho."""
+    data = Path(path).read_bytes()
+    trocado = bytearray(data)
+    trocado[-1] ^= 0xFF
+    Path(path).write_bytes(bytes(trocado))
 
 
 def no_leaks(label: str, resp, tmp_name: str) -> None:
@@ -86,6 +115,67 @@ def no_leaks(label: str, resp, tmp_name: str) -> None:
     check(f"{label}: sem caminho temporário na resposta", tmp_name not in body)
     check(f"{label}: sem caminho resolvido na resposta", str(Path(tmp_name).resolve()) not in body)
     check(f"{label}: sem traceback na resposta", "Traceback" not in body)
+
+
+def no_leaks_pasta(label: str, resp, pasta) -> None:
+    """Como no_leaks, mas com a pasta completa (cru e resolvida) em vez do nome."""
+    body = resp.text
+    crua, resolvida = str(pasta), str(Path(pasta).resolve())
+    check(f"{label}: sem caminho temporário na resposta",
+          crua not in body and resolvida not in body)
+    check(f"{label}: sem traceback na resposta", "Traceback" not in body)
+
+
+def alerta(event_id: int, ts: str, user: str = "jsilva", ip: str = "192.168.1.10") -> dict:
+    return {
+        "@timestamp": ts,
+        "agent": {"name": "WIN-PC01", "ip": "192.168.1.5"},
+        "rule": {"id": "1", "description": "x", "level": 5},
+        "data": {"win": {"system": {"eventID": str(event_id)},
+                         "eventdata": {"targetUserName": user, "ipAddress": ip}}},
+        "full_log": "x",
+    }
+
+
+MOCK_ALERTS = (
+    [alerta(4624, f"2026-09-01T09:0{i}:00Z", user="mcosta") for i in range(4)]
+    + [alerta(4625, f"2026-09-02T03:0{i}:00Z", user="convidado", ip="203.0.113.50")
+       for i in range(6)]
+)
+
+
+def real_model_bytes() -> tuple[bytes, bytes]:
+    """Bytes de .pkl verdadeiros: um IsolationForest minúsculo treinado sobre
+    os próprios MOCK_ALERTS (como em test_ml_anomalies.py), dumpado para
+    BytesIO. Se estes pickles não forem carregáveis, o teste acusa-o — que é
+    precisamente o que se quer: provar o caminho BOM, não o caminho torto."""
+    model, scaler = train_model(
+        vectorize(extract_features(MOCK_ALERTS)), contamination=0.3, random_state=1
+    )
+    buf_model, buf_scaler = io.BytesIO(), io.BytesIO()
+    joblib.dump(model, buf_model)
+    joblib.dump(scaler, buf_scaler)
+    return buf_model.getvalue(), buf_scaler.getvalue()
+
+
+class ContadorJoblib:
+    """Embraça `joblib.load` para contar chamadas.
+
+    A propriedade que prova o SEC-01 é negativa: com um .pkl adulterado o
+    contador tem de ficar a 0 — nada não verificado chega ao desserializador
+    (T-01-07). Os restantes atributos do módulo passamstraight para o joblib
+    real, para não partir quem use ml_anomalies.joblib.dump.
+    """
+
+    def __init__(self) -> None:
+        self.chamadas = 0
+
+    def load(self, *args, **kwargs):
+        self.chamadas += 1
+        return joblib.load(*args, **kwargs)
+
+    def __getattr__(self, nome):
+        return getattr(joblib, nome)
 
 
 def run() -> None:
@@ -267,7 +357,186 @@ def run() -> None:
         finally:
             model_registry.build_models_report = original_report
 
+    carregamento_verificado(client)
+
     main.ML_MODEL_DIR = original_dir
+
+
+def carregamento_verificado(client) -> None:
+    """
+    01-02: o carregamento verificado ponta a ponta, com pickles REAIS.
+
+    Cobre o caminho bom (v1 com os hashes certos, e o legado sem
+    metadados), o caminho mau (um byte trocado em cada um dos dois .pkl —
+    tem de dar 503 com o código e ZERO chamadas a joblib.load), o
+    fail-closed (ACTIVE inválido com .pkl soltos presentes) e o
+    curto-circuito da cache (com o modelo já em memória o registo não é
+    sequer consultado).
+    """
+    print("\n--- carregamento verificado (SEC-01/REG-02, 01-02) ---")
+
+    original_dir = main.ML_MODEL_DIR
+    original_joblib = ml_anomalies.joblib
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        model_bytes, scaler_bytes = real_model_bytes()
+
+        def usar(pasta) -> None:
+            main.ML_MODEL_DIR = str(pasta)
+            ml_anomalies.reset_cache()
+
+        try:
+            # (j) versão v1 com os hashes certos -> carrega e serve.
+            verificada = raiz / "verificada"
+            make_version(verificada, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            write_active(verificada, "v1")
+            usar(verificada)
+            resp = client.get("/api/ml-anomalies")
+            check("(j) versão verificada -> GET /api/ml-anomalies 200", resp.status_code == 200)
+            check("(j) e classifica os alertas mockados",
+                  resp.status_code == 200 and resp.json()["total"] == len(MOCK_ALERTS))
+            check("(j) loaded == 'v1' (D-02)",
+                  client.get("/api/ml/models").json()["loaded"] == "v1")
+            check("(j) a v1 aparece ativa e com status 'ok'",
+                  (client.get("/api/ml/models").json()["versions"] or [{}])[0].get("status") == "ok")
+
+            # (k) legado real, sem ACTIVE -> continua a carregar (REG-02).
+            legado = make_legacy(raiz / "legado", model_bytes=model_bytes,
+                                 scaler_bytes=scaler_bytes)
+            usar(legado)
+            resp = client.get("/api/ml-anomalies")
+            check("(k) legado -> GET /api/ml-anomalies 200", resp.status_code == 200)
+            report_legado = client.get("/api/ml/models").json()
+            check("(k) loaded == 'legacy' (D-02)", report_legado["loaded"] == "legacy")
+            check("(k) active == 'legacy'", report_legado["active"] == "legacy")
+            entrada = (report_legado["versions"] or [{}])[0]
+            check("(k) entrada legacy ativa e sem metadados",
+                  entrada.get("kind") == "legacy" and entrada.get("active") is True
+                  and entrada.get("label") == model_registry.LEGACY_LABEL
+                  and entrada.get("metadata") is None)
+            check("(k) sem ACTIVE o estado é o do legado em memória",
+                  ml_anomalies.loaded_version() == "legacy")
+
+            # (l) um byte trocado no modelo -> 503 hash_mismatch, 0 joblib.load.
+            adulterado = raiz / "adulterado"
+            make_version(adulterado, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            flip_byte(adulterado / "v1" / MODEL_FILE)
+            write_active(adulterado, "v1")
+            usar(adulterado)
+            contador = ContadorJoblib()
+            ml_anomalies.joblib = contador
+            try:
+                resp = client.get("/api/ml-anomalies")
+                check("(l) modelo adulterado -> 503", resp.status_code == 503)
+                check("(l) modelo adulterado -> detail 'hash_mismatch'",
+                      resp.json().get("detail") == "hash_mismatch")
+                check("(l) modelo adulterado -> ZERO chamadas a joblib.load",
+                      contador.chamadas == 0)
+                no_leaks_pasta("(l) modelo adulterado", resp, adulterado)
+
+                try:
+                    ml_anomalies.load_model(str(adulterado))
+                    exc = None
+                except model_registry.ModelRegistryError as raised:
+                    exc = raised
+                check("(l) load_model levanta ModelRegistryError('hash_mismatch')",
+                      exc is not None and exc.code == "hash_mismatch"
+                      and str(exc) == "hash_mismatch")
+                check("(l) e o contador continua a 0", contador.chamadas == 0)
+                check("(l) nada ficou em cache depois da recusa",
+                      ml_anomalies._model is None and ml_anomalies._scaler is None
+                      and ml_anomalies.loaded_version() is None)
+
+                resp = client.get("/api/ml/models")
+                check("(l) /api/ml/models -> 200 com a v1 em hash_mismatch",
+                      resp.status_code == 200
+                      and (resp.json()["versions"] or [{}])[0].get("status") == "hash_mismatch")
+                no_leaks_pasta("(l) /api/ml/models", resp, adulterado)
+
+                resp = client.get("/api/redblue/metrics")
+                check("(l) /api/redblue/metrics -> 503 (nunca 500)", resp.status_code == 503)
+                check("(l) /api/redblue/metrics -> detail 'hash_mismatch'",
+                      resp.json().get("detail") == "hash_mismatch")
+                no_leaks_pasta("(l) /api/redblue/metrics", resp, adulterado)
+                check("(l) o contador de joblib.load ficou a 0 no fim", contador.chamadas == 0)
+            finally:
+                ml_anomalies.joblib = original_joblib
+
+            # (m) um byte trocado no scaler: os dois artefactos são
+            # verificados antes do primeiro load, logo também 0 chamadas.
+            adulterado_scaler = raiz / "adulterado-scaler"
+            make_version(adulterado_scaler, "v1", model_bytes=model_bytes,
+                         scaler_bytes=scaler_bytes)
+            flip_byte(adulterado_scaler / "v1" / SCALER_FILE)
+            write_active(adulterado_scaler, "v1")
+            usar(adulterado_scaler)
+            contador = ContadorJoblib()
+            ml_anomalies.joblib = contador
+            try:
+                resp = client.get("/api/ml-anomalies")
+                check("(m) scaler adulterado -> 503 com detail 'hash_mismatch'",
+                      resp.status_code == 503 and resp.json().get("detail") == "hash_mismatch")
+                check("(m) scaler adulterado -> ZERO chamadas a joblib.load",
+                      contador.chamadas == 0)
+                resp = client.get("/api/redblue/metrics")
+                check("(m) /api/redblue/metrics -> 503 'hash_mismatch'",
+                      resp.status_code == 503 and resp.json().get("detail") == "hash_mismatch")
+                check("(m) contador ainda a 0", contador.chamadas == 0)
+                no_leaks_pasta("(m) scaler adulterado", resp, adulterado_scaler)
+            finally:
+                ml_anomalies.joblib = original_joblib
+
+            # (n) ACTIVE inválido com .pkl soltos reais -> fail-closed.
+            active_mau = make_legacy(raiz / "active-mau", model_bytes=model_bytes,
+                                     scaler_bytes=scaler_bytes)
+            write_active(active_mau, "../x")
+            usar(active_mau)
+            resp = client.get("/api/ml-anomalies")
+            check("(n) ACTIVE '../x' com .pkl soltos -> 503 'invalid_version_id'",
+                  resp.status_code == 503 and resp.json().get("detail") == "invalid_version_id")
+            check("(n) e não 500", resp.status_code != 500)
+            resp = client.get("/api/redblue/metrics")
+            check("(n) /api/redblue/metrics -> 503 'invalid_version_id'",
+                  resp.status_code == 503 and resp.json().get("detail") == "invalid_version_id")
+            no_leaks_pasta("(n) ACTIVE inválido", resp, active_mau)
+
+            # (o) pasta vazia -> 503 sem nenhum caminho na resposta.
+            vazia = raiz / "sem-modelo"
+            vazia.mkdir(parents=True, exist_ok=True)
+            usar(vazia)
+            resp = client.get("/api/ml-anomalies")
+            check("(o) pasta vazia -> 503", resp.status_code == 503)
+            check("(o) e a resposta não é um traceback", resp.status_code == 503)
+            no_leaks_pasta("(o) pasta vazia", resp, vazia)
+
+            # (p) cache hit: com _model/_scaler em memória o registo nem é
+            # consultado — nem sequer com a pasta adulterada em ML_MODEL_DIR.
+            sentinela_modelo, sentinela_scaler = object(), object()
+            ml_anomalies._model = sentinela_modelo
+            ml_anomalies._scaler = sentinela_scaler
+            ml_anomalies._loaded_from = "v1"
+            usar_do_cache = adulterado  # a pasta que daria hash_mismatch
+            try:
+                devolvido = ml_anomalies.load_model(str(usar_do_cache))
+                check("(p) cache hit devolve os objetos em memória sem levantar",
+                      devolvido == (sentinela_modelo, sentinela_scaler))
+                check("(p) e o registo nem foi consultado",
+                      ml_anomalies.loaded_version() == "v1")
+            except Exception as exc:  # noqa: BLE001 — o teste é que diz
+                check(f"(p) cache hit devolve os objetos em memória sem levantar ({exc!r})",
+                      False)
+            finally:
+                ml_anomalies.reset_cache()
+            check("(p) reset_cache limpa _model, _scaler e _loaded_from",
+                  ml_anomalies._model is None and ml_anomalies._scaler is None
+                  and ml_anomalies._loaded_from is None)
+            check("(p) e loaded_version() passa a None", ml_anomalies.loaded_version() is None)
+        finally:
+            ml_anomalies.joblib = original_joblib
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
 
 
 if __name__ == "__main__":

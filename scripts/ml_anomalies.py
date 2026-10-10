@@ -10,47 +10,78 @@ feature_extractor.py — o MESMO módulo de extração de features usado
 aqui, para que treino e inferência nunca divirjam.
 """
 
+import io
 import os
 
 import joblib
 
+import model_registry
 from feature_extractor import extract_features, vectorize
 
 DEFAULT_MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 _model = None
 _scaler = None
+# De onde veio o modelo que está em memória: "vN", "legacy" ou None. É o
+# `loaded` do relatório de GET /api/ml/models (D-02) — a cache é por
+# processo, por isso depois de um adopt o processo continua a servir o
+# modelo antigo até reiniciar e o dashboard tem de o dizer.
+_loaded_from = None
 
 
 def load_model(model_dir: str | None = None):
-    """Carrega (e mantém em cache no processo) o modelo + scaler
-    treinados. Lança FileNotFoundError com uma mensagem acionável se
-    train_anomaly_model.py ainda não correu — quem chama decide o
-    código de estado HTTP.
+    """Carrega (e mantém em cache no processo) o modelo + scaler da versão
+    ativa do registo, em model_registry.
 
-    Nota de segurança: joblib.load desserializa pickle, o que permite
-    execução arbitrária de código sobre ficheiros não confiáveis. Aqui é
-    seguro porque os .pkl só podem vir de train_anomaly_model.py a
-    correr localmente (nunca são recebidos de upload, rede ou de fora
-    deste repositório) — ver ML_MODEL_DIR em main.py, que aponta sempre
-    para uma pasta local gerida por nós.
+    Na cache miss, `model_registry.resolve_active_artifacts()` devolve os
+    bytes JÁ VERIFICADOS dos dois .pkl (SHA-256 conferido contra o
+    metadata.json) e aqui são desserializados com
+    `joblib.load(io.BytesIO(...))` — os mesmos bytes que foram verificados,
+    nunca um segundo open do ficheiro (SEC-01, T-01-08).
+
+    Lança FileNotFoundError com uma mensagem acionável e SEM caminhos
+    quando não há nada ativo (quem chama decide o estado HTTP, 503), e
+    ModelRegistryError(code) quando o registo recusa a versão ativa (hash
+    adulterado, ACTIVE inválido, metadados corrompidos).
+
+    Nota de segurança: `joblib.load` desserializa pickle, o que executa
+    código arbitrário — daí nada não verificado chegar lá. Os limites
+    honestos desta verificação: o SHA-256 deteta corrupção, troca acidental
+    e ficheiros alheios sem metadados, mas NÃO autentica (quem escreve em
+    models/ reescreve também o metadata.json — dívida registada, D-04); e o
+    modelo legado, sem metadados, carrega sem verificação até ser adotado
+    com `python model_registry.py adopt` (REG-02, risco aceite T-01-10).
     """
-    global _model, _scaler
+    global _model, _scaler, _loaded_from
     if _model is not None and _scaler is not None:
         return _model, _scaler
 
-    model_dir = model_dir or DEFAULT_MODEL_DIR
-    model_path = os.path.join(model_dir, "isolation_forest.pkl")
-    scaler_path = os.path.join(model_dir, "scaler.pkl")
-    if not os.path.exists(model_path) or not os.path.exists(scaler_path):
-        raise FileNotFoundError(
-            f"Modelo de ML não encontrado em '{model_dir}'. Corre "
-            "'python train_anomaly_model.py' primeiro para o gerar."
-        )
-
-    _model = joblib.load(model_path)
-    _scaler = joblib.load(scaler_path)
+    source = model_registry.resolve_active_artifacts(model_dir or DEFAULT_MODEL_DIR)
+    # Só depois de os DOIS artefactos virem verificados do registo é que se
+    # desserializa; se um `joblib.load` explodir, a cache fica vazia e o
+    # próximo pedido volta a tentar em vez de servir metade do modelo.
+    model = joblib.load(io.BytesIO(source.model_bytes))
+    scaler = joblib.load(io.BytesIO(source.scaler_bytes))
+    _model = model
+    _scaler = scaler
+    _loaded_from = source.version
     return _model, _scaler
+
+
+def reset_cache() -> None:
+    """Esvazia a cache do processo. Usado nos testes e depois de um adopt
+    (a cache é por processo: sem isto, o backend continua a servir o modelo
+    antigo depois de adotar a v1)."""
+    global _model, _scaler, _loaded_from
+    _model = None
+    _scaler = None
+    _loaded_from = None
+
+
+def loaded_version() -> str | None:
+    """A versão que este processo tem de facto em memória: "vN", "legacy"
+    ou None. É o `loaded` que GET /api/ml/models expõe (D-02)."""
+    return _loaded_from
 
 
 def build_ml_anomalies_report(alerts: list[dict], model, scaler) -> dict:

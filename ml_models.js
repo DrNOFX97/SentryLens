@@ -86,9 +86,16 @@ function mlmBuildModelsRows(report) {
   }
   return versions.map((entry) => {
     const ativa = entry.active ? '<span class="mlm-badge mlm-badge-active">ativa</span> ' : "";
+    // O badge de erro só entra quando há mesmo um erro: `error_code` null com
+    // um status diferente de "ok" é o legado ("no_metadata"), que carrega
+    // sem verificação até ser adotado (REG-02) — pintá-lo de vermelho e com
+    // a mensagem genérica diria ao analista que o modelo avariou quando
+    // está a ser usado à vontade.
     const estado = entry.status === "ok"
       ? "OK"
-      : `<span class="mlm-badge mlm-badge-error">${escapeHtml(mlmErrorText(entry.error_code))}</span>`;
+      : entry.error_code
+        ? `<span class="mlm-badge mlm-badge-error">${escapeHtml(mlmErrorText(entry.error_code))}</span>`
+        : '<span class="mlm-badge mlm-badge-legacy">sem metadados</span>';
     const avaliacao = entry.evaluation === null || entry.evaluation === undefined
       ? "Sem avaliação"
       : "Registada";

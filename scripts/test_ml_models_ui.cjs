@@ -84,6 +84,7 @@ if (!fixturesDir) {
 }
 check("pasta de fixtures recebida", true);
 const reportV1 = JSON.parse(fs.readFileSync(path.join(fixturesDir, "report_v1.json"), "utf8"));
+const reportLegacy = JSON.parse(fs.readFileSync(path.join(fixturesDir, "report_legacy.json"), "utf8"));
 const reportEmpty = JSON.parse(fs.readFileSync(path.join(fixturesDir, "report_empty.json"), "utf8"));
 
 // --- mlmErrorText: cada código de D-06 traduzido, nunca em bruto -------------
@@ -153,6 +154,24 @@ check("HTML nos metadados nunca chega ao DOM", !rowsXss.includes("<script"));
 check("HTML escapado continua visível como texto", rowsXss.includes("&lt;img"));
 check("erro de uma versão traduzido pela tabela",
   rowsXss.includes("metadata.json") && !rowsXss.includes("metadata_invalid"));
+
+// --- a entrada do legado NÃO é um erro (REG-02, 01-02) ------------------------
+//
+// O relatório real com só os dois .pkl soltos tem status "no_metadata" e
+// error_code null: o modelo está a ser usado. Pinta-lo com o badge de erro
+// (que cai no texto genérico, porque não há código) seria mentir ao analista.
+
+const rowsLegacy = mlmBuildModelsRows(reportLegacy);
+check("legado: exactamente uma linha",
+  (rowsLegacy.match(/<tr/g) || []).length === 1);
+check("legado: mostra o label 'legado, sem metadados'",
+  rowsLegacy.includes("legado, sem metadados"));
+check("legado: marcado como ativo", rowsLegacy.includes("mlm-badge-active"));
+check("legado: sem badge de erro (o modelo carrega, não está avariado)",
+  !rowsLegacy.includes("mlm-badge-error"));
+check("legado: sem mensagem genérica de erro",
+  !rowsLegacy.includes(MLM_GENERIC_ERROR));
+check("legado: sem avaliação", rowsLegacy.includes("Sem avaliação"));
 
 // --- mlmModelsNoticeText -----------------------------------------------------
 

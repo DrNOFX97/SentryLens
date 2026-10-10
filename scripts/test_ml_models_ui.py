@@ -77,6 +77,15 @@ def make_version(root, vid, model_bytes=b"fake-model", scaler_bytes=b"fake-scale
     return version_dir
 
 
+def make_legacy(root) -> Path:
+    """Os dois .pkl soltos em models/ — o "legado", sem metadados (REG-02)."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "isolation_forest.pkl").write_bytes(b"fake-model")
+    (root / "scaler.pkl").write_bytes(b"fake-scaler")
+    return root
+
+
 def run() -> None:
     node = shutil.which("node")
     if node is None:
@@ -91,10 +100,13 @@ def run() -> None:
             com_v1 = Path(reg_tmp) / "com-v1"
             make_version(com_v1, "v1")
             (com_v1 / "ACTIVE").write_text("v1\n", encoding="utf-8")
+            legado = make_legacy(Path(reg_tmp) / "legado")
             vazia = Path(reg_tmp) / "vazia"
             vazia.mkdir()
 
-            for nome, pasta in (("report_v1.json", com_v1), ("report_empty.json", vazia)):
+            for nome, pasta in (("report_v1.json", com_v1),
+                                ("report_legacy.json", legado),
+                                ("report_empty.json", vazia)):
                 main.ML_MODEL_DIR = str(pasta)
                 resp = client.get("/api/ml/models")
                 check(f"GET /api/ml/models ({nome}) -> 200", resp.status_code == 200)

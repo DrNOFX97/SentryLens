@@ -763,6 +763,12 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except model_registry.ModelRegistryError as e:
+        # O registo recusou a versão ativa (hash adulterado, ACTIVE
+        # inválido, metadados corrompidos): 503 com o código estável, nunca
+        # 500 e nunca texto de exceção — a causa fica no log (API-02).
+        logger.warning("/api/ml-anomalies: registo de modelos recusou o carregamento (%s)", e.code)
+        raise HTTPException(status_code=503, detail=e.code)
 
     try:
         raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
@@ -780,6 +786,9 @@ async def get_ml_models():
     ativa (models/ACTIVE) e os metadados de cada uma. Só leitura — ativar,
     adotar ou treinar é operação de CLI, nunca por HTTP.
 
+    `loaded` é a versão que o ml_anomalies tem de facto em memória (D-02),
+    que pode não ser a ativa: a cache do modelo é por processo.
+
     O contrato da resposta está em
     .planning/phases/01-registo-de-modelos-ponta-a-ponta/SKELETON.md e a
     transformação dos dados é toda de model_registry.build_models_report;
@@ -790,7 +799,9 @@ async def get_ml_models():
     caminhos).
     """
     try:
-        return await run_in_threadpool(model_registry.build_models_report, ML_MODEL_DIR)
+        return await run_in_threadpool(
+            model_registry.build_models_report, ML_MODEL_DIR, ml_anomalies.loaded_version()
+        )
     except model_registry.ModelRegistryError as e:
         logger.warning("GET /api/ml/models: %s", e.code)
         raise HTTPException(status_code=503, detail=e.code)
@@ -814,6 +825,10 @@ async def get_redblue_metrics(
         model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except model_registry.ModelRegistryError as e:
+        # Mesmo mapeamento de /api/ml-anomalies: 503 com o código estável.
+        logger.warning("/api/redblue/metrics: registo de modelos recusou o carregamento (%s)", e.code)
+        raise HTTPException(status_code=503, detail=e.code)
 
     try:
         raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
