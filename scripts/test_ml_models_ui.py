@@ -1,12 +1,20 @@
 """
-Wrapper dos testes de UI do registo de modelos (ml_models.js).
+Wrapper dos testes de UI do registo de modelos (ml_models.js e
+ml_evaluation.js).
 
 O run_all_tests.py só descobre test_*.py, por isso este ficheiro é a ponte
 para o teste Node scripts/test_ml_models_ui.cjs: monta um registo real num
 directório temporário, pede-o a GET /api/ml/models com TestClient e escreve
-as respostas em report_v1.json / report_empty.json, que o .cjs usa como
-fixtures. Assim os helpers puros de ml_models.js são testados contra o JSON
-verdadeiro da rota, não contra um JSON escrito à mão.
+as respostas em report_v1.json / report_empty.json / report_legacy.json, que
+o .cjs usa como fixtures. Assim os helpers puros de ml_models.js são testados
+contra o JSON verdadeiro da rota, não contra um JSON escrito à mão.
+
+A quarta fixture, report_evaluated.json, é o fecho do caminho da Fase 2: num
+registo temporário com duas versões, o comando `python model_registry.py
+evaluate v1` é corrido A SÉRIO (com pickles reais e o motor de avaliação
+completo) e só depois é pedida a rota. O stdout do comando vai para
+evaluate_stdout.txt, para o .cjs poder confirmar que a linha da tabela mostra
+as mesmas percentagens que o CLI imprimiu.
 
 Nunca toca no scripts/models real. Sem `node` no PATH falha com mensagem
 explícita (fail-closed) — nunca passa em silêncio.
@@ -16,6 +24,7 @@ Correr (a partir de scripts/):
 """
 
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -26,9 +35,12 @@ from pathlib import Path
 
 os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
 
+import joblib
 from fastapi.testclient import TestClient
 
 import main
+from feature_extractor import extract_features, vectorize
+from train_anomaly_model import train_model
 
 main.app.router.on_startup.clear()
 
@@ -86,6 +98,37 @@ def make_legacy(root) -> Path:
     return root
 
 
+# Alertas mockados no mesmo formato do Wazuh Indexer.
+def alerta(event_id: int, ts: str, user: str = "jsilva", ip: str = "192.168.1.10") -> dict:
+    return {
+        "@timestamp": ts,
+        "agent": {"name": "WIN-PC01", "ip": "192.168.1.5"},
+        "rule": {"id": "1", "description": "x", "level": 5},
+        "data": {"win": {"system": {"eventID": str(event_id)},
+                         "eventdata": {"targetUserName": user, "ipAddress": ip}}},
+        "full_log": "x",
+    }
+
+
+MOCK_ALERTS = (
+    [alerta(4624, f"2026-09-01T09:0{i}:00Z", user="mcosta") for i in range(4)]
+    + [alerta(4625, f"2026-09-02T03:0{i}:00Z", user="convidado", ip="203.0.113.50")
+       for i in range(6)]
+)
+
+
+def real_model_bytes() -> tuple[bytes, bytes]:
+    """Bytes de .pkl verdadeiros: um IsolationForest minúsculo treinado sobre
+    os MOCK_ALERTS, dumpado para BytesIO. Sem isto o `evaluate` a sério não
+    teria o que carregar."""
+    model, scaler = train_model(
+        vectorize(extract_features(MOCK_ALERTS)), contamination=0.3, random_state=1)
+    buf_model, buf_scaler = io.BytesIO(), io.BytesIO()
+    joblib.dump(model, buf_model)
+    joblib.dump(scaler, buf_scaler)
+    return buf_model.getvalue(), buf_scaler.getvalue()
+
+
 def run() -> None:
     node = shutil.which("node")
     if node is None:
@@ -116,6 +159,49 @@ def run() -> None:
 
             main.ML_MODEL_DIR = original_dir
 
+            # Quarta fixture: o `evaluate` corrido A SÉRIO, com pickles reais.
+            # Sem o check explícito do código de saída, o .cjs acabaria a
+            # testar um fixture inventado — que é pior do que não testar.
+            avaliado = Path(reg_tmp) / "avaliado"
+            model_bytes, scaler_bytes = real_model_bytes()
+            make_version(avaliado, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            make_version(avaliado, "v2", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            (avaliado / "ACTIVE").write_text("v1\n", encoding="utf-8")
+            eventos = Path(reg_tmp) / "eventos.json"
+            eventos.write_text(json.dumps(MOCK_ALERTS, ensure_ascii=False), encoding="utf-8")
+            log = Path(reg_tmp) / "attack_log.jsonl"
+            log.write_text(json.dumps({"timestamp": "2026-09-02T03:05:00Z",
+                                       "type": "brute_force"}) + "\n", encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, "-X", "utf8",
+                 str(Path(__file__).with_name("model_registry.py")),
+                 "evaluate", "v1",
+                 "--events", str(eventos), "--attack-log", str(log),
+                 "--models-dir", str(avaliado), "--dataset-origin", "real"],
+                capture_output=True, text=True, encoding="utf-8",
+                cwd=str(Path(__file__).resolve().parent), timeout=180,
+            )
+            check(f"CLI 'evaluate v1' no registo temporário -> código 0 (stderr: {proc.stderr.strip()[:200]})",
+                  proc.returncode == 0)
+            Path(out_dir, "evaluate_stdout.txt").write_text(proc.stdout, encoding="utf-8")
+            check("o stdout do evaluate traz percentagens para comparar com a tabela",
+                  "%" in proc.stdout)
+
+            main.ML_MODEL_DIR = str(avaliado)
+            resp = client.get("/api/ml/models")
+            check("GET /api/ml/models (report_evaluated.json) -> 200", resp.status_code == 200)
+            corpo = resp.json()
+            Path(out_dir, "report_evaluated.json").write_text(
+                json.dumps(corpo, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            por_id = {v.get("id"): v for v in corpo.get("versions") or []}
+            check("a v1 ficou com avaliação gravada",
+                  bool((por_id.get("v1") or {}).get("evaluation")))
+            check("a v2 ficou sem avaliação (avaliou-se a versão pedida, D-02)",
+                  (por_id.get("v2") or {}).get("evaluation") is None)
+
+            main.ML_MODEL_DIR = original_dir
+
             proc = subprocess.run(
                 [node, str(Path(__file__).with_name("test_ml_models_ui.cjs")), out_dir],
                 capture_output=True,
@@ -127,7 +213,7 @@ def run() -> None:
                 print(proc.stdout, end="")
             if proc.stderr:
                 print(proc.stderr, end="")
-            check("teste Node de ml_models.js", proc.returncode == 0)
+            check("teste Node de ml_models.js + ml_evaluation.js", proc.returncode == 0)
     finally:
         main.ML_MODEL_DIR = original_dir
 

@@ -1,13 +1,19 @@
 "use strict";
-// Teste Node da camada pura de ml_models.js (marco R9). Corre o ficheiro
-// real num contexto node:vm sem document/window/fetch e exercita só os
-// helpers que devolvem strings — a camada DOM não é testada aqui, é o que
-// o <human-check> no browser de cada fase.
+// Teste Node da camada pura de ml_models.js E de ml_evaluation.js (marco R9).
+// Corre os dois ficheiros REAIS num contexto node:vm sem document/window/fetch
+// e exercita só os helpers que devolvem strings — a camada DOM não é testada
+// aqui, é o que o <human-check> no browser de cada fase cobre.
 //
-// Os relatórios de report_v1.json / report_empty.json são reais: vêm do
-// wrapper test_ml_models_ui.py, que os obtém de GET /api/ml/models com
-// TestClient sobre um registo temporário. Por isso este ficheiro nunca é
-// corrido sozinho (sem argumentos sai com [FALHOU]).
+// Os dois ficheiros são carregados no MESMO contexto, porque em produção
+// partilham um só escopo global: um identificador repetido entre eles
+// rebentaria o script inteiro no browser (D-09/Pitfall 9).
+//
+// Os relatórios de report_v1.json / report_empty.json / report_legacy.json /
+// report_evaluated.json são reais: vêm do wrapper test_ml_models_ui.py, que os
+// obtém de GET /api/ml/models com TestClient sobre um registo temporário — e
+// no caso do report_evaluated.json, depois de correr o `evaluate` a sério. Por
+// isso este ficheiro nunca é corrido sozinho (sem argumentos sai com
+// [FALHOU]).
 //
 // Uso: node test_ml_models_ui.cjs <pasta-com-os-json>
 
@@ -23,7 +29,7 @@ function check(label, condition) {
 }
 
 // Cópia exacta do corpo de escapeHtml em app.js (linhas 40-48). O contexto
-// do vm tem de trazer os globais que ml_models.js NÃO redeclara.
+// do vm tem de trazer os globais que nenhum dos dois ficheiros redeclara.
 function escapeHtml(value) {
   if (value === null || value === undefined) return "";
   return String(value)
@@ -46,25 +52,29 @@ const D06_CODES = [
   "registry_unavailable",
 ];
 
-// --- carregar o ficheiro real sem DOM ----------------------------------------
+// --- carregar os ficheiros reais sem DOM ---------------------------------------
 
 const mlSource = fs.readFileSync(path.join(__dirname, "..", "ml_models.js"), "utf8");
+const mleSource = fs.readFileSync(path.join(__dirname, "..", "ml_evaluation.js"), "utf8");
 const ctx = vm.createContext({ escapeHtml, console });
 try {
   vm.runInContext(mlSource, ctx, { filename: "ml_models.js" });
+  vm.runInContext(mleSource, ctx, { filename: "ml_evaluation.js" });
 } catch (err) {
-  console.log("[FALHOU] ml_models.js carrega sem DOM (nenhuma linha de topo toca em document)");
+  console.log("[FALHOU] ml_models.js e ml_evaluation.js carregam no MESMO contexto sem DOM "
+    + "(nenhuma linha de topo toca em document, nenhum identificador colide)");
   console.log(String(err && err.stack ? err.stack : err));
   process.exit(1);
 }
-check("ml_models.js carrega sem DOM (nenhuma linha de topo toca em document)", true);
+check("ml_models.js e ml_evaluation.js carregam no MESMO contexto sem DOM "
+  + "(nenhuma linha de topo toca em document, nenhum identificador colide)", true);
 
 const helpers = vm.runInContext(
-  "({ MLM_ERROR_TEXT, MLM_GENERIC_ERROR, mlmErrorText, mlmCodeFromResponse, mlmCell," +
-  "   mlmStatusText, mlmFormatDate, mlmOriginHtml, mlmTrainedAtText," +
-  "   mlmEntryKey, mlmFindEntryIndex, mlmRowIndexFromEvent, mlmIsSelectKey," +
-  "   mlmHandleRowKey, mlmBuildDetail," +
-  "   mlmBuildModelsRows, mlmModelsNoticeText, mlmBuildEvalRows })",
+  "({ MLM_ERROR_TEXT, MLM_GENERIC_ERROR, mlmErrorText, mlmCodeFromResponse, mlmCell,"
+  + "   mlmStatusText, mlmFormatDate, mlmOriginHtml, mlmTrainedAtText,"
+  + "   mlmEntryKey, mlmFindEntryIndex, mlmRowIndexFromEvent, mlmIsSelectKey,"
+  + "   mlmHandleRowKey, mlmBuildDetail,"
+  + "   mlmBuildModelsRows, mlmModelsNoticeText })",
   ctx
 );
 const {
@@ -85,8 +95,15 @@ const {
   mlmBuildDetail,
   mlmBuildModelsRows,
   mlmModelsNoticeText,
-  mlmBuildEvalRows,
 } = helpers;
+
+// Os helpers da Evaluation vivem agora em ml_evaluation.js (D-09): saem do
+// MESMO contexto, depois de o segundo ficheiro ter carregado.
+const helpersEval = vm.runInContext(
+  "({ mleEmptyState, mlePercent, mleMetricCell, mleBuildEvalRows, mleEvalNoticeText })",
+  ctx
+);
+const { mleEmptyState, mlePercent, mleMetricCell, mleBuildEvalRows, mleEvalNoticeText } = helpersEval;
 
 // --- relatórios reais gerados pelo wrapper ------------------------------------
 
@@ -99,6 +116,9 @@ check("pasta de fixtures recebida", true);
 const reportV1 = JSON.parse(fs.readFileSync(path.join(fixturesDir, "report_v1.json"), "utf8"));
 const reportLegacy = JSON.parse(fs.readFileSync(path.join(fixturesDir, "report_legacy.json"), "utf8"));
 const reportEmpty = JSON.parse(fs.readFileSync(path.join(fixturesDir, "report_empty.json"), "utf8"));
+const reportEvaluated = JSON.parse(
+  fs.readFileSync(path.join(fixturesDir, "report_evaluated.json"), "utf8"));
+const evaluateStdout = fs.readFileSync(path.join(fixturesDir, "evaluate_stdout.txt"), "utf8");
 
 // --- mlmErrorText: cada código de D-06 traduzido, nunca em bruto -------------
 
@@ -618,33 +638,194 @@ check("aviso com active_error traduz o código",
   mlmModelsNoticeText({ active: null, active_error: "active_not_found", versions: [] })
     .includes(mlmErrorText("active_not_found")));
 
-// --- mlmBuildEvalRows (aba Evaluation, D-05) --------------------------------
+// --- Evaluation: os helpers puros de ml_evaluation.js (D-09, D-11) ------------
 
-const evalV1 = mlmBuildEvalRows(reportV1);
-check("Evaluation com v1: uma linha por versão",
-  (evalV1.match(/<tr/g) || []).length === 1);
-check("Evaluation com v1: diz que não há avaliação", evalV1.includes("Sem avaliação"));
-check("Evaluation com v1: marca a versão ativa", evalV1.includes("mlm-badge-active"));
+// Avaliação de exemplo segundo o contrato: as 14 chaves de EVALUATION_KEYS,
+// como as que o `evaluate` grava e a API sub-projeta.
+function avaliacao(over) {
+  return Object.assign({
+    evaluated_at: "2026-10-10T09:30:00+00:00",
+    events_file: "eventos.json",
+    attack_log: "attack_log.jsonl",
+    label_window_seconds: 120,
+    total_events: 35,
+    attacks_in_dataset: 20,
+    ml: { precision: 0.987, recall: 0.5, f1: 0.62 },
+    rules: { precision: 0.875, recall: 0.4, f1: 0.33 },
+    comparison: { both_flagged: 8, ml_only: 2, rules_only: 4, neither: 21 },
+    min_events: 50,
+    min_attacks: 10,
+    small_sample: true,
+    caveat: "Dataset pequeno (35 eventos, 20 ataques).",
+    dataset_origin: "real",
+  }, over);
+}
+
+function versaoAvaliada(id, active, ev) {
+  return versioned(Object.assign({ id, label: id, active }, ev ? { evaluation: ev } : {}));
+}
+
+// mlePercent: uma percentagem pt-PT; um valor em falta NUNCA é 0 (D-10).
+
+check("mlePercent(0.987) -> '98,7 %'", mlePercent(0.987) === "98,7 %");
+check("mlePercent(1) -> '100,0 %'", mlePercent(1) === "100,0 %");
+check("mlePercent(0) -> '0,0 %'", mlePercent(0) === "0,0 %");
+check("mlePercent(0.5) -> '50,0 %'", mlePercent(0.5) === "50,0 %");
+check("mlePercent(null) -> '—' (nunca '0 %')", mlePercent(null) === "—");
+check("mlePercent(undefined) -> '—'", mlePercent(undefined) === "—");
+check("mlePercent('x') -> '—' (nunca 'NaN %')", mlePercent("x") === "—");
+check("mlePercent('') -> '—'", mlePercent("") === "—");
+check("mlePercent(NaN) -> '—'", mlePercent(NaN) === "—");
+
+// mleMetricCell
+
+const celula = mleMetricCell(avaliacao().ml);
+check("mleMetricCell: as três métricas em percentagem com vírgula",
+  celula.includes("98,7 %") && celula.includes("50,0 %") && celula.includes("62,0 %"));
+check("mleMetricCell: identifica P, R e F",
+  celula.includes(">P<") && celula.includes(">R<") && celula.includes(">F<"));
+check("mleMetricCell(null) -> '—'", mleMetricCell(null) === "—");
+check("mleMetricCell(undefined) -> '—'", mleMetricCell(undefined) === "—");
+check("mleMetricCell({}) -> três '—' e nenhum '0 %'",
+  (mleMetricCell({}).match(/—/g) || []).length === 3 && !mleMetricCell({}).includes("0,0 %"));
+
+// mleBuildEvalRows: uma linha por versão, e "Sem avaliação" é visível (EVAL-03).
+
+const evalV1 = mleBuildEvalRows(reportV1);
+check("Evaluation com v1 sem avaliação: diz 'Sem avaliação'", evalV1.includes("Sem avaliação"));
+check("Evaluation com v1 sem avaliação: marca a versão ativa", evalV1.includes("mlm-badge-active"));
 check("Evaluation sem versões: diz que ainda não há modelos registados",
-  mlmBuildEvalRows(reportEmpty).includes("Sem dados — ainda não há modelos registados."));
+  mleBuildEvalRows(reportEmpty).includes("Sem dados — ainda não há modelos registados."));
+check("Evaluation sem versões: colspan=4", mleBuildEvalRows(reportEmpty).includes('colspan="4"'));
 
-// D-05: a Fase 1 não mostra métricas — só diz que existe uma avaliação.
-const evalComNumeros = mlmBuildEvalRows({
-  versions: [{
-    id: "v9",
-    label: "v9",
-    kind: "versioned",
+// [INVERSÃO D-11] A Fase 1 fixava que NENHUM número era mostrado. A Fase 2
+// precisa do contrário: a precisão do ML e a das regras aparecem, em
+// percentagem com vírgula, e o valor cru nunca aparece. O teste foi
+// invertido, não contornado nem saltado.
+const evalComNumeros = mleBuildEvalRows({
+  versions: [versaoAvaliada("v9", false, avaliacao())],
+});
+check("Evaluation com objeto: mostra a precisão do ML (D-11)",
+  evalComNumeros.includes("98,7 %"));
+check("Evaluation com objeto: mostra a precisão das regras (D-11)",
+  evalComNumeros.includes("87,5 %"));
+check("Evaluation com objeto: mostra o recall e o F1 do ML",
+  evalComNumeros.includes("50,0 %") && evalComNumeros.includes("62,0 %"));
+check("Evaluation com objeto: mostra o recall e o F1 das regras",
+  evalComNumeros.includes("40,0 %") && evalComNumeros.includes("33,0 %"));
+check("Evaluation com objeto: o valor cru (0.987) NUNCA aparece",
+  !evalComNumeros.includes("0.987") && !evalComNumeros.includes("0.875"));
+check("Evaluation com objeto: não volta a dizer que a apresentação chega na Fase 2",
+  !evalComNumeros.includes("Fase 2"));
+
+// Pitfall 1 — o critério 2 do ROADMAP: duas versões com avaliações DIFERENTES,
+// cada linha com as SUAS métricas. É o teste que fecha esse critério.
+const duasAvaliadas = mleBuildEvalRows({
+  versions: [
+    versaoAvaliada("v2", true, avaliacao({
+      ml: { precision: 0.1111, recall: 0.2222, f1: 0.3333 },
+      rules: { precision: 0.4444, recall: 0.5555, f1: 0.6666 },
+    })),
+    versaoAvaliada("v1", false, avaliacao()),
+  ],
+});
+const linhaDe = (html, id) => (html.split("<tr").find((p) => p.includes(`>${id}<`)) || "");
+const linhaV1 = linhaDe(duasAvaliadas, "v1");
+const linhaV2 = linhaDe(duasAvaliadas, "v2");
+check("Pitfall 1: a linha da v1 tem as métricas da v1",
+  linhaV1.includes("98,7 %") && linhaV1.includes("87,5 %"));
+check("Pitfall 1: a linha da v1 NÃO tem as métricas da v2",
+  !linhaV1.includes("11,1 %") && !linhaV1.includes("44,4 %"));
+check("Pitfall 1: a linha da v2 tem as métricas da v2",
+  linhaV2.includes("11,1 %") && linhaV2.includes("44,4 %"));
+check("Pitfall 1: a linha da v2 NÃO tem as métricas da v1",
+  !linhaV2.includes("98,7 %") && !linhaV2.includes("87,5 %"));
+check("Pitfall 1: a badge de ativa só aparece na linha da v2",
+  linhaV1.includes("—") && linhaV2.includes("mlm-badge-active"));
+
+// Uma versão com avaliação e outra sem, na mesma resposta.
+const mista = mleBuildEvalRows({
+  versions: [versaoAvaliada("v2", false, null), versaoAvaliada("v1", true, avaliacao())],
+});
+check("mista: a versão sem avaliação diz 'Sem avaliação'", mista.includes("Sem avaliação"));
+check("mista: a linha com avaliação mostra os números",
+  linhaDe(mista, "v1").includes("98,7 %"));
+check("mista: a linha sem avaliação não mostra números",
+  !linhaDe(mista, "v2").includes("98,7 %"));
+check("mista: o id da versão aparece sempre",
+  mista.includes(">v1<") && mista.includes(">v2<"));
+
+// Tudo o que vem do metadata.json do utilizador passa por escapeHtml.
+const xss = mleBuildEvalRows({
+  versions: [versioned({
+    id: "<img src=x onerror=alert(1)>",
+    label: "<img src=x onerror=alert(1)>",
     active: false,
     status: "ok",
     error_code: null,
     metadata: null,
-    evaluation: { precision: 0.987, recall: 0.5 },
-  }],
+    evaluation: avaliacao({ caveat: "<img src=x onerror=alert(1)>", events_file: "<script>x</script>" }),
+  })],
 });
-check("Evaluation com objeto: diz que está registada no metadata.json",
-  evalComNumeros.includes("Avaliação registada no metadata.json"));
-check("Evaluation com objeto: nenhum número é mostrado (D-05)",
-  !evalComNumeros.includes("0.987") && !evalComNumeros.includes("0.5"));
+check("XSS na Evaluation: o id nunca chega ao DOM", !xss.includes("<img"));
+check("XSS na Evaluation: escapado continua legível como texto", xss.includes("&lt;img"));
+
+// mleEvalNoticeText
+
+const noticeDuas = mleEvalNoticeText({
+  versions: [versaoAvaliada("v1", true, avaliacao()), versaoAvaliada("v2", false, null)],
+});
+check("aviso da Evaluation: conta as versões", noticeDuas.includes("2 versão"));
+check("aviso da Evaluation: conta as sem avaliação", noticeDuas.includes("1 sem avaliação"));
+check("aviso da Evaluation: zero versões -> '0'",
+  mleEvalNoticeText(reportEmpty).includes("0 versão") && mleEvalNoticeText(reportEmpty).includes("0 sem"));
+check("aviso da Evaluation: com todas avaliadas -> '0 sem avaliação'",
+  mleEvalNoticeText({ versions: [versaoAvaliada("v1", true, avaliacao())] }).includes("0 sem avaliação"));
+
+// --- fecho do tracer: o que o comando mediu é o que a tabela mostra ----------
+//
+// O report_evaluated.json é a resposta VERDADEIRA de GET /api/ml/models a um
+// registo onde `model_registry.py evaluate` foi corrido a sério (o wrapper
+// gravou também o stdout do comando em evaluate_stdout.txt). A linha da v1
+// tem de trazer as mesmas três percentagens de ML e as três de regras que o
+// CLI imprimiu — é isto que liga as duas pontas do caminho.
+
+const avaliacoes = ((reportEvaluated.versions || []).filter((v) => v.evaluation) || []);
+check("fecho do tracer: o relatório avaliado tem pelo menos uma versão com avaliação",
+  avaliacoes.length >= 1);
+
+const linhaReal = linhaDe(mleBuildEvalRows(reportEvaluated), "v1");
+function percentagensDaLinha(texto) {
+  const achados = texto.match(/\d+,\d %/g) || [];
+  return achados;
+}
+function percentagensDoCli(rotulo) {
+  const linha = (evaluateStdout.split("\n").find((l) => l.trim().startsWith(rotulo)) || "");
+  return percentagensDaLinha(linha);
+}
+
+const cliML = percentagensDoCli("ML");
+const cliRegras = percentagensDoCli("Regras");
+check("fecho do tracer: o stdout do CLI traz as três percentagens do ML",
+  cliML.length === 3);
+check("fecho do tracer: o stdout do CLI traz as três percentagens das regras",
+  cliRegras.length === 3);
+check("fecho do tracer: a linha da v1 mostra as MESMAS percentagens de ML que o CLI imprimiu",
+  cliML.every((p) => linhaReal.includes(p)));
+check("fecho do tracer: a linha da v1 mostra as MESMAS percentagens de regras que o CLI imprimiu",
+  cliRegras.every((p) => linhaReal.includes(p)));
+check("fecho do tracer: a linha da v1 não mostra nenhum valor cru do metadata.json",
+  !linhaReal.includes("0.9") && !linhaReal.includes("NaN"));
+
+// A v2 (registada sem avaliação) não pode herdar os números da v1.
+const v2DoRelatorio = ((reportEvaluated.versions || []).find((v) => v.id === "v2") || null);
+if (v2DoRelatorio) {
+  const linhasReais = mleBuildEvalRows(reportEvaluated);
+  check("fecho do tracer: a v2 sem avaliação diz 'Sem avaliação'",
+    linhasReais.includes("Sem avaliação"));
+  check("fecho do tracer: a linha da v2 não mostra percentagem nenhuma",
+    !linhaDe(linhasReais, "v2").includes("%"));
+}
 
 // --- fim ---------------------------------------------------------------------
 
