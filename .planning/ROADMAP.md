@@ -16,7 +16,7 @@ O backend do R9 é só de leitura: treinar a partir do dashboard e comparar vers
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Registo de modelos ponta a ponta** - Versões em `models/vN`, legado, `adopt`, carregamento com SHA-256, `GET /api/ml/models` e aba Models
+- [x] **Phase 1: Registo de modelos ponta a ponta** - Versões em `models/vN`, legado, `adopt`, carregamento com SHA-256, `GET /api/ml/models` e aba Models
 - [ ] **Phase 2: Avaliação ligada à versão** - Avaliação guardada no `metadata.json`, comando `evaluate` e aba Evaluation (ML vs regras)
 - [ ] **Phase 3: Treino gera versões, testes e documentação** - Cada treino cria e ativa uma versão nova; suite de testes completa e documentação atualizada
 
@@ -36,10 +36,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Tracer: registo em disco → `GET /api/ml/models` (API key) → abas Models e Evaluation reais (wave 1)
-- [ ] 01-02-PLAN.md — SHA-256 antes de `joblib.load`, legado "sem metadados", ids/ACTIVE validados, 503 com códigos, `loaded` (wave 2)
-- [ ] 01-03-PLAN.md — Aba Models: estados (legado, adotado, erros), avisos de ACTIVE/`loaded` e detalhe dos metadados (wave 2)
-- [ ] 01-04-PLAN.md — `python model_registry.py adopt` (cópia atómica para v1, ACTIVE só se não existir) e fluxo ponta a ponta (wave 3)
+- [x] 01-01-PLAN.md — Tracer: registo em disco → `GET /api/ml/models` (API key) → abas Models e Evaluation reais (wave 1)
+- [x] 01-02-PLAN.md — SHA-256 antes de `joblib.load`, legado "sem metadados", ids/ACTIVE validados, 503 com códigos, `loaded` (wave 2)
+- [x] 01-03-PLAN.md — Aba Models: estados (legado, adotado, erros), avisos de ACTIVE/`loaded` e detalhe dos metadados (wave 2)
+- [x] 01-04-PLAN.md — `python model_registry.py adopt` (cópia atómica para v1, ACTIVE só se não existir) e fluxo ponta a ponta (wave 3)
 **UI hint**: yes
 
 ### Phase 2: Avaliação ligada à versão
@@ -73,6 +73,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Registo de modelos ponta a ponta | 0/0 | Not started | - |
+| 1. Registo de modelos ponta a ponta | 4/4 | Complete | 2026-10-10 |
 | 2. Avaliação ligada à versão | 0/0 | Not started | - |
 | 3. Treino gera versões, testes e documentação | 0/0 | Not started | - |
