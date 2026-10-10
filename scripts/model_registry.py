@@ -787,6 +787,205 @@ def _write_active_atomic(root: Path, version_id: str) -> None:
                 pass
 
 
+def next_version_id(models_dir) -> str:
+    """
+    Retorna a próxima ID de versão no registo.
+
+    - Se o diretório não existir ou estiver vazio → `"v1"`.
+    - Caso contrário, `max(int(n[1:]) for n em itens que combinam VERSION_ID_RE
+      e que sejam pastas) + 1`, ou `"v1"` se não houver números.
+    - O resultado é validado por `validate_version_id` (evita `v10000` etc.).
+    - Usa `max+1`, **não** `count()`. O `os.replace` de pasta sobre pasta existente
+      dá `PermissionError [WinError 5]` no Windows; `count()` faria o id colidir
+      com uma versão apagada no meio.
+
+    Aplica `_root(models_dir)` antes de listar, nunca usa o `cwd`.
+    """
+    from model_registry import validate_version_id as _valid
+
+    root = _root(models_dir)
+    try:
+        nomes = [
+            n for n in root.iterdir()
+            if VERSION_ID_RE.fullmatch(n.name) and (root / n.name).is_dir()
+        ]
+        nums = [int(n.name[1:]) for n in nomes]
+        if nums:
+            result = f"v{max(nums) + 1}"
+        else:
+            result = "v1"
+    except FileNotFoundError:
+        result = "v1"
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+
+    validated = _valid(result)
+    return validated
+
+
+def build_trained_metadata(
+    *,
+    version_id,
+    contamination,
+    random_state,
+    n_estimators,
+    dataset_name,
+    dataset_size,
+    dataset_attacks,
+    synthetic,
+    library_versions,
+    model_type="IsolationForest",
+    trained_at=None,
+    created_at=None,
+) -> dict:
+    """
+    Constrói o dict `metadata` que o registo grava para uma versão treinada.
+
+    Todas as entradas são escalares — o `train_anomaly_model.py` calcula os
+    valores e o registo monta o dict. O registo é o dono do schema (D-01): quem
+    chama nunca escreve um `metadata.json` directamente, entrega os factos ao
+    registo e este o monta.
+
+    Diferenças obrigatórias face ao `adopt` (que usa `origin: "adopted"`,
+    `adopted: True`, `trained_at_estimated: True`):
+
+    - `origin: "trained"` — a data é conhecida, não estimada.
+    - `adopted: False`.
+    - `trained_at_estimated: False`.
+    - `evaluation: None` — a versão nova nasce sem avaliação (anti-padrão D-06 da Fase 2).
+    - `artifacts: {}` — os .pkl ainda não foram copiados para a pasta da versão.
+
+    O `dataset` reduz o nome a apenas o nome de ficheiro (`Path(dataset_name).name`)
+    sem separadores ou drive (constrangimento de schema 1). O `library_versions` é
+    copiado (`dict(library_versions)`) para que uma mutação posterior do chamador
+    não altere o que já foi escrito em disco.
+
+    Valida `synthetic` (tem de ser `True`, `False` ou `None`; outro valor levanta
+    `ValueError` — diferencia "não declarado" de um booleano inventado).
+    """
+    if synthetic not in (True, False, None):
+        raise ValueError(
+            "synthetic deve ser True, False ou None; valores inventados não são permitidos"
+        )
+
+    validated_version_id = validate_version_id(version_id)
+
+    if trained_at is None:
+        trained_at = datetime.now(timezone.utc).isoformat()
+    if created_at is None:
+        created_at = datetime.now(timezone.utc).isoformat()
+
+    parameters = {"contamination": contamination, "random_state": random_state, "n_estimators": n_estimators}
+    dataset = {
+        "name": Path(dataset_name).name if isinstance(dataset_name, str) else dataset_name,
+        "size": dataset_size,
+        "attacks": dataset_attacks,
+        "synthetic": synthetic,
+    }
+    library_versions_copy = dict(library_versions)
+
+    return {
+        "schema_version": 1,
+        "version": validated_version_id,
+        "origin": "trained",
+        "adopted": False,
+        "created_at": created_at,
+        "trained_at": trained_at,
+        "trained_at_estimated": False,
+        "model_type": model_type,
+        "parameters": parameters,
+        "dataset": dataset,
+        "library_versions": library_versions_copy,
+        "artifacts": {},
+        "evaluation": None,
+    }
+
+
+def register_trained_version(
+    models_dir,
+    sources,
+    *,
+    contamination,
+    random_state,
+    n_estimators,
+    dataset_name,
+    dataset_size,
+    dataset_attacks,
+    synthetic,
+    library_versions,
+    model_type="IsolationForest",
+    trained_at=None,
+    created_at=None,
+) -> dict:
+    """
+    Regista uma versão treinada no registo, seguindo a ordem de D-03:
+
+    1. `root = _root(models_dir)` — resolve o diretório base.
+    2. `vid = next_version_id(root)` — obtém a próxima ID (sempre `max+1`, nunca `count()`).
+    3. `meta = build_trained_metadata(...)` — monta o dict de metadados com as 13 chaves.
+    4. Valida `sources`: tem de ter **exactamente** as chaves de `ARTIFACT_FILES` e mais nenhuma.
+       Falta uma → `artifact_missing`; extra → `artifact_missing` (nome de ficheiro vindo do utilizador).
+    5. `_materialize_version(root, vid, sources, meta)` — copia os .pkl, verifica SHA-256 cópia↔original,
+       escreve o metadata.json dentro da pasta da versão.
+    6. **Confirmação (o passo que falta ao `adopt` e que o D-03 exige):** `confirmado =
+       load_metadata(root/vid, vid)` e `status = _verify_artifacts(root/vid, confirmado)`.
+       Se `status != "ok"` ⇒ `raise ModelRegistryError(status)`. Melhor falhar aqui do que deixar
+       um ACTIVE a apontar para uma versão que não verifica.
+    7. `_write_active_atomic(root, vid)` — **sobrescreve sempre** (ao contrário do `adopt`, que só escreve
+       se não existir nenhum). Este passo grava `models/ACTIVE` com o novo vid.
+    8. Devolve `{"version": vid, "metadata": confirmado, "active_written": True}` — `confirmado` é o
+       dict relido do disco (com os artifacts), não o dict em memória.
+
+    Se algum dos passos 6 ou 7 falhar, a versão `vN` fica criada e visível na listagem, mas **não**
+    ativa; a versão anterior continua ativa e intacta; voltar a correr o treino cria `vN+1` (resposta
+    à OPEN QUESTION 3 da pesquisa: aceitar a órfã visível e inofensiva em vez de retomada automática).
+
+    O dicionário `sources` deve ser um mapeamento `{MODEL_FILE: caminho_modelo, SCALER_FILE: caminho_scaler}`
+    a apontar para ficheiros .pkl que **estão fora** da pasta do registo (ex.: um `TemporaryDirectory`).
+    """
+    root = _root(models_dir)
+
+    # 2. próxima ID
+    vid = next_version_id(root)
+
+    # 3. monta metadados
+    meta = build_trained_metadata(
+        version_id=vid,
+        contamination=contamination,
+        random_state=random_state,
+        n_estimators=n_estimators,
+        dataset_name=dataset_name,
+        dataset_size=dataset_size,
+        dataset_attacks=dataset_attacks,
+        synthetic=synthetic,
+        library_versions=library_versions,
+        model_type=model_type,
+        trained_at=trained_at,
+        created_at=created_at,
+    )
+
+    # 4. valida sources — tem de ter exacto as chaves de ARTIFACT_FILES
+    expected_keys = set(model_registry.ARTIFACT_FILES)
+    actual_keys = set(sources.keys())
+    if actual_keys != expected_keys:
+        raise ModelRegistryError("artifact_missing")
+
+    # 5. materializa versão (copia .pkl, verifica hash, escreve metadata)
+    _materialize_version(root, vid, sources, meta)
+
+    # 6. confirmação pós-escrita (passo 4 de D-03)
+    confirmado = load_metadata(root / vid, vid)
+    status = _verify_artifacts(root / vid, confirmado)
+    if status != "ok":
+        raise ModelRegistryError(status)
+
+    # 7. escreve ACTIVE (sobrescreve sempre)
+    _write_active_atomic(root, vid)
+
+    # 8. devolve resultado
+    return {"version": vid, "metadata": confirmado, "active_written": True}
+
+
 def _resume_adoption(root: Path) -> dict:
     """
     Recupera um `adopt` interrompido entre o `os.replace` da `v1` e a escrita

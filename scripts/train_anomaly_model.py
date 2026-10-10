@@ -18,6 +18,8 @@ Uso:
 
 import argparse
 import json
+import platform
+import tempfile
 from pathlib import Path
 
 import joblib
@@ -25,12 +27,13 @@ from sklearn.ensemble import IsolationForest
 from sklearn.metrics import f1_score, precision_score, recall_score
 from sklearn.preprocessing import StandardScaler
 
+import model_registry
+
 from feature_extractor import extract_features, label_with_attack_log, load_attack_log, vectorize
 
 DEFAULT_EVENTS_PATH = Path(__file__).parent / "sample_events_real.json"
 DEFAULT_ATTACK_LOG_PATH = Path(__file__).parent / "sample_attack_log.jsonl"
 DEFAULT_MODEL_DIR = Path(__file__).parent / "models"
-DEFAULT_REPORT_PATH = Path(__file__).parent / "ml_training_report.json"
 
 
 def load_dataset(events_path: Path, attack_log_path: Path) -> list[dict]:
@@ -48,7 +51,7 @@ def train_model(vectors: list[list[float]], contamination: float = 0.2, random_s
     return model, scaler
 
 
-def evaluate(feature_rows: list[dict], model, scaler, events_path: Path = DEFAULT_EVENTS_PATH) -> dict:
+def evaluate(feature_rows: list[dict], model, scaler, dataset_origin: str = "unknown") -> dict:
     vectors = vectorize(feature_rows)
     scaled = scaler.transform(vectors)
     predictions = model.predict(scaled)  # -1 = anómalo, 1 = normal
@@ -69,16 +72,27 @@ def evaluate(feature_rows: list[dict], model, scaler, events_path: Path = DEFAUL
     rule_only = sum(1 for m, r in zip(ml_flags, rule_flags) if r and not m)
     neither = sum(1 for m, r in zip(ml_flags, rule_flags) if not m and not r)
 
-    is_synthetic = Path(events_path).resolve() == DEFAULT_EVENTS_PATH.resolve()
-    caveat = (
-        "Métricas calculadas sobre dados sintéticos (sample_events_real.json), "
-        "não validadas contra o laboratório Wazuh real."
-        if is_synthetic else
-        f"Métricas calculadas sobre dados reais exportados do laboratório Wazuh "
-        f"({Path(events_path).name}) — ainda assim, dataset pequeno "
-        f"({len(feature_rows)} eventos), não é uma estimativa robusta de taxa de "
-        f"deteção em produção."
-    )
+    # Tri-estado de origem: declarado pelo utilizador via --dataset-origin
+    # Substituí a heurística de caminho pelo lookup explícito
+    sintetico = {"synthetic": True, "real": False}.get(dataset_origin)
+    if sintetico is True:
+        caveat = (
+            "Métricas calculadas sobre dados sintéticos (sample_events_real.json), "
+            "não validadas contra o laboratório Wazuh real."
+        )
+    elif sintetico is False:
+        caveat = (
+            f"Métricas calculadas sobre dados reais exportados do laboratório Wazuh "
+            f"({len(feature_rows)} eventos) — ainda assim, dataset pequeno "
+            f"não é uma estimativa robusta de taxa de deteção em produção."
+        )
+    else:
+        # unknown / não declarado
+        caveat = (
+            "A origem do dataset não foi declarada (--dataset-origin); "
+            "estas métricas são calculadas sobre o próprio conjunto de treino "
+            "e não são uma avaliação."
+        )
 
     return {
         "total_events": len(feature_rows),
@@ -90,8 +104,19 @@ def evaluate(feature_rows: list[dict], model, scaler, events_path: Path = DEFAUL
     }
 
 
-def save_model(model, scaler, model_dir: Path = DEFAULT_MODEL_DIR) -> None:
-    model_dir.mkdir(parents=True, exist_ok=True)
+def save_model(model, scaler, model_dir: Path) -> None:
+    """
+    Grava os dois ficheiros .pkl no diretório indicado.
+
+    O parâmetro `model_dir` é **obrigatório** (sem default para `models/`).
+    Um `joblib.dump` para dentro de `models/` é o Pitfall 1 (sem hash,
+    sem temporário, sem confirmação, e um `Ctrl-C` deixa um `.pkl` truncado
+    que o `joblib.load` não consegue explicar). O registo (model_registry)
+    resolve o destino final; este script apenas garante que os ficheiros
+    estão num diretório seguro fora do caminho do registo.
+    """
+    if not model_dir.is_dir():
+        model_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, model_dir / "isolation_forest.pkl")
     joblib.dump(scaler, model_dir / "scaler.pkl")
 
@@ -100,24 +125,33 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--events", default=str(DEFAULT_EVENTS_PATH))
     parser.add_argument("--attack-log", default=str(DEFAULT_ATTACK_LOG_PATH))
-    parser.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR))
-    parser.add_argument("--report", default=str(DEFAULT_REPORT_PATH))
+    parser.add_argument("--models-dir", required=True)
+    parser.add_argument("--dataset-origin", default="unknown", choices=["synthetic", "real", "unknown"])
+    parser.add_argument("--report", default=None)
     parser.add_argument("--contamination", type=float, default=0.2)
+
     args = parser.parse_args()
+
+    models_dir = Path(args.models_dir)
+    if not models_dir.is_dir():
+        parser.error(f"--models-dir must be an existing directory, got: {args.models_dir}")
 
     feature_rows = load_dataset(Path(args.events), Path(args.attack_log))
     vectors = vectorize(feature_rows)
 
     model, scaler = train_model(vectors, contamination=args.contamination)
-    save_model(model, scaler, Path(args.model_dir))
+    save_model(model, scaler, models_dir)
 
-    report = evaluate(feature_rows, model, scaler, events_path=Path(args.events))
-    with open(args.report, "w", encoding="utf-8") as handle:
-        json.dump(report, handle, ensure_ascii=False, indent=2)
+    report = evaluate(feature_rows, model, scaler, dataset_origin=args.dataset_origin)
+    with open(args.report, "w", encoding="utf-8") if args.report else None as handle:
+        if args.report:
+            json.dump(report, handle, ensure_ascii=False, indent=2)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    print(f"\nModelo guardado em: {args.model_dir}")
-    print(f"Relatório guardado em: {args.report}")
+    print(f"\nModelo guardado em: {models_dir}")
+
+    if not args.report:
+        print("\n(dica: use --report <ficheiro> para gravar o resumo como artefacto avulso)")
 
 
 if __name__ == "__main__":

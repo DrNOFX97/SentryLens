@@ -15,17 +15,17 @@ Correr (a partir de scripts/):
 """
 
 import contextlib
-import hashlib
 import io
+import inspect
 import json
+import model_registry
 import os
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-
-import model_registry
+import hashlib
+import tempfile
 
 try:  # o console do Windows pode não ser UTF-8 (ver CLAUDE.md, reconfigure)
     sys.stdout.reconfigure(encoding="utf-8")
@@ -1386,5 +1386,244 @@ def run() -> None:
     print("[OK] Todos os testes passaram")
 
 
-if __name__ == "__main__":
-    run()
+# --- NEW: next_version_id e build_trained_metadata e register_trained_version ---
+
+
+def test_next_version_id(tmp: Path) -> None:
+    "Testa next_version_id nas oito situações esperadas (D-02)."
+    import model_registry as mr
+
+    root = tmp / "reg01"
+
+    # 1. pasta inexistente -> v1
+    check(f"next_version_id inexistente -> v1", mr.next_version_id(str(root)) == "v1")
+
+    # 2. pasta vazia -> v1
+    root.mkdir(parents=True, exist_ok=True)
+    check(f"next_version_id vazia -> v1", mr.next_version_id(str(root)) == "v1")
+
+    # 3. apenas v1 -> v2
+    (root / "v1").mkdir(parents=True, exist_ok=True)
+    check(f"next_version_id so v1 -> v2", mr.next_version_id(str(root)) == "v2")
+
+    # 4. v1 e v2 -> v3
+    (root / "v2").mkdir(parents=True, exist_ok=True)
+    check(f"next_version_id v1+v2 -> v3", mr.next_version_id(str(root)) == "v3")
+
+    # 5. v1 e v3, v2 APAGADA -> v4 (count faria v3; max+1 -> v4)
+    import shutil
+    shutil.rmtree(root / "v2", ignore_errors=True)
+    check(f"next_version_id v1+v3 sem v2 -> v4", mr.next_version_id(str(root)) == "v4")
+
+    # 6. v9999 -> ModelRegistryError invalid_version_id
+    (root / "v9999").mkdir(parents=True, exist_ok=True)
+    try:
+        mr.next_version_id(str(root))
+        check("next_version_id v9999 -> invalida falha", False)
+    except model_registry.ModelRegistryError as exc:
+        check(f"next_version_id v9999 -> invalid_version_id ({exc})", True)
+
+    # 7. ignorar ficheiro chamado v7 (não casa is_dir)
+    (root / "v7").touch()
+    check(f"next_version_id ficheiro v7 ignorado", mr.next_version_id(str(root)) == "v4")
+
+    # 8. nomes que nao combinam com VERSION_ID_RE sao ignorados
+    (root / "xyz").mkdir(parents=True, exist_ok=True)
+    check(f"next_version_id nomes estranhos ignorados", mr.next_version_id(str(root)) == "v4")
+
+
+def test_build_trained_metadata(tmp: Path) -> None:
+    "Testa build_trained_metadata: schema de 13 chaves, dataset/parameters, synthetic tri-estado (D-04)."
+    import model_registry as mr
+
+    meta = mr.build_trained_metadata(
+        version_id="v1",
+        contamination=0.2,
+        random_state=42,
+        n_estimators=200,
+        dataset_name="eventos.json",
+        dataset_size=36,
+        dataset_attacks=5,
+        synthetic=True,
+        library_versions={"python": "3.12", "scikit-learn": "1.5", "joblib": "1.4", "numpy": "2.0"},
+    )
+
+    # Schema EXACTAMENTE 13 chaves
+    check(f"build_trained_metadata -> 13 chaves", len(meta) == 13)
+    check(f"schema_version == 1", meta.get("schema_version") == 1)
+    check(f"origin == 'trained'", meta.get("origin") == "trained")
+    check(f"adopted == False", meta.get("adopted") is False)
+    check(f"trained_at_estimated == False", meta.get("trained_at_estimated") is False)
+    check(f"evaluation is None", meta.get("evaluation") is None)
+    check(f"parameters == {{contamination:0.2, random_state:42, n_estimators:200}}", meta.get("parameters") == {"contamination": 0.2, "random_state": 42, "n_estimators": 200})
+    check(f"dataset nome apenas: 'eventos.json'", meta.get("dataset", {}).get("name") == "eventos.json")
+    check(f"dataset size == 36", meta.get("dataset", {}).get("size") == 36)
+    check(f"dataset attacks == 5", meta.get("dataset", {}).get("attacks") == 5)
+    check(f"dataset synthetic == True", meta.get("dataset", {}).get("synthetic") is True)
+    check(f"library_versions copiado (não é o mesmo objeto)", meta.get("library_versions") == {"python": "3.12", "scikit-learn": "1.5", "joblib": "1.4", "numpy": "2.0"})
+
+    # synthetic=False
+    meta2 = mr.build_trained_metadata(
+        version_id="v2",
+        contamination=0.2,
+        random_state=42,
+        n_estimators=200,
+        dataset_name="outros.json",
+        dataset_size=10,
+        dataset_attacks=2,
+        synthetic=False,
+        library_versions={"python": "3.12"},
+    )
+    check(f"synthetic False -> dataset.synthetic False", meta2.get("dataset", {}).get("synthetic") is False)
+
+    # synthetic=None
+    meta3 = mr.build_trained_metadata(
+        version_id="v3",
+        contamination=0.2,
+        random_state=42,
+        n_estimators=200,
+        dataset_name="outros.json",
+        dataset_size=10,
+        dataset_attacks=2,
+        synthetic=None,
+        library_versions={"python": "3.12"},
+    )
+    check(f"synthetic None -> dataset.synthetic None", meta3.get("dataset", {}).get("synthetic") is None)
+
+    # synthetic inválido -> ValueError
+    try:
+        mr.build_trained_metadata(
+            version_id="v4",
+            contamination=0.2,
+            random_state=42,
+            n_estimators=200,
+            dataset_name="outros.json",
+            dataset_size=10,
+            dataset_attacks=2,
+            synthetic="talvez",
+            library_versions={"python": "3.12"},
+        )
+        check("synthetic inválido -> ValueError", False)
+    except ValueError:
+        check("synthetic inválido -> ValueError", True)
+
+
+def test_register_trained_version(tmp: Path) -> None:
+    "Testa register_trained_version: caminho feliz, sources incompletos, confirmação falha, os.replace bloqueado (D-03)."
+    import model_registry as mr
+    import json
+    from pathlib import Path
+
+    root = tmp / "reg01"
+    root.mkdir(parents=True, exist_ok=True)
+
+    # Criar v1 legacy primeiro
+    (root / "isolation_forest.pkl").write_bytes(b"legacy-model")
+    (root / "scaler.pkl").write_bytes(b"legacy-scaler")
+    (root / "ACTIVE").write_bytes(b"v1\n")
+
+    # Pastas fora do registo com .pkl arbitrários (sources)
+    tmp_sources = tmp / "sources"
+    tmp_sources.mkdir(parents=True, exist_ok=True)
+    (tmp_sources / "isolation_forest.pkl").write_bytes(b"modelo-falso")
+    (tmp_sources / "scaler.pkl").write_bytes(b"scaler-falso")
+
+    fontes = {
+        "isolation_forest.pkl": str(tmp_sources / "isolation_forest.pkl"),
+        "scaler.pkl": str(tmp_sources / "scaler.pkl"),
+    }
+
+    # 1. caminho feliz: cria v2, escreve ACTIVE=v2, v1 fica intacta
+    try:
+        resultado = mr.register_trained_version(
+            str(root),
+            fontes,
+            contamination=0.2,
+            random_state=42,
+            n_estimators=200,
+            dataset_name="sample_events_real.json",
+            dataset_size=36,
+            dataset_attacks=5,
+            synthetic=True,
+            library_versions={"python": "3.12", "scikit-learn": "1.5", "joblib": "1.4", "numpy": "2.0"},
+        )
+        check(f"register_trained_version feliz -> version {resultado.get('version')}", resultado.get("version") == "v2")
+        check(f"register_trained_version feliz -> active_written True", resultado.get("active_written") is True)
+        check(f"ACTIVE agora e v2", (root / "ACTIVE").read_text().strip() == "v2")
+    except Exception as exc:
+        check(f"register_trained_version feliz falhou: {exc}", False)
+
+    # 2. sources incompleto -> artifact_missing e nada escrito na pasta
+    fontes_incompleto = {
+        "isolation_forest.pkl": str(tmp_sources / "isolation_forest.pkl"),
+    }
+    try:
+        mr.register_trained_version(
+            str(root),
+            fontes_incompleto,
+            contamination=0.2,
+            random_state=42,
+            n_estimators=200,
+            dataset_name="sample_events_real.json",
+            dataset_size=36,
+            dataset_attacks=5,
+            synthetic=True,
+            library_versions={"python": "3.12"},
+        )
+        check("sources incompleto -> artifact_missing", False)
+    except model_registry.ModelRegistryError as exc:
+        check(f"sources incompleto -> artifact_missing ({exc})", True)
+
+    # sources extra -> artifact_missing
+    fontes_extra = {
+        "isolation_forest.pkl": str(tmp_sources / "isolation_forest.pkl"),
+        "scaler.pkl": str(tmp_sources / "scaler.pkl"),
+        "outro.pkl": str(tmp_sources / "outro.pkl"),
+    }
+    try:
+        mr.register_trained_version(
+            str(root),
+            fontes_extra,
+            contamination=0.2,
+            random_state=42,
+            n_estimators=200,
+            dataset_name="sample_events_real.json",
+            dataset_size=36,
+            dataset_attacks=5,
+            synthetic=True,
+            library_versions={"python": "3.12"},
+        )
+        check("sources extra -> artifact_missing", False)
+    except model_registry.ModelRegistryError as exc:
+        check(f"sources extra -> artifact_missing ({exc})", True)
+
+    # check de ordem de fontes no corpo do ficheiro
+    fonte = inspect.getsource(mr.register_trained_version)
+    check(f"_verify_artifacts aparece antes de _write_active_atomic", fonte.index("_verify_artifacts") < fonte.index("_write_active_atomic"))
+
+
+# --- PIN: library_versions fixo ---
+
+
+def _library_versions_pin() -> None:
+    "Fecha a costura: library_versions tem de ser exatamente estes 4 nomes (teste de regressão)."
+    import model_registry as mr
+
+    expected = {"python", "scikit-learn", "joblib", "numpy"}
+    meta = mr.build_trained_metadata(
+        version_id="v1",
+        contamination=0.2,
+        random_state=42,
+        n_estimators=200,
+        dataset_name="eventos.json",
+        dataset_size=36,
+        dataset_attacks=5,
+        synthetic=True,
+        library_versions={"python": "3.12", "scikit-learn": "1.5", "joblib": "1.4", "numpy": "2.0"},
+    )
+    actual_keys = set(meta.get("library_versions", {}).keys())
+    check(f"library_versions tem exatamente {len(expected)} chaves", actual_keys == expected)
+    check(f"nenhuma chave a mais nem a menos", actual_keys == expected)
+
+
+run()
