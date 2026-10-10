@@ -17,7 +17,7 @@ O backend do R9 é só de leitura: treinar a partir do dashboard e comparar vers
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Registo de modelos ponta a ponta** - Versões em `models/vN`, legado, `adopt`, carregamento com SHA-256, `GET /api/ml/models` e aba Models
-- [ ] **Phase 2: Avaliação ligada à versão** - Avaliação guardada no `metadata.json`, comando `evaluate` e aba Evaluation (ML vs regras)
+- [x] **Phase 2: Avaliação ligada à versão** - Avaliação guardada no `metadata.json`, comando `evaluate` e aba Evaluation (ML vs regras)
 - [ ] **Phase 3: Treino gera versões, testes e documentação** - Cada treino cria e ativa uma versão nova; suite de testes completa e documentação atualizada
 
 ## Phase Details
@@ -55,16 +55,17 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Tracer: `resolve_version_artifacts` → `evaluate` → `metadata.json` → API → `ml_evaluation.js` (wave 1)
-- [ ] 02-02-PLAN.md — Motor de avaliação (precisão/recall/F1, limiares de amostra, comparabilidade) e suite própria (wave 2)
-- [ ] 02-03-PLAN.md — Exportador bruto do Indexer, testado sem o laboratório ligado (wave 2)
-- [ ] 02-04-PLAN.md — Aba Evaluation completa: dataset, origem, aviso de amostra e concordância ao vivo (wave 3)
+- [x] 02-01-PLAN.md — Tracer: `resolve_version_artifacts` → `evaluate` → `metadata.json` → API → `ml_evaluation.js` (wave 1)
+- [x] 02-02-PLAN.md — Motor de avaliação (precisão/recall/F1, limiares de amostra, comparabilidade) e suite própria (wave 2)
+- [x] 02-03-PLAN.md — Exportador bruto do Indexer, testado sem o laboratório ligado (wave 2)
+- [x] 02-04-PLAN.md — Aba Evaluation completa: dataset, origem, aviso de amostra e concordância ao vivo (wave 3)
 **Decisões:** `02-CONTEXT.md` (D-01..D-11, decididas pelo utilizador em 2026-10-10)
 **UI hint**: yes
 
-> **Nota de execução:** a avaliação real sobre dados do laboratório exige o Wazuh Indexer ligado
-> (está desligado em 2026-10-10). Os testes da fase não dependem dele; a execução do `evaluate`
-> sobre dados reais é um passo de execução, com o comando exacto nos `<human-check>` dos planos.
+> **Nota de execução:** a avaliação real sobre dados do laboratório exige o Wazuh Indexer ligado.
+> O dataset histórico (`scripts/snapshots/real_events_2026-09-14.json`) **foi encontrado**, mas o
+> `attack_log.jsonl` só cobre 2026-10-06 e não o rotula — dá 0 ataques, recall 0 por definição.
+> Para uma avaliação rotulada a sério é preciso lançar os ataques e exportar na mesma janela.
 
 ### Phase 3: Treino gera versões, testes e documentação
 **Goal:** Cada treino deixa uma versão rastreável e ativa sem passos manuais, e o marco R9 fica fechado com testes completos e documentação a refletir o registo de modelos.
@@ -85,5 +86,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Registo de modelos ponta a ponta | 4/4 | Complete | 2026-10-10 |
-| 2. Avaliação ligada à versão | 0/4 | Planned | - |
+| 2. Avaliação ligada à versão | 4/4 | Complete | 2026-10-10 |
 | 3. Treino gera versões, testes e documentação | 0/0 | Not started | - |

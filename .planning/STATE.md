@@ -1,12 +1,12 @@
 ---
 gsd_state_version: '1.0'
-status: planned
+status: phase-complete
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 8
-  completed_plans: 4
-  percent: 33
+  completed_plans: 8
+  percent: 67
 ---
 
 # Project State
@@ -16,16 +16,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** Phase 2 — Avaliação ligada à versão (planeada, 4 planos prontos para executar)
+**Current focus:** Phase 3 — Treino gera versões, testes e documentação (por planear)
 
 ## Current Position
 
-Phase: 2 of 3 (Avaliação ligada à versão)
-Plan: 0 of 4 in current phase
-Status: Ready to execute
-Last activity: 2026-10-10 — Fase 2 planeada (4 planos, 3 waves; decisões D-01..D-11 do utilizador)
+Phase: 2 of 3 complete (Avaliação ligada à versão) — next is Phase 3
+Plan: 4 of 4 in Phase 2
+Status: Phase complete, ready to plan Phase 3
+Last activity: 2026-10-10 — Fase 2 executada (4 planos, 3 waves), 38/38 testes verdes
 
-Progress: [░░░░░░░░░░] 33%
+Progress: [██████░░░░] 67%
 
 ## Performance Metrics
 
@@ -39,10 +39,11 @@ Progress: [░░░░░░░░░░] 33%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Registo de modelos ponta a ponta | 4 | 4 | 1 sessao |
+| 2. Avaliação ligada à versão | 4 | 4 | 1 sessao |
 
 **Recent Trend:**
-- Last 5 plans: 01-01, 01-02, 01-03, 01-04
-- Trend: 4 planos numa sessao (wave 1 → 2 → 3)
+- Last 5 plans: 02-01, 02-02, 02-03, 02-04
+- Trend: 8 planos em duas sessões (2 fases completas)
 
 *Updated after each plan completion*
 
@@ -65,11 +66,16 @@ Decisões recentes que afetam o trabalho atual:
 - [Fase 2]: Aviso de amostra pequena com dois limiares nomeados: `MIN_EVENTS = 50`, `MIN_ATTACKS = 10` (D-05).
 - [Fase 2]: `evaluation` fica fora de `METADATA_PUBLIC_KEYS` e a API expõe uma sub-projeção (`EVALUATION_PUBLIC_KEYS`), fechando o risco residual T-01-14 (D-07, D-08).
 - [Fase 2]: A aba Evaluation passa a `ml_evaluation.js` (prefixo `mle`), revertendo a implementação da Fase 1 que a tinha posto em `ml_models.js` (D-09).
+- [Fase 2]: Verificado na prática: o `comparison` do `evaluate` sobre o dataset real dá 5/2/3/25, **idêntico** ao `ml_training_report.json` histórico — as métricas são comparáveis com as do README (D-04).
+- [Fase 2]: `export_raw_events.py` exporta documentos brutos num formato que `feature_extractor.extract_features` lê; provado por um teste que escreve o ficheiro com um cliente real e só depois o passa ao extractor.
+- [Fase 2]: `/api/ml-anomalies` ganhou `alerts_fetched` e `alerts_truncated` (aditivo; nenhum consumidor existente foi quebrado).
 
 ### Pending Todos
 
-- **Verificação humana pendente na Fase 1 (D9/D10 nos três SUMMARY):** abrir o dashboard real e confirmar os badges, o detalhe por teclado e o aviso de reinício do backend. Os testes cobrem a camada pura em `node:vm`, não o browser.
-- **Fase 2 por executar** (`/gsd-execute-phase 2`). A execução da avaliação real sobre dados do laboratório exige o Wazuh Indexer ligado — em 2026-10-10 está desligado (9200 e 55000 fechadas); os testes da fase não dependem dele.
+- **Verificação humana pendente nas Fases 1 e 2:** abrir o dashboard real e confirmar os badges, o detalhe por teclado, a Evaluation e o aviso de reinício do backend. Os testes cobrem a camada pura em `node:vm`, não o browser.
+- **A exportação real do Wazuh continua por executar** (Indexer desligado). Comandos exactos em `02-VERIFICATION.md`.
+- **O dataset histórico foi encontrado** (`scripts/snapshots/real_events_2026-09-14.json`, 1,7 MB, não versionado) mas **não é rotulável**: o `attack_log.jsonl` só cobre 2026-10-06 e a janela do dataset é 2026-09-14 15:22–15:34. Rotulado contra ele dá 0 ataques. Para uma avaliação a sério é preciso lançar os ataques e exportar na mesma janela — trabalho de laboratório, não de código.
+- Fase 3 por planear (`/gsd-plan-phase 3`): treino a gerar versões, suite completa e documentação.
 
 ### Blockers/Concerns
 
@@ -77,6 +83,8 @@ Decisões recentes que afetam o trabalho atual:
 - O marco R9 não tem token de versão `vX.Y` (é "R9" do Roadmap v2); ferramentas que procuram milestones por `vX.Y` podem não o reconhecer.
 - **D-04 (aceita, não resolvida):** o SHA-256 deteta corrupção/troca acidental mas **não autentica** — quem escreve em `models/` reescreve o `metadata.json`. O legado carrega sem verificação até ao `adopt`. A documentação da Fase 3 tem de manter esta honestidade.
 - O `run_all_tests.py` tem timeout de 300 s por ficheiro; numa máquina fria o `test_attack_library.py` pode ir a ~190 s.
+- **Costura da Fase 2:** as 14 chaves de `evaluation` estão escritas à mão em dois ficheiros (motor e registo), presas por comparação em `test_ml_models_api.py`. Mudar a lista obriga a migrar os `metadata.json` gravados e `schema_version` continua 1.
+- `docs/ML.md:71-75` está desatualizado: diz que o gap do formato de exportação "fica para uma sessão futura" — já foi resolvido pelo `export_raw_events.py`. A correcção é do DOC-01 (Fase 3).
 
 ## Deferred Items
 
@@ -89,8 +97,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-10
-Stopped at: Fase 1 executada e verificada; Fase 2 planeada (4 planos, 3 waves, decisões D-01..D-11)
+Stopped at: Fases 1 e 2 do R9 executadas e verificadas (8 planos); Fase 3 por planear
 Resume file: None
 
-Próximo passo natural: `/gsd-execute-phase 2`. A verificação humana da aba Models/Evaluation
-(num browser real) e a avaliação real sobre dados do Wazuh continuam pendentes.
+Próximo passo natural: `/gsd-plan-phase 3` (treino gera versões, testes e documentação).
+Ficam pendentes a verificação humana no browser e a exportação real do Wazuh.

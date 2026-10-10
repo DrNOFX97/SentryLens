@@ -72,13 +72,13 @@ Preenchido na criação do roadmap (2026-10-09).
 | REG-04 | Phase 3 | Pending |
 | SEC-01 | Phase 1 | Complete (01-02) |
 | SEC-02 | Phase 1 | Complete (01-01, 01-02) |
-| EVAL-01 | Phase 2 | Pending |
-| EVAL-02 | Phase 2 | Pending |
-| EVAL-03 | Phase 2 | Pending |
+| EVAL-01 | Phase 2 | Complete (02-01, 02-02) |
+| EVAL-02 | Phase 2 | Complete (02-01, 02-03) |
+| EVAL-03 | Phase 2 | Complete (02-01, 02-02, 02-04) |
 | API-01 | Phase 1 | Complete (01-01) |
 | API-02 | Phase 1 | Complete (01-01, 01-02, 01-03) |
 | UI-01 | Phase 1 | Complete (01-01, 01-03) |
-| UI-02 | Phase 2 | Pending |
+| UI-02 | Phase 2 | Complete (02-01, 02-04) |
 | UI-03 | Phase 1 | Complete (01-01) |
 | TST-01 | Phase 3 | Pending |
 | DOC-01 | Phase 3 | Pending |
@@ -90,4 +90,4 @@ Preenchido na criação do roadmap (2026-10-09).
 
 ---
 *Requirements defined: 2026-10-09*
-*Last updated: 2026-10-10 after Phase 1 completion*
+*Last updated: 2026-10-10 after Phase 2 completion*
