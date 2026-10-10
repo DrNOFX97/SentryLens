@@ -577,7 +577,7 @@ def _materialize_version(root: Path, version_id: str, sources: dict, meta: dict)
     NÃO casa `VERSION_ID_RE`, logo uma versão a meio é invisível para
     `build_models_report` mesmo que o processo seja interrompido entre a
     cópia e o `os.replace`. O `finally` apaga a temporária em qualquer
-   outcome — o disco nunca fica com sobras `v1.tmp-*`.
+    caso — o disco nunca fica com sobras `v1.tmp-*`.
 
     Os originais são só lidos: `shutil.copy2` copia e preserva o mtime (a data
     de treino estimada sai daqui), e o SHA-256 é conferido entre a cópia e o
