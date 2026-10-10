@@ -1,11 +1,13 @@
 """
 Registo de versões de modelo ML em disco (marco R9) — fonte única de
-verdade sobre "que versões existem, qual está ativa e o que há em cada pasta".
+verdade sobre "que versões existem, qual está ativa e os artefactos batem
+com o que o metadata.json diz".
 
 Módulo de domínio puro, no mesmo padrão de lifecycle.py / attack_registry.py:
 só stdlib, sem HTTP, sem FastAPI e sem joblib. Nunca desserializa pickle —
-ler os metadados não é carregar o modelo, e carregar o modelo é o único ponto
-com `joblib.load` do projeto (ml_anomalies.load_model, Fase 2).
+ler os metadados e verificar um SHA-256 não é carregar o modelo, e carregar o
+modelo é o único ponto com `joblib.load` do projeto (ml_anomalies.load_model,
+que pede aqui os bytes já verificados).
 
 Layout em disco (ver SKELETON.md):
 
@@ -13,6 +15,7 @@ Layout em disco (ver SKELETON.md):
     scripts/models/vN/isolation_forest.pkl
     scripts/models/vN/scaler.pkl
     scripts/models/vN/metadata.json          schema 1
+    scripts/models/{isolation_forest,scaler}.pkl   o "legado", sem metadados
 
 Tudo o que vem do disco é dado não confiável (pode ter sido editado à mão
 ou estar corrompido), por isso:
@@ -27,14 +30,26 @@ ou estar corrompido), por isso:
       decodificado em utf-8-sig (um `echo v1 > ACTIVE` no PowerShell 5.1
       grava UTF-16, que tem de falhar em vez de ser adivinhado);
     - `metadata.json` tem um teto de MAX_METADATA_BYTES;
+    - os bytes de um `.pkl` são lidos UMA vez e o SHA-256 é calculado sobre
+      esses mesmos bytes, que são os que `joblib.load` vai receber — não há
+      janela entre "verificar" e "usar" (SEC-01, ameaças T-01-07/T-01-08);
     - qualquer problema é devolvido com um código da lista fechada
       ERROR_CODES — nunca um caminho nem texto de exceção, porque é o código
       que vai para o HTTP (API-02).
+
+Limite honesto desta verificação (D-04): o SHA-256 deteta corrupção, troca
+acidental e ficheiros alheios sem metadados, mas NÃO autentica quem escreveu
+— quem tem escrita em `models/` reescreve também o `metadata.json`. HMAC ou
+assinatura ficam fora do âmbito do R9; ver README/ROADMAP_STATUS.
 """
 
+import hashlib
+import hmac
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 # --- Contrato em disco -------------------------------------------------------
 
@@ -51,6 +66,19 @@ MAX_METADATA_BYTES = 65536
 
 SCHEMA_VERSION = 1
 LEGACY_LABEL = "legado, sem metadados"
+
+# Ordem importa: ARTIFACT_FILES[0] é o modelo e [1] o scaler, e é essa ordem
+# que vai para ArtifactSource.model_bytes / .scaler_bytes.
+MODEL_FILE, SCALER_FILE = ARTIFACT_FILES
+
+# Mensagem do FileNotFoundError do carregamento, sem nenhum caminho dentro
+# (API-02: o `detail` da resposta HTTP levava `str(e)`, que antes incluía a
+# pasta de modelos). A mensagem PT vive aqui e no browser (MLM_ERROR_TEXT);
+# a razão fica no log.
+NO_MODEL_MESSAGE = (
+    "Modelo de ML não encontrado nem ativo. Corre 'python train_anomaly_model.py' "
+    "para o gerar, ou 'python model_registry.py adopt' se já existir um modelo legado."
+)
 
 # `fullmatch` e nunca `match` com `$`: o `$` casa antes de um "\n" final, ou
 # seja "v1\n" passaria a validação (RESEARCH, Pitfall 1).
@@ -174,11 +202,15 @@ def _active_state(root: Path) -> tuple[str | None, str | None]:
     - `ACTIVE` existe e é válido -> (vN, None).
     - `ACTIVE` existe mas é inválido ou aponta para uma pasta que não existe
       -> (None, <código>); quem carrega o modelo recusa com esse código em vez
-      de cair para o legado.
-    - `ACTIVE` não existe -> (None, None). O ramo do legado (`.pkl` soltos) é
-      acrescentado aqui na Fase 2, para o carregamento usar a mesma decisão.
+      de cair para o legado (fail-closed — mesmo com .pkl soltos presentes).
+    - `ACTIVE` não existe, os dois `.pkl` soltos existem e `models/v1` não
+      existe -> ("legacy", None): o modelo atual continua a carregar (REG-02),
+      sem verificação de hash, até ser adotado.
+    - caso contrário -> (None, None).
     """
     if not (root / ACTIVE_FILE).exists():
+        if not (root / "v1").exists() and detect_legacy(root) is not None:
+            return ("legacy", None)
         return (None, None)
     try:
         version_id = read_active(root)
@@ -261,6 +293,177 @@ def _public_metadata(meta: dict) -> dict:
     return public
 
 
+# --- Integridade (SEC-01) -----------------------------------------------------
+
+
+def sha256_file(path) -> str:
+    """
+    SHA-256 de um ficheiro, em streaming (blocos de 1 MiB — os `.pkl` do
+    projeto têm ~0,5 MB, mas a listagem não deve carregar o ficheiro inteiro
+    só para o summarizar). Ficheiro em falta = `artifact_missing`; outra
+    falha de I/O = `registry_unavailable`.
+    """
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+    except FileNotFoundError as exc:
+        raise ModelRegistryError("artifact_missing") from exc
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+    return digest.hexdigest()
+
+
+def _verify_artifacts(version_dir: Path, meta: dict) -> str:
+    """
+    Confere o SHA-256 dos dois artefactos de uma versão contra o que o
+    metadata.json diz. Devolve "ok" | "artifact_missing" | "hash_mismatch" |
+    "registry_unavailable" — nunca levanta, para que uma versão corrotta
+    apareça marcada na lista sem derrubar as restantes.
+
+    `hmac.compare_digest` em vez de `==` por convenção (o hash não é segredo,
+    não é defesa contra timing; a stdlib não tem uma comparação de strings
+    constante exposta). A comparação é feita em minúsculas para aceitar um
+    metadata.json escrito com o hash em maiúsculas.
+    """
+    artifacts = meta.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return "metadata_invalid"
+    for name in ARTIFACT_FILES:
+        esperado = str((artifacts.get(name) or {}).get("sha256") or "")
+        try:
+            real = sha256_file(version_dir / name)
+        except ModelRegistryError as exc:
+            return exc.code
+        if not hmac.compare_digest(real, esperado.lower()):
+            return "hash_mismatch"
+    return "ok"
+
+
+def read_verified_bytes(version_dir: Path, filename: str, expected_sha256: str) -> bytes:
+    """
+    Os bytes de um artefacto, **verificados**: o ficheiro é lido UMA vez, o
+    SHA-256 é calculado sobre esses mesmos bytes e devolve-se exatamente
+    esses bytes. Quem chama faz `joblib.load(io.BytesIO(data))` sobre eles —
+    nunca reabre o ficheiro, logo não há janela TOCTOU entre verificar e
+    carregar (T-01-08).
+
+    `filename` tem de ser uma constante de ARTIFACT_FILES: nenhum caminho é
+    construído a partir de texto que venha de fora (uma camada de defence
+    contra traversal, para o caso de alguém chamar isto com um nome lido do
+    metadata.json). Erro de programação, não de dados — daí `metadata_invalid`
+    em vez de um código novo (D-06 fecha a lista).
+    """
+    if filename not in ARTIFACT_FILES:
+        raise ModelRegistryError("metadata_invalid")
+    try:
+        data = (version_dir / filename).read_bytes()
+    except (FileNotFoundError, IsADirectoryError) as exc:
+        raise ModelRegistryError("artifact_missing") from exc
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+    real = hashlib.sha256(data).hexdigest()
+    if not hmac.compare_digest(real, str(expected_sha256).lower()):
+        raise ModelRegistryError("hash_mismatch")
+    return data
+
+
+def detect_legacy(root: Path) -> dict | None:
+    """
+    Os dois `.pkl` soltos em `models/` — o "legado" sem metadados — ou None
+    se algum deles não existir. Só `stat()`: nunca abre nem desserializa os
+    ficheiros (REG-02 obriga a que este seja o mesmo ficheiro local que já
+    era carregado antes, agora exposto na lista como "legado, sem
+    metadados"). Um `.pkl` isolado (só um dos dois) não é legado.
+    """
+    ficheiros: dict[str, dict] = {}
+    for name in ARTIFACT_FILES:
+        path = root / name
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ModelRegistryError("registry_unavailable") from exc
+        if not path.is_file():
+            return None
+        ficheiros[name] = {
+            "size_bytes": st.st_size,
+            "modified_at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+        }
+    return ficheiros
+
+
+class ArtifactSource(NamedTuple):
+    """
+    Os bytes com que o modelo vai ser carregado, já decididos pelo registo.
+
+    `version` é "vN" ou "legacy". `verified` é True só quando os bytes foram
+    conferidos contra o SHA-256 do metadata.json; no legado é False — REG-02
+    obriga a que o modelo atual continue a carregar até ser adotado, e o risco
+    aceite está documentado em README e no modelo de ameaças (T-01-10).
+    """
+
+    version: str
+    verified: bool
+    model_bytes: bytes
+    scaler_bytes: bytes
+
+
+def resolve_active_artifacts(models_dir) -> ArtifactSource:
+    """
+    Os bytes a carregar do que está ativo, com a verificação de integridade
+    já feita. É a fronteira de segurança do SEC-01: devolve os dois
+    artefactos **juntos** ou não devolve nada — quem chama nunca recebe um par
+    em que um foi verificado e o outro não.
+
+    - versão ativa vN -> resolve_version_dir + load_metadata +
+      read_verified_bytes para os DOIS artefactos antes de devolver;
+    - legado ativo -> os dois `.pkl` soltos, sem verificação (REG-02);
+    - `ACTIVE` inválido -> ModelRegistryError com esse código, sem cair para
+      o legado (fail-closed);
+    - nada ativo (pasta vazia ou inexistente) -> FileNotFoundError com
+      NO_MODEL_MESSAGE, que não contém nenhum caminho.
+    """
+    root = _root(models_dir)
+    active, active_error = _active_state(root)
+    if active_error:
+        raise ModelRegistryError(active_error)
+
+    if active == "legacy":
+        brutos: dict[str, bytes] = {}
+        for name in ARTIFACT_FILES:
+            try:
+                brutos[name] = (root / name).read_bytes()
+            except (FileNotFoundError, IsADirectoryError) as exc:
+                raise ModelRegistryError("artifact_missing") from exc
+            except OSError as exc:
+                raise ModelRegistryError("registry_unavailable") from exc
+        return ArtifactSource(
+            version="legacy",
+            verified=False,
+            model_bytes=brutos[MODEL_FILE],
+            scaler_bytes=brutos[SCALER_FILE],
+        )
+
+    if active:
+        version_dir = resolve_version_dir(root, active)
+        meta = load_metadata(version_dir, active)
+        artifacts = meta["artifacts"]
+        # Os dois lidos e verificados ANTES de devolver qualquer coisa.
+        model_bytes = read_verified_bytes(version_dir, MODEL_FILE, artifacts[MODEL_FILE]["sha256"])
+        scaler_bytes = read_verified_bytes(version_dir, SCALER_FILE, artifacts[SCALER_FILE]["sha256"])
+        return ArtifactSource(
+            version=active,
+            verified=True,
+            model_bytes=model_bytes,
+            scaler_bytes=scaler_bytes,
+        )
+
+    raise FileNotFoundError(NO_MODEL_MESSAGE)
+
+
 def build_models_report(models_dir, loaded=None) -> dict:
     """
     Relatório do registo para `GET /api/ml/models` (contrato em SKELETON.md).
@@ -286,8 +489,7 @@ def build_models_report(models_dir, loaded=None) -> dict:
         raise ModelRegistryError("registry_unavailable") from exc
 
     # Só pastas cujo nome casa o regex: "v1.tmp-123" (a pasta temporária de um
-    # adopt/treino em curso) e ficheiros soltos ficam de fora. A entrada do
-    # legado é acrescentada na Fase 2.
+    # adopt/treino em curso) e ficheiros soltos ficam de fora.
     version_ids = [n for n in names if VERSION_ID_RE.fullmatch(n) and (root / n).is_dir()]
 
     versions: list[dict] = []
@@ -295,7 +497,11 @@ def build_models_report(models_dir, loaded=None) -> dict:
         try:
             version_dir = resolve_version_dir(root, version_id)
             meta = load_metadata(version_dir, version_id)
-            status, error_code = "ok", None
+            # A verificação de integridade só roda com metadata válido: em
+            # `artifact_missing`/`hash_mismatch` os metadados continuam
+            # visíveis, para o analista ver que esperava que hash (SKELETON).
+            status = _verify_artifacts(version_dir, meta)
+            error_code = None if status == "ok" else status
             metadata = _public_metadata(meta)
             evaluation = meta.get("evaluation")
         except ModelRegistryError as exc:
@@ -312,6 +518,24 @@ def build_models_report(models_dir, loaded=None) -> dict:
             "metadata": metadata,
             "evaluation": evaluation,
         })
+
+    # Entrada do legado (D-03): só enquanto os dois .pkl soltos existirem,
+    # `models/v1` não existir e nada válido estar ativo. Nunca substitui uma
+    # versão — os originais ficam em disco intactos.
+    if not (root / "v1").exists() and active in (None, "legacy"):
+        legacy_files = detect_legacy(root)
+        if legacy_files is not None:
+            versions.append({
+                "id": None,
+                "kind": "legacy",
+                "label": LEGACY_LABEL,
+                "active": active == "legacy",
+                "status": "no_metadata",
+                "error_code": None,
+                "metadata": None,
+                "evaluation": None,
+                "files": legacy_files,
+            })
 
     return {
         "active": active,
