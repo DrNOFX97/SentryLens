@@ -774,6 +774,14 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
         report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
         report["window_hours"] = hours
+        # Sinais de INTEGRIDADE da janela, não métricas: o fetch é limitado a
+        # 1000 alertas (newest-first), e uma concordância calculada sobre uma
+        # janela truncada não é uma concordância completa — sem este sinal o
+        # dashboard não teria como distinguir "concordância total" de "concordância
+        # só no que coube no tecto" (D-10). Mesmo padrão de /api/redblue/metrics.
+        # Aditivo: nenhuma chave que já existia muda de nome nem de significado.
+        report["alerts_fetched"] = len(raw_alerts)
+        report["alerts_truncated"] = len(raw_alerts) >= 1000
         return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
