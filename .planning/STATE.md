@@ -20,10 +20,10 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 2 of 3 complete (Avaliação ligada à versão) — next is Phase 3
-Plan: 4 of 4 in Phase 2
-Status: Phase complete, ready to plan Phase 3
-Last activity: 2026-10-10 — Fase 2 executada (4 planos, 3 waves), 38/38 testes verdes
+Phase: 3 of 3 (Treino gera versões, testes e documentação)
+Plan: 0 of 3 in current phase
+Status: Ready to execute
+Last activity: 2026-10-10 — Fase 3 planeada (3 planos, 3 waves; decisões D-01..D-11 do utilizador)
 
 Progress: [██████░░░░] 67%
 
@@ -75,7 +75,8 @@ Decisões recentes que afetam o trabalho atual:
 - **Verificação humana pendente nas Fases 1 e 2:** abrir o dashboard real e confirmar os badges, o detalhe por teclado, a Evaluation e o aviso de reinício do backend. Os testes cobrem a camada pura em `node:vm`, não o browser.
 - **A exportação real do Wazuh continua por executar** (Indexer desligado). Comandos exactos em `02-VERIFICATION.md`.
 - **O dataset histórico foi encontrado** (`scripts/snapshots/real_events_2026-09-14.json`, 1,7 MB, não versionado) mas **não é rotulável**: o `attack_log.jsonl` só cobre 2026-10-06 e a janela do dataset é 2026-09-14 15:22–15:34. Rotulado contra ele dá 0 ataques. Para uma avaliação a sério é preciso lançar os ataques e exportar na mesma janela — trabalho de laboratório, não de código.
-- Fase 3 por planear (`/gsd-plan-phase 3`): treino a gerar versões, suite completa e documentação.
+- Fase 3 por executar (`/gsd-execute-phase 3`): 3 planos, um por wave, sequenciais.
+- **Risco conhecido para a execução da Fase 3:** `test_ml_evaluation.py:185` chama `train_anomaly_model.evaluate(linhas, model, scaler)` com três posicionais — o novo `dataset_origin` tem de ter valor por omissão ou esse teste parte.
 
 ### Blockers/Concerns
 

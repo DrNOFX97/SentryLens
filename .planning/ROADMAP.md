@@ -76,7 +76,14 @@ Plans:
   1. Cada execução de `train_anomaly_model.py` grava uma versão nova `vN` (a seguinte) com metadados (data, parâmetros, nome/tamanho/nº de ataques/sintético do dataset, SHA-256 dos dois `.pkl`) e ativa-a; a aba Models mostra a nova versão como ativa e as versões anteriores ficam intactas.
   2. Os testes standalone cobrem registo, `adopt`, hash adulterado recusado, id inválido recusado, legado sem metadados, avaliação ausente e a rota `GET /api/ml/models`; `python run_all_tests.py` termina verde, sem o laboratório Wazuh ligado. Os testes do âmbito das Fases 1 e 2 escrevem-se com o respetivo código; esta fase fecha a cobertura completa.
   3. `docs/ROADMAP_STATUS.md` marca o R9 como concluído (✅) e `docs/DATA_MODEL.md`, `README.md` e `CLAUDE.md` descrevem o registo de modelos (versões, `ACTIVE`, `adopt`, verificação SHA-256 e `/api/ml/models`).
-**Plans:** TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Tracer: `next_version_id` + `build_trained_metadata` + `register_trained_version` → treino → `GET /api/ml/models` → `/api/ml-anomalies` com a vN → aba Models (wave 1)
+- [ ] 03-02-PLAN.md — TST-01: garantias negativas do caminho novo, gate dos sete itens e suite completa (wave 2)
+- [ ] 03-03-PLAN.md — DOC-01: `README.md`, `CLAUDE.md`, `docs/DATA_MODEL.md`, `docs/ROADMAP_STATUS.md`, `docs/ML.md` (wave 3)
+**Decisões:** `03-CONTEXT.md` (D-01..D-11, decididas pelo utilizador em 2026-10-10)
+**UI hint**: no — D-10 confirmado por inspecção do código: `ml_models.js` já desenha `parameters`, `dataset`, `library_versions` e `origin: "trained"`. Falta é a prova (fixture da versão treinada completa), não a capacidade.
 
 ## Progress
 
@@ -87,4 +94,4 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Registo de modelos ponta a ponta | 4/4 | Complete | 2026-10-10 |
 | 2. Avaliação ligada à versão | 4/4 | Complete | 2026-10-10 |
-| 3. Treino gera versões, testes e documentação | 0/0 | Not started | - |
+| 3. Treino gera versões, testes e documentação | 0/3 | Planned | - |
