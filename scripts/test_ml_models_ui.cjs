@@ -61,6 +61,7 @@ check("ml_models.js carrega sem DOM (nenhuma linha de topo toca em document)", t
 
 const helpers = vm.runInContext(
   "({ MLM_ERROR_TEXT, MLM_GENERIC_ERROR, mlmErrorText, mlmCodeFromResponse, mlmCell," +
+  "   mlmStatusText, mlmFormatDate, mlmOriginHtml, mlmTrainedAtText," +
   "   mlmBuildModelsRows, mlmModelsNoticeText, mlmBuildEvalRows })",
   ctx
 );
@@ -70,6 +71,10 @@ const {
   mlmErrorText,
   mlmCodeFromResponse,
   mlmCell,
+  mlmStatusText,
+  mlmFormatDate,
+  mlmOriginHtml,
+  mlmTrainedAtText,
   mlmBuildModelsRows,
   mlmModelsNoticeText,
   mlmBuildEvalRows,
@@ -123,6 +128,241 @@ check("mlmCell(null) -> desconhecido", mlmCell(null) === "desconhecido");
 check("mlmCell(undefined) -> desconhecido", mlmCell(undefined) === "desconhecido");
 check("mlmCell('') -> desconhecido", mlmCell("") === "desconhecido");
 check("mlmCell escapa HTML", mlmCell("<b>") === "&lt;b&gt;");
+
+// --- fixtures inline segundo o contrato do SKELETON.md -----------------------
+//
+// Nada aqui é inventado: são as duas entradas do contrato de
+// GET /api/ml/models (uma versionada completa, a do legado com kind/status
+// no_metadata e `files` com size_bytes/modified_at).
+
+const SHA_MODEL = "a".repeat(64);
+const SHA_SCALER = "b".repeat(64);
+
+function versioned(over) {
+  return Object.assign({
+    id: "v1",
+    kind: "versioned",
+    label: "v1",
+    active: true,
+    status: "ok",
+    error_code: null,
+    metadata: {
+      schema_version: 1,
+      version: "v1",
+      origin: "adopted",
+      adopted: true,
+      created_at: "2026-10-09T21:00:00+00:00",
+      trained_at: "2026-09-14T15:40:00+00:00",
+      trained_at_estimated: true,
+      model_type: "IsolationForest",
+      parameters: null,
+      dataset: { name: null, size: null, attacks: null, synthetic: null },
+      library_versions: null,
+      artifacts: {
+        "isolation_forest.pkl": { sha256: SHA_MODEL, size_bytes: 539673 },
+        "scaler.pkl": { sha256: SHA_SCALER, size_bytes: 767 },
+      },
+    },
+    evaluation: null,
+  }, over);
+}
+
+function legacy(over) {
+  return Object.assign({
+    id: null,
+    kind: "legacy",
+    label: "legado, sem metadados",
+    active: true,
+    status: "no_metadata",
+    error_code: null,
+    metadata: null,
+    evaluation: null,
+    files: {
+      "isolation_forest.pkl": { size_bytes: 539673, modified_at: "2026-09-14T15:40:00+00:00" },
+      "scaler.pkl": { size_bytes: 767, modified_at: "2026-09-14T15:40:00+00:00" },
+    },
+  }, over);
+}
+
+// --- mlmStatusText: os 8 estados + o desconhecido ----------------------------
+
+check("mlmStatusText: 'ok' diz que o SHA-256 foi verificado",
+  mlmStatusText({ status: "ok" }) === "Íntegra (SHA-256 verificado)");
+check("mlmStatusText: 'no_metadata' diz que carrega sem verificação",
+  mlmStatusText({ status: "no_metadata" })
+    === "Sem metadados nem hash — carrega sem verificação até ser adotado");
+
+const CODES_UI = [
+  "hash_mismatch",
+  "artifact_missing",
+  "metadata_missing",
+  "metadata_invalid",
+  "invalid_version_id",
+  "registry_unavailable",
+];
+for (const code of CODES_UI) {
+  check(`mlmStatusText: ${code} dá exactamente a mensagem de MLM_ERROR_TEXT`,
+    mlmStatusText({ status: code, error_code: code }) === MLM_ERROR_TEXT[code]);
+}
+check("mlmStatusText: código inventado cai na mensagem genérica",
+  mlmStatusText({ status: "codigo_inventado", error_code: "codigo_inventado" })
+    === MLM_GENERIC_ERROR);
+check("mlmStatusText: estado sem código não dá a genérica (o legado carrega)",
+  mlmStatusText({ status: "no_metadata", error_code: null }) !== MLM_GENERIC_ERROR);
+
+// --- mlmFormatDate ------------------------------------------------------------
+
+check("mlmFormatDate formata uma data ISO em pt-PT",
+  mlmFormatDate("2026-09-14T15:40:00+00:00").includes("2026"));
+check("mlmFormatDate sem data -> desconhecido", mlmFormatDate(null) === "desconhecido");
+check("mlmFormatDate(undefined) -> desconhecido", mlmFormatDate(undefined) === "desconhecido");
+check("mlmFormatDate que não é data devolve o texto escapado",
+  mlmFormatDate("nao-e-data") === "nao-e-data");
+check("mlmFormatDate escapa texto que não é data",
+  mlmFormatDate("<b>x") === "&lt;b&gt;x");
+
+// --- mlmOriginHtml / mlmTrainedAtText -----------------------------------------
+
+check("mlmOriginHtml: metadata.adopted true -> badge 'adotado'",
+  mlmOriginHtml(versioned()).includes("mlm-badge-adopted")
+  && mlmOriginHtml(versioned()).includes("adotado"));
+check("mlmOriginHtml: origin 'trained' -> 'treinado'",
+  mlmOriginHtml(versioned({ metadata: Object.assign(versioned().metadata, { adopted: false, origin: "trained" }) }))
+    .includes("treinado"));
+check("mlmOriginHtml: legado -> 'legado'", mlmOriginHtml(legacy()).includes("mlm-badge-legacy"));
+check("mlmOriginHtml: sem metadados -> desconhecido",
+  mlmOriginHtml(versioned({ metadata: null })).includes("desconhecido"));
+
+const metaBase = versioned().metadata;
+const treadoEstimada = mlmTrainedAtText(versioned());
+const treadoReal = mlmTrainedAtText(versioned({
+  metadata: Object.assign({}, metaBase, { trained_at_estimated: false }),
+}));
+check("mlmTrainedAtText: data estimada fica marcada como tal", treadoEstimada.includes("(estimada)"));
+check("mlmTrainedAtText: data real não é marcada como estimada", !treadoReal.includes("(estimada)"));
+check("mlmTrainedAtText: ambos mostram a data", treadoEstimada.includes("2026") && treadoReal.includes("2026"));
+check("mlmTrainedAtText: sem data de treino -> desconhecido",
+  mlmTrainedAtText(versioned({ metadata: Object.assign({}, metaBase, { trained_at: null }) }))
+    === "desconhecido");
+check("mlmTrainedAtText: legado usa a data do ficheiro",
+  mlmTrainedAtText(legacy()).includes("(data do ficheiro)"));
+
+// --- linhas: uma por estado de erro, com mensagem PT e nunca o código --------
+
+const entriesErro = CODES_UI.map((code, i) => versioned({
+  id: `v${i + 1}`,
+  label: `v${i + 1}`,
+  active: false,
+  status: code,
+  error_code: code,
+  metadata: (code === "metadata_missing" || code === "metadata_invalid") ? null : metaBase,
+}));
+const rowsErro = mlmBuildModelsRows({
+  active: null, active_error: null, loaded: null, total: entriesErro.length, versions: entriesErro,
+});
+for (const code of CODES_UI) {
+  check(`${code}: a linha mostra o badge de erro e a mensagem PT`,
+    rowsErro.includes("mlm-badge-error") && rowsErro.includes(escapeHtml(MLM_ERROR_TEXT[code])));
+  check(`${code}: o código em bruto nunca chega ao HTML`, !rowsErro.includes(code));
+}
+
+// --- a linha do legado (REG-02) ----------------------------------------------
+
+const rowsLegacyInline = mlmBuildModelsRows({
+  active: "legacy", active_error: null, loaded: "legacy", total: 1, versions: [legacy()],
+});
+check("legado (fixture do contrato): badge 'legado, sem metadados'",
+  rowsLegacyInline.includes("mlm-badge-legacy")
+  && rowsLegacyInline.includes("legado, sem metadados"));
+check("legado (fixture do contrato): badge 'ativa'", rowsLegacyInline.includes("mlm-badge-active"));
+check("legado (fixture do contrato): a data vem do ficheiro",
+  rowsLegacyInline.includes("(data do ficheiro)"));
+check("legado (fixture do contrato): estado diz que carrega sem verificação",
+  rowsLegacyInline.includes("carrega sem verificação"));
+check("legado (fixture do contrato): sem avaliação", rowsLegacyInline.includes("Sem avaliação"));
+check("legado (fixture do contrato): não é pintado como erro",
+  !rowsLegacyInline.includes("mlm-badge-error"));
+
+// --- linhas selecionáveis (seleção em detalhe é da Task 2) --------------------
+
+const rowsTres = mlmBuildModelsRows({
+  versions: [
+    versioned({ id: "v3", label: "v3" }),
+    versioned({ id: "v2", label: "v2", active: false }),
+    legacy({ active: false }),
+  ],
+});
+const indices = (rowsTres.match(/data-index="(\d+)"/g) || []).map((s) => s.slice(12, -1));
+check("cada linha leva data-index com a sua posição",
+  JSON.stringify(indices) === JSON.stringify(["0", "1", "2"]));
+check("cada linha é clicável", (rowsTres.match(/class="atk-row"/g) || []).length === 3);
+check("cada linha é focável pelo teclado", (rowsTres.match(/tabindex="0"/g) || []).length === 3);
+
+// --- XSS em todos os campos dinâmicos da linha -------------------------------
+
+const rowsXss2 = mlmBuildModelsRows({
+  versions: [{
+    id: null,
+    kind: "legacy",
+    label: "<script>alert(1)</script>",
+    active: false,
+    status: "no_metadata",
+    error_code: null,
+    metadata: null,
+    evaluation: null,
+    files: {
+      "isolation_forest.pkl": { size_bytes: 1, modified_at: "<img src=x onerror=1>" },
+      "scaler.pkl": { size_bytes: 1, modified_at: "<img src=x onerror=1>" },
+    },
+  }],
+});
+check("XSS: <script> no label nunca chega ao DOM", !rowsXss2.includes("<script"));
+check("XSS: <img> na data do ficheiro nunca chega ao DOM", !rowsXss2.includes("<img"));
+check("XSS: escapado continua legível como texto", rowsXss2.includes("&lt;script"));
+
+// --- os cinco avisos ----------------------------------------------------------
+
+const avisoActiveError = mlmModelsNoticeText({
+  active: null, active_error: "invalid_version_id", loaded: null, total: 0, versions: [],
+});
+check("aviso: ACTIVE inválido traduz o código e aponta para models/ACTIVE",
+  avisoActiveError.includes(MLM_ERROR_TEXT.invalid_version_id)
+  && avisoActiveError.includes("models/ACTIVE"));
+
+const avisoAtivoLegado = mlmModelsNoticeText({
+  active: "legacy", active_error: null, loaded: "legacy", total: 1, versions: [legacy()],
+});
+check("aviso: com o legado ativo sugere o adopt",
+  avisoAtivoLegado.includes("python model_registry.py adopt"));
+
+const avisoSemAtiva = mlmModelsNoticeText({
+  active: null, active_error: null, loaded: null, total: 1, versions: [versioned()],
+});
+check("aviso: sem versão ativa diz o que fazer (adopt interrompido)",
+  avisoSemAtiva.includes("Nenhuma versão ativa") && avisoSemAtiva.includes("volta a correr"));
+
+const avisoLoadedDiff = mlmModelsNoticeText({
+  active: "v1", active_error: null, loaded: "legacy", total: 2,
+  versions: [versioned(), legacy({ active: false })],
+});
+check("aviso: loaded != active manda reiniciar o backend e diz os dois nomes (D-02)",
+  avisoLoadedDiff.includes("reinicia o backend")
+  && avisoLoadedDiff.includes("«legacy»") && avisoLoadedDiff.includes("«v1»"));
+
+const avisoTudoCerto = mlmModelsNoticeText({
+  active: "v1", active_error: null, loaded: "v1", total: 1, versions: [versioned()],
+});
+check("aviso: loaded == active não pede para reiniciar",
+  !avisoTudoCerto.includes("reinicia o backend"));
+
+const avisoSemLoaded = mlmModelsNoticeText({
+  active: "v1", active_error: null, loaded: null, total: 1, versions: [versioned()],
+});
+check("aviso: sem modelo carregado diz que ainda não carregou",
+  avisoSemLoaded.includes("ainda não carregou"));
+
+check("aviso: conta sempre as versões registadas",
+  avisoTudoCerto.includes("1 versão(ões) registada(s)."));
 
 // --- mlmBuildModelsRows sobre o relatório real ------------------------------
 

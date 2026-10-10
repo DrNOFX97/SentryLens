@@ -79,45 +79,131 @@ function mlmCell(value) {
   return escapeHtml(String(value));
 }
 
+// --- estados, datas e origem (texto simples ou HTML já escapado) -------------
+//
+// "ok" e "no_metadata" são os dois estados que não são problema: o primeiro
+// diz que o SHA-256 bateu, o segundo que o legado está a ser usado sem
+// verificação até ser adotado (REG-02). Qualquer outro status é um problema
+// real e traduz-se pela mensagem de MLM_ERROR_TEXT — o código nunca aparece.
+
+const MLM_OK_TEXT = "Íntegra (SHA-256 verificado)";
+const MLM_NO_METADATA_TEXT =
+  "Sem metadados nem hash — carrega sem verificação até ser adotado";
+
+function mlmStatusText(entry) {
+  const status = entry ? entry.status : null;
+  if (status === "ok") return MLM_OK_TEXT;
+  if (status === "no_metadata") return MLM_NO_METADATA_TEXT;
+  return mlmErrorText(entry ? entry.error_code : null);
+}
+
+// Data ISO -> texto pt-PT. Uma data ilegível nunca é adivinhada nem vira
+// "Invalid Date": devolve o texto escapado que estava no metadata.json, para
+// o analista ver o que lá está. Sem data, "desconhecido".
+function mlmFormatDate(iso) {
+  if (iso === null || iso === undefined || iso === "") return "desconhecido";
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return escapeHtml(String(iso));
+  return data.toLocaleString("pt-PT");
+}
+
+// "adotado" é o badge de quem herdou do legado; "treinado" (Fase 3) é texto
+// simples; o legado é neutro, nunca verde nem vermelho.
+function mlmOriginHtml(entry) {
+  if (entry && entry.kind === "legacy") {
+    return '<span class="mlm-badge mlm-badge-legacy">legado</span>';
+  }
+  const meta = (entry && entry.metadata) || null;
+  if (meta && meta.adopted === true) {
+    return '<span class="mlm-badge mlm-badge-adopted">adotado</span>';
+  }
+  if (meta && meta.origin === "trained") return "treinado";
+  return "desconhecido";
+}
+
+// A data de treino do legado é a mtime do ficheiro — não é a data em que o
+// modelo foi treinado, por isso diz "(data do ficheiro)" em vez de fingir.
+function mlmTrainedAtText(entry) {
+  const meta = (entry && entry.metadata) || null;
+  if (meta) {
+    // "(estimada)" só faz sentido com uma data: "desconhecido (estimada)"
+    // seria dizer ao mesmo tempo que não se sabe e que se sabe.
+    if (meta.trained_at === null || meta.trained_at === undefined || meta.trained_at === "") {
+      return "desconhecido";
+    }
+    const base = mlmFormatDate(meta.trained_at);
+    return meta.trained_at_estimated === true ? `${base} (estimada)` : base;
+  }
+  const ficheiro = entry && entry.files ? entry.files["isolation_forest.pkl"] : null;
+  if (ficheiro) {
+    return `${mlmFormatDate(ficheiro.modified_at)} (data do ficheiro)`;
+  }
+  return "desconhecido";
+}
+
 function mlmBuildModelsRows(report) {
   const versions = (report && report.versions) || [];
   if (!versions.length) {
     return '<tr><td colspan="5" class="empty-state">Sem dados — ainda não há modelos registados.</td></tr>';
   }
-  return versions.map((entry) => {
+  return versions.map((entry, indice) => {
     const ativa = entry.active ? '<span class="mlm-badge mlm-badge-active">ativa</span> ' : "";
-    // O badge de erro só entra quando há mesmo um erro: `error_code` null com
-    // um status diferente de "ok" é o legado ("no_metadata"), que carrega
-    // sem verificação até ser adotado (REG-02) — pintá-lo de vermelho e com
-    // a mensagem genérica diria ao analista que o modelo avariou quando
-    // está a ser usado à vontade.
-    const estado = entry.status === "ok"
-      ? "OK"
-      : entry.error_code
-        ? `<span class="mlm-badge mlm-badge-error">${escapeHtml(mlmErrorText(entry.error_code))}</span>`
-        : '<span class="mlm-badge mlm-badge-legacy">sem metadados</span>';
+    const estadoTexto = mlmStatusText(entry);
+    // O badge de erro só entra quando há mesmo um erro. O legado tem
+    // status "no_metadata" e error_code null porque o modelo está a ser
+    // usado à vontade: pintá-lo de vermelho (e com a mensagem genérica, já
+    // que não há código) diria ao analista que o modelo avariou.
+    const estado = (entry.status === "ok" || entry.status === "no_metadata")
+      ? escapeHtml(estadoTexto)
+      : `<span class="mlm-badge mlm-badge-error">${escapeHtml(estadoTexto)}</span>`;
+    const versao = entry.kind === "legacy"
+      ? `<span class="mlm-badge mlm-badge-legacy">${escapeHtml(entry.label || "legado, sem metadados")}</span>`
+      : escapeHtml(entry.id || entry.label || "");
     const avaliacao = entry.evaluation === null || entry.evaluation === undefined
       ? "Sem avaliação"
       : "Registada";
-    const meta = entry.metadata || {};
-    return `<tr>
-      <td>${escapeHtml(entry.id || entry.label || "")}</td>
+    return `<tr class="atk-row" data-index="${indice}" tabindex="0">
+      <td>${versao}</td>
       <td>${ativa}${estado}</td>
-      <td>${mlmCell(meta.origin)}</td>
-      <td>${mlmCell(meta.trained_at)}</td>
+      <td>${mlmOriginHtml(entry)}</td>
+      <td>${mlmTrainedAtText(entry)}</td>
       <td>${avaliacao}</td>
     </tr>`;
   }).join("");
 }
 
+// Uma frase por condição, todas a dizer o que fazer. A diferença entre
+// `active` (o que models/ACTIVE aponta) e `loaded` (o que o processo tem
+// mesmo em memória) é a que explica um dashboard desatualizado depois de um
+// adopt: sem ela, a aba affirmaria uma ativa que não é a usada nas deteções
+// (D-02).
 function mlmModelsNoticeText(report) {
   const versions = (report && report.versions) || [];
   const ativa = report && report.active ? report.active : "nenhuma";
-  let texto = `${versions.length} versão(ões) registada(s). Ativa: ${ativa}.`;
+  const carregado = report && report.loaded ? report.loaded : null;
+  const frases = [`${versions.length} versão(ões) registada(s). Ativa: ${ativa}.`];
+
   if (report && report.active_error) {
-    texto += ` Aviso: ${mlmErrorText(report.active_error)}`;
+    frases.push(`⚠ ${mlmErrorText(report.active_error)} Nenhuma versão está ativa e a deteção `
+      + "de anomalias fica indisponível (503) até corrigires models/ACTIVE.");
   }
-  return texto;
+  if (report && report.active === "legacy") {
+    frases.push("Ativo: modelo legado (sem metadados nem verificação SHA-256). "
+      + "Para o registar como v1 corre 'python model_registry.py adopt' em scripts/.");
+  }
+  if (report && !report.active && !report.active_error && versions.length > 0) {
+    frases.push("Nenhuma versão ativa. Se um adopt foi interrompido, volta a correr "
+      + "'python model_registry.py adopt' em scripts/ para completar o models/ACTIVE.");
+  }
+  if (carregado && report && report.active && carregado !== report.active) {
+    frases.push(`O backend está a usar «${carregado}» mas a versão ativa é «${report.active}»: `
+      + "reinicia o backend (scripts/start-backend.ps1) para carregar a ativa.");
+  }
+  if (!carregado) {
+    frases.push("O backend ainda não carregou nenhum modelo neste processo "
+      + "(carrega no primeiro pedido de deteção).");
+  }
+  return frases.join(" ");
 }
 
 // Avaliação por versão (D-05). Nesta fase nenhuma versão tem avaliação, por
