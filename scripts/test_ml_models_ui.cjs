@@ -62,6 +62,8 @@ check("ml_models.js carrega sem DOM (nenhuma linha de topo toca em document)", t
 const helpers = vm.runInContext(
   "({ MLM_ERROR_TEXT, MLM_GENERIC_ERROR, mlmErrorText, mlmCodeFromResponse, mlmCell," +
   "   mlmStatusText, mlmFormatDate, mlmOriginHtml, mlmTrainedAtText," +
+  "   mlmEntryKey, mlmFindEntryIndex, mlmRowIndexFromEvent, mlmIsSelectKey," +
+  "   mlmHandleRowKey, mlmBuildDetail," +
   "   mlmBuildModelsRows, mlmModelsNoticeText, mlmBuildEvalRows })",
   ctx
 );
@@ -75,6 +77,12 @@ const {
   mlmFormatDate,
   mlmOriginHtml,
   mlmTrainedAtText,
+  mlmEntryKey,
+  mlmFindEntryIndex,
+  mlmRowIndexFromEvent,
+  mlmIsSelectKey,
+  mlmHandleRowKey,
+  mlmBuildDetail,
   mlmBuildModelsRows,
   mlmModelsNoticeText,
   mlmBuildEvalRows,
@@ -363,6 +371,194 @@ check("aviso: sem modelo carregado diz que ainda não carregou",
 
 check("aviso: conta sempre as versões registadas",
   avisoTudoCerto.includes("1 versão(ões) registada(s)."));
+
+// --- painel de detalhe -------------------------------------------------------
+
+const META_BASE = versioned().metadata;
+
+const entryCompleta = versioned({
+  metadata: Object.assign({}, META_BASE, {
+    parameters: { n_estimators: 100 },
+    library_versions: { "scikit-learn": "1.5.2" },
+    dataset: { name: "lab", size: 120, attacks: 7, synthetic: true },
+  }),
+});
+const detalheCompleto = mlmBuildDetail(entryCompleta);
+check("detalhe: o título é o id da versão", detalheCompleto.title === "v1");
+check("detalhe: o SHA-256 do modelo vai dentro de <code>",
+  detalheCompleto.artifactsHtml.includes("<code>" + SHA_MODEL + "</code>"));
+check("detalhe: o SHA-256 do scaler vai dentro de <code>",
+  detalheCompleto.artifactsHtml.includes("<code>" + SHA_SCALER + "</code>"));
+check("detalhe: o tamanho do modelo aparece em bytes",
+  detalheCompleto.artifactsHtml.includes("539673 bytes"));
+check("detalhe: o tamanho do scaler aparece em bytes",
+  detalheCompleto.artifactsHtml.includes("767 bytes"));
+check("detalhe: os parâmetros aparecem como 'chave = valor'",
+  detalheCompleto.paramsHtml.includes("n_estimators = 100"));
+check("detalhe: as versões das bibliotecas aparecem",
+  detalheCompleto.metaHtml.includes("scikit-learn=1.5.2"));
+check("detalhe: a data de treino estimada é marcada", detalheCompleto.metaHtml.includes("(estimada)"));
+check("detalhe: o nome do dataset", detalheCompleto.datasetHtml.includes("lab"));
+check("detalhe: o tamanho do dataset", detalheCompleto.datasetHtml.includes("120"));
+check("detalhe: o número de ataques do dataset", detalheCompleto.datasetHtml.includes("7"));
+check("detalhe: dataset sintético -> Sim", detalheCompleto.datasetHtml.includes("Sim"));
+check("detalhe: sem avaliação nesta fase (D-05)", detalheCompleto.evalText === "Sem avaliação");
+
+// Uma versão adotada real: parameters/library_versions/dataset são null
+// (nada é desserializado no adopt e não se inventa o dataset).
+const detalheVazio = mlmBuildDetail(versioned());
+check("detalhe: sem parâmetros -> desconhecido", detalheVazio.paramsHtml.includes("desconhecido"));
+check("detalhe: sem versões de bibliotecas -> desconhecido",
+  detalheVazio.metaHtml.includes("desconhecido"));
+check("detalhe: dataset com os quatro campos null -> desconhecido quatro vezes",
+  (detalheVazio.datasetHtml.match(/desconhecido/g) || []).length === 4);
+
+const detalheLegado = mlmBuildDetail(legacy());
+check("detalhe do legado: o título é o label",
+  detalheLegado.title === "legado, sem metadados");
+check("detalhe do legado: diz que não há hash registado",
+  detalheLegado.artifactsHtml.includes("sem hash registado"));
+check("detalhe do legado: tamanho do modelo",
+  detalheLegado.artifactsHtml.includes("539673 bytes"));
+check("detalhe do legado: tamanho do scaler",
+  detalheLegado.artifactsHtml.includes("767 bytes"));
+check("detalhe do legado: a data vem do ficheiro",
+  detalheLegado.metaHtml.includes("(data do ficheiro)"));
+check("detalhe do legado: sem parâmetros registados",
+  detalheLegado.paramsHtml.includes("desconhecido"));
+check("detalhe do legado: sem avaliação", detalheLegado.evalText === "Sem avaliação");
+
+// Detalhe do legado REAL (resposta da rota com os .pkl soltos).
+const legadoReal = (reportLegacy.versions || [])[0];
+const detalheLegadoReal = mlmBuildDetail(legadoReal);
+check("detalhe do legado real: título e estado honestos",
+  detalheLegadoReal.title === "legado, sem metadados"
+  && detalheLegadoReal.artifactsHtml.includes("sem hash registado"));
+check("detalhe do legado real: os dois tamanhos reais aparecem",
+  detalheLegadoReal.artifactsHtml.includes(`${legadoReal.files["isolation_forest.pkl"].size_bytes} bytes`)
+  && detalheLegadoReal.artifactsHtml.includes(`${legadoReal.files["scaler.pkl"].size_bytes} bytes`));
+check("detalhe do legado real: nenhum caminho do disco",
+  !detalheLegadoReal.artifactsHtml.includes("\\") && !detalheLegadoReal.metaHtml.includes("scripts/"));
+
+// Versão sem metadata.json utilizável: não há hashes para mostrar, mas a
+// mensagem do código ainda é a acção a fazer (API-02).
+const entryQuebrada = versioned({
+  metadata: null, status: "metadata_invalid", error_code: "metadata_invalid",
+});
+const detalheQuebrado = mlmBuildDetail(entryQuebrada);
+check("detalhe sem metadata.json: estado vazio com a mensagem do código",
+  detalheQuebrado.artifactsHtml.includes("empty-state")
+  && detalheQuebrado.artifactsHtml.includes(escapeHtml(MLM_ERROR_TEXT.metadata_invalid))
+  && !detalheQuebrado.artifactsHtml.includes("metadata_invalid"));
+check("detalhe sem metadata.json: o estado traduz o código também",
+  detalheQuebrado.metaHtml.includes(escapeHtml(MLM_ERROR_TEXT.metadata_invalid)));
+
+// --- XSS no detalhe ----------------------------------------------------------
+
+const detalheXss = mlmBuildDetail(versioned({
+  metadata: Object.assign({}, META_BASE, {
+    parameters: { "<b>k": "<img src=x>" },
+    library_versions: { "<b>k": "<img src=x>" },
+    dataset: { name: "<img src=x>", size: null, attacks: null, synthetic: null },
+  }),
+}));
+check("XSS no detalhe: chave e valor dos parâmetros escapados",
+  !detalheXss.paramsHtml.includes("<b>") && !detalheXss.paramsHtml.includes("<img"));
+check("XSS no detalhe: biblioteca escapada",
+  !detalheXss.metaHtml.includes("<b>") && !detalheXss.metaHtml.includes("<img"));
+check("XSS no detalhe: nome do dataset escapado", !detalheXss.datasetHtml.includes("<img"));
+
+// --- chaves e selecção por índice --------------------------------------------
+
+const RELATORIO = {
+  versions: [
+    versioned({ id: "v2", label: "v2" }),
+    versioned({ id: "v1", label: "v1", active: false }),
+    legacy({ active: false }),
+  ],
+};
+check("mlmEntryKey: versionada dá o id", mlmEntryKey(RELATORIO.versions[0]) === "v2");
+check("mlmEntryKey: o legado dá 'legacy'", mlmEntryKey(RELATORIO.versions[2]) === "legacy");
+check("mlmFindEntryIndex acha a v1", mlmFindEntryIndex(RELATORIO, "v1") === 1);
+check("mlmFindEntryIndex acha o legado", mlmFindEntryIndex(RELATORIO, "legacy") === 2);
+check("mlmFindEntryIndex com chave ausente -> -1", mlmFindEntryIndex(RELATORIO, "v9") === -1);
+
+// Depois de um adopt o legado deixa de estar na lista (D-03): o detalhe da
+// seleção que apontava para ele tem de desaparecer, não ficar a apontar
+// para a versão que ficou no mesmo lugar.
+const APOS_ADOPT = { versions: [versioned({ id: "v1" })] };
+check("mlmFindEntryIndex: legado depois do adopt -> -1",
+  mlmFindEntryIndex(APOS_ADOPT, "legacy") === -1);
+
+// A seleção segue a CHAVE, não a posição: um refresh que reordene a lista
+// tem de continuar a mostrar a mesma versão no detalhe.
+const REORDENADO = {
+  versions: [legacy({ active: false }), versioned({ id: "v1" }), versioned({ id: "v2", active: false })],
+};
+check("mlmFindEntryIndex: a seleção acompanha uma reordenação",
+  mlmFindEntryIndex(REORDENADO, "v1") === 1
+  && mlmFindEntryIndex(RELATORIO, "v1") === 1);
+
+// --- teclado: Enter e Espaço selecionam, o resto não --------------------------
+
+function fakeEvent(key, indice) {
+  const chamadas = { preventDefault: 0, onSelect: [] };
+  const evento = {
+    key,
+    target: {
+      closest(seletor) {
+        if (indice === null) return null;
+        return seletor === "tr[data-index]" ? { dataset: { index: String(indice) } } : null;
+      },
+    },
+    preventDefault() { chamadas.preventDefault += 1; },
+  };
+  const selecionar = (i) => { chamadas.onSelect.push(i); };
+  return { evento, chamadas, selecionar };
+}
+
+for (const key of ["Enter", " ", "Spacebar"]) {
+  check(`mlmIsSelectKey: ${JSON.stringify(key)} é tecla de seleção`, mlmIsSelectKey({ key }) === true);
+}
+for (const key of ["a", "Tab", "ArrowDown", "Escape"]) {
+  check(`mlmIsSelectKey: ${JSON.stringify(key)} não é tecla de seleção`, mlmIsSelectKey({ key }) === false);
+}
+
+const enter = fakeEvent("Enter", 1);
+check("mlmHandleRowKey: Enter na linha 1 devolve true",
+  mlmHandleRowKey(enter.evento, enter.selecionar) === true);
+check("mlmHandleRowKey: Enter chama preventDefault uma vez", enter.chamadas.preventDefault === 1);
+check("mlmHandleRowKey: Enter seleciona o índice 1",
+  JSON.stringify(enter.chamadas.onSelect) === "[1]");
+
+const espaco = fakeEvent(" ", 1);
+check("mlmHandleRowKey: Espaço na linha 1 devolve true",
+  mlmHandleRowKey(espaco.evento, espaco.selecionar) === true);
+check("mlmHandleRowKey: Espaço chama preventDefault uma vez", espaco.chamadas.preventDefault === 1);
+check("mlmHandleRowKey: Espaço seleciona o índice 1",
+  JSON.stringify(espaco.chamadas.onSelect) === "[1]");
+
+for (const key of ["a", "Tab"]) {
+  const outra = fakeEvent(key, 1);
+  check(`mlmHandleRowKey: ${JSON.stringify(key)} devolve false`,
+    mlmHandleRowKey(outra.evento, outra.selecionar) === false);
+  check(`mlmHandleRowKey: ${JSON.stringify(key)} não faz nada`, outra.chamadas.preventDefault === 0
+    && outra.chamadas.onSelect.length === 0);
+}
+
+const semLinha = fakeEvent("Enter", null);
+check("mlmHandleRowKey: Enter fora de uma linha devolve false",
+  mlmHandleRowKey(semLinha.evento, semLinha.selecionar) === false);
+check("mlmHandleRowKey: Enter fora de uma linha não seleciona nada",
+  semLinha.chamadas.preventDefault === 0 && semLinha.chamadas.onSelect.length === 0);
+
+const indiceLixo = fakeEvent("Enter", "abc");
+check("mlmRowIndexFromEvent com data-index inválido -> -1",
+  mlmRowIndexFromEvent(indiceLixo.evento) === -1);
+check("mlmRowIndexFromEvent devolve a posição da linha",
+  mlmRowIndexFromEvent(fakeEvent("Enter", 2).evento) === 2);
+check("mlmRowIndexFromEvent sem linha -> -1",
+  mlmRowIndexFromEvent(fakeEvent("Enter", null).evento) === -1);
 
 // --- mlmBuildModelsRows sobre o relatório real ------------------------------
 

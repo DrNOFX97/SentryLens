@@ -109,16 +109,24 @@ function mlmFormatDate(iso) {
 
 // "adotado" é o badge de quem herdou do legado; "treinado" (Fase 3) é texto
 // simples; o legado é neutro, nunca verde nem vermelho.
-function mlmOriginHtml(entry) {
-  if (entry && entry.kind === "legacy") {
-    return '<span class="mlm-badge mlm-badge-legacy">legado</span>';
-  }
+function mlmOriginText(entry) {
+  if (entry && entry.kind === "legacy") return "legado";
   const meta = (entry && entry.metadata) || null;
-  if (meta && meta.adopted === true) {
-    return '<span class="mlm-badge mlm-badge-adopted">adotado</span>';
-  }
+  if (meta && meta.adopted === true) return "adotado";
   if (meta && meta.origin === "trained") return "treinado";
   return "desconhecido";
+}
+
+function mlmOriginHtml(entry) {
+  const meta = (entry && entry.metadata) || null;
+  const texto = escapeHtml(mlmOriginText(entry));
+  if (entry && entry.kind === "legacy") {
+    return `<span class="mlm-badge mlm-badge-legacy">${texto}</span>`;
+  }
+  if (meta && meta.adopted === true) {
+    return `<span class="mlm-badge mlm-badge-adopted">${texto}</span>`;
+  }
+  return texto;
 }
 
 // A data de treino do legado é a mtime do ficheiro — não é a data em que o
@@ -206,6 +214,155 @@ function mlmModelsNoticeText(report) {
   return frases.join(" ");
 }
 
+// ================== detalhe da versão selecionada ============================
+//
+// Tudo o que o metadata.json traz, desenhado a partir do relatório que a
+// aba J tem em memória — a lista já traz os metadados, por isso selecionar
+// uma versão não custa um pedido ao backend.
+//
+// Regra única: um valor que não existe é "desconhecido", nunca uma string
+// vazia e nunca um valor adivinhado. E um erro de uma versão com problema
+// aparece pela mensagem de MLM_ERROR_TEXT, nunca pelo código.
+
+const MLM_ARTIFACT_NAMES = ["isolation_forest.pkl", "scaler.pkl"];
+
+// A chave estável de uma entrada. A seleção segue a chave e não a posição:
+// entre dois refrescamentos a lista pode reordenar-se, e o legado depois de
+// um adopt desaparece (D-03) — com a posição, o detalhe passava a mostrar
+// outra versão sem ninguém ter clicado em nada.
+function mlmEntryKey(entry) {
+  if (entry && entry.kind === "legacy") return "legacy";
+  return (entry && entry.id) || "";
+}
+
+function mlmFindEntryIndex(report, key) {
+  const versions = (report && report.versions) || [];
+  if (!key) return -1;
+  for (let i = 0; i < versions.length; i += 1) {
+    if (mlmEntryKey(versions[i]) === key) return i;
+  }
+  return -1;
+}
+
+function mlmRowIndexFromEvent(event) {
+  const alvo = event && event.target;
+  const linha = alvo && typeof alvo.closest === "function"
+    ? alvo.closest("tr[data-index]") : null;
+  if (!linha || !linha.dataset) return -1;
+  const indice = parseInt(linha.dataset.index, 10);
+  return Number.isNaN(indice) ? -1 : indice;
+}
+
+function mlmIsSelectKey(event) {
+  const key = event && event.key;
+  // "Spacebar" é o nome antigo do Espaço em alguns browsers.
+  return key === "Enter" || key === " " || key === "Spacebar";
+}
+
+// Delegado pelo keydown do tbody: Enter e Espaço selecionam a linha focada
+// (sem deixar a página fazer scroll com o Espaço), o resto passa.
+function mlmHandleRowKey(event, onSelect) {
+  if (!mlmIsSelectKey(event)) return false;
+  const indice = mlmRowIndexFromEvent(event);
+  if (indice < 0) return false;
+  event.preventDefault();
+  onSelect(indice);
+  return true;
+}
+
+function mlmLibraryVersionsText(libraryVersions) {
+  if (!libraryVersions || typeof libraryVersions !== "object") return "desconhecido";
+  const chaves = Object.keys(libraryVersions).sort();
+  if (!chaves.length) return "desconhecido";
+  return chaves
+    .map((chave) => `${escapeHtml(chave)}=${escapeHtml(String(libraryVersions[chave]))}`)
+    .join(", ");
+}
+
+function mlmArtifactsHtml(entry) {
+  const meta = (entry && entry.metadata) || null;
+  const registados = meta && meta.artifacts && typeof meta.artifacts === "object"
+    ? meta.artifacts : null;
+  const linhas = [];
+  for (const nome of MLM_ARTIFACT_NAMES) {
+    const artefacto = registados ? registados[nome] : null;
+    if (artefacto) {
+      const hash = typeof artefacto.sha256 === "string" && artefacto.sha256
+        ? `<code>${escapeHtml(artefacto.sha256)}</code>`
+        : "hash em falta no metadata.json";
+      const tamanho = (artefacto.size_bytes === null || artefacto.size_bytes === undefined)
+        ? "desconhecido" : `${mlmCell(artefacto.size_bytes)} bytes`;
+      linhas.push(`<li><strong>${escapeHtml(nome)}</strong> — ${hash} — ${tamanho}</li>`);
+      continue;
+    }
+    if (entry && entry.kind === "legacy") {
+      const ficheiro = entry.files ? entry.files[nome] : null;
+      if (!ficheiro) {
+        linhas.push(`<li class="empty-state">${escapeHtml(nome)}: sem ficheiro registado.</li>`);
+        continue;
+      }
+      const tamanho = (ficheiro.size_bytes === null || ficheiro.size_bytes === undefined)
+        ? "desconhecido" : `${mlmCell(ficheiro.size_bytes)} bytes`;
+      linhas.push(`<li><strong>${escapeHtml(nome)}</strong> — sem hash registado — ${tamanho}`
+        + ` — ${mlmFormatDate(ficheiro.modified_at)}</li>`);
+      continue;
+    }
+    return `<li class="empty-state">${escapeHtml(mlmErrorText(entry && entry.error_code))}</li>`;
+  }
+  return linhas.join("\n");
+}
+
+function mlmParamsHtml(parameters) {
+  if (!parameters || typeof parameters !== "object") {
+    return '<li class="empty-state">desconhecido</li>';
+  }
+  const chaves = Object.keys(parameters).sort();
+  if (!chaves.length) return '<li class="empty-state">desconhecido</li>';
+  return chaves
+    .map((chave) => `<li>${escapeHtml(chave)} = ${escapeHtml(String(parameters[chave]))}</li>`)
+    .join("\n");
+}
+
+function mlmDatasetHtml(dataset) {
+  const d = dataset && typeof dataset === "object" ? dataset : {};
+  const sintetico = (d.synthetic === null || d.synthetic === undefined)
+    ? "desconhecido" : (d.synthetic ? "Sim" : "Não");
+  return [
+    `<li>Nome: ${mlmCell(d.name)}</li>`,
+    `<li>Tamanho: ${mlmCell(d.size)}</li>`,
+    `<li>Ataques: ${mlmCell(d.attacks)}</li>`,
+    `<li>Sintético: ${sintetico}</li>`,
+  ].join("\n");
+}
+
+// Devolve {title, metaHtml, artifactsHtml, paramsHtml, datasetHtml, evalText}.
+// `title` e `evalText` são texto simples (vão por textContent); os *Html já
+// vêm escapados.
+function mlmBuildDetail(entry) {
+  const meta = (entry && entry.metadata) || null;
+  const criadoEm = meta ? mlmFormatDate(meta.created_at) : "desconhecido";
+  const tipo = meta ? mlmCell(meta.model_type) : "desconhecido";
+  const bibliotecas = mlmLibraryVersionsText(meta ? meta.library_versions : null);
+  return {
+    title: (entry && (entry.id || entry.label)) || "Versão",
+    metaHtml: [
+      `<span>Estado: <strong>${escapeHtml(mlmStatusText(entry))}</strong></span>`,
+      `<span>Ativa: <strong>${entry && entry.active ? "Sim" : "Não"}</strong></span>`,
+      `<span>Origem: <strong>${escapeHtml(mlmOriginText(entry))}</strong></span>`,
+      `<span>Criado em: <strong>${criadoEm}</strong></span>`,
+      `<span>Treinado em: <strong>${mlmTrainedAtText(entry)}</strong></span>`,
+      `<span>Tipo de modelo: <strong>${tipo}</strong></span>`,
+      `<span>Versões das bibliotecas: <strong>${bibliotecas}</strong></span>`,
+    ].join("\n"),
+    artifactsHtml: mlmArtifactsHtml(entry),
+    paramsHtml: mlmParamsHtml(meta ? meta.parameters : null),
+    datasetHtml: mlmDatasetHtml(meta ? meta.dataset : null),
+    evalText: entry && entry.evaluation !== null && entry.evaluation !== undefined
+      ? "Avaliação registada no metadata.json; a apresentação das métricas chega na Fase 2."
+      : "Sem avaliação",
+  };
+}
+
 // Avaliação por versão (D-05). Nesta fase nenhuma versão tem avaliação, por
 // isso a coluna só distingue "não há" de "há": mostrar as métricas de uma
 // versão é trabalho da Fase 2, com o cuidado de nunca mostrar números de
@@ -235,6 +392,8 @@ let mlmModelsWasShown = false;
 let mlmEvalTab = null;
 let mlmEvalWasShown = false;
 let mlmLoading = false;
+let mlmLastReport = null;
+let mlmSelectedKey = null;
 
 async function mlmRequest(path) {
   const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
@@ -251,6 +410,67 @@ async function mlmRequest(path) {
 function mlmRenderModels(report) {
   document.getElementById("mlm-models-body").innerHTML = mlmBuildModelsRows(report);
   document.getElementById("mlm-models-notice").textContent = mlmModelsNoticeText(report);
+  // A tabela acabou de ser redesenhada, o que apagou a linha marcada: volta
+  // a marcá-la se a versão selecionada ainda existir.
+  mlmReapplySelection();
+}
+
+// Todo o conteúdo do painel vem de mlmBuildDetail, que já escapou tudo. O
+// title e o texto de avaliação são texto simples (textContent).
+function mlmRenderDetail(entry) {
+  const painel = document.getElementById("ml-models-detail-panel");
+  if (!painel) return;
+  const detalhe = mlmBuildDetail(entry);
+  renderPanelError("#ml-models-detail-panel", "");
+  painel.hidden = false;
+  document.getElementById("mlm-detail-title").textContent = detalhe.title;
+  document.getElementById("mlm-detail-meta").innerHTML = detalhe.metaHtml;
+  document.getElementById("mlm-detail-artifacts").innerHTML = detalhe.artifactsHtml;
+  document.getElementById("mlm-detail-params").innerHTML = detalhe.paramsHtml;
+  document.getElementById("mlm-detail-dataset").innerHTML = detalhe.datasetHtml;
+  document.getElementById("mlm-detail-eval").textContent = detalhe.evalText;
+}
+
+function mlmMarkSelectedRow(index) {
+  const body = document.getElementById("mlm-models-body");
+  if (!body) return;
+  body.querySelectorAll("tr[data-index]").forEach((tr) => {
+    tr.classList.toggle("selected", tr.dataset.index === String(index));
+  });
+}
+
+function mlmHideDetail() {
+  mlmSelectedKey = null;
+  mlmMarkSelectedRow(-1);
+  const painel = document.getElementById("ml-models-detail-panel");
+  if (painel) painel.hidden = true;
+}
+
+// Não há novo pedido: os metadados já vieram com a lista.
+function mlmSelectEntry(index) {
+  const versions = (mlmLastReport && mlmLastReport.versions) || [];
+  const entry = versions[index];
+  if (!entry) {
+    mlmHideDetail();
+    return;
+  }
+  mlmSelectedKey = mlmEntryKey(entry);
+  mlmMarkSelectedRow(index);
+  mlmRenderDetail(entry);
+}
+
+// Depois de cada refrescamento a seleção é reposta a partir da CHAVE. Se a
+// versão deixou de existir — o legado depois de um adopt (D-03) — o detalhe
+// desaparece em vez de ficar a mostrar outra versão.
+function mlmReapplySelection() {
+  if (!mlmSelectedKey) return;
+  const index = mlmFindEntryIndex(mlmLastReport, mlmSelectedKey);
+  if (index < 0) {
+    mlmHideDetail();
+    return;
+  }
+  mlmMarkSelectedRow(index);
+  mlmRenderDetail((mlmLastReport && mlmLastReport.versions)[index]);
 }
 
 function mlmRenderEvaluation(report) {
@@ -276,10 +496,13 @@ async function mlmRefresh() {
     const report = await mlmRequest("/api/ml/models");
     renderPanelError("#ml-models-panel", "");
     renderPanelError("#ml-evaluation-panel", "");
+    mlmLastReport = report;
     mlmRenderModels(report);
     mlmRenderEvaluation(report);
   } catch (err) {
     const texto = mlmErrorText(err.message);
+    mlmLastReport = null;
+    mlmHideDetail();
     renderPanelError("#ml-models-panel", "Não foi possível carregar os modelos: " + texto);
     renderPanelError("#ml-evaluation-panel", "Não foi possível carregar as avaliações: " + texto);
     document.getElementById("mlm-models-body").innerHTML =
@@ -319,6 +542,18 @@ function mlmInit() {
   document.addEventListener("visibilitychange", mlmOnTabChange);
   document.getElementById("mlm-models-reload").addEventListener("click", () => mlmRefresh());
   document.getElementById("mlm-eval-reload").addEventListener("click", () => mlmRefresh());
+  // Linhas selecionáveis com rato e com teclado (Enter/Espaço), como na
+  // Attack Library. O keydown delega em mlmHandleRowKey, que é puro.
+  const corpo = document.getElementById("mlm-models-body");
+  if (corpo) {
+    corpo.addEventListener("click", (event) => {
+      const index = mlmRowIndexFromEvent(event);
+      if (index >= 0) mlmSelectEntry(index);
+    });
+    corpo.addEventListener("keydown", (event) => {
+      mlmHandleRowKey(event, mlmSelectEntry);
+    });
+  }
   // Deep link #ml-models / #ml-evaluation: o applyHash de app.js corre antes
   // deste script.
   mlmOnTabChange();

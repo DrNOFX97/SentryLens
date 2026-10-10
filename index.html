@@ -593,6 +593,26 @@
           </table>
         </div>
       </section>
+
+      <!-- Detalhe da versão selecionada (rato ou Enter/Espaço numa linha).
+           hidden até haver seleção; preenchido só por ml_models.js, que
+           escapa tudo o que vem de scripts/models/. -->
+      <section class="panel" id="ml-models-detail-panel" hidden>
+        <h2 id="mlm-detail-title">Versão</h2>
+        <div id="mlm-detail-meta" class="inc-meta"></div>
+
+        <h3>Artefactos</h3>
+        <ul class="atk-evidence" id="mlm-detail-artifacts"></ul>
+
+        <h3>Parâmetros</h3>
+        <ul class="atk-evidence" id="mlm-detail-params"></ul>
+
+        <h3>Dataset</h3>
+        <ul class="atk-evidence" id="mlm-detail-dataset"></ul>
+
+        <h3>Avaliação</h3>
+        <p id="mlm-detail-eval"></p>
+      </section>
     </div>
 
     <!-- ===== Evaluation ===== -->
