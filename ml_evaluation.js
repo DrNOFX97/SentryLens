@@ -358,7 +358,7 @@ function mleInit() {
   const reload = document.getElementById("mlm-eval-reload");
   if (reload) reload.addEventListener("click", () => mleRefresh());
   // Mudar a janela recarrega SÓ o bloco ao vivo: a avaliação por versão não
-  // depende da janela e não é worth um pedido.
+  // depende da janela, por isso não justifica um pedido ao registo.
   const janela = document.getElementById("mle-live-hours");
   if (janela) janela.addEventListener("change", () => mleRefreshLive());
   // Deep link #ml-evaluation: o applyHash de app.js corre antes deste script.
