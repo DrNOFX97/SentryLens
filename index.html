@@ -85,7 +85,7 @@
     <details class="nav-group" open>
       <summary>ML</summary>
       <button class="nav-item" data-tab="ml-anomalies">🧠 Anomalias</button>
-      <button class="nav-item is-planned" data-planned="R9" data-label="Models">📦 Models<span class="nav-badge">R9</span></button>
+      <button class="nav-item" data-tab="ml-models">📦 Models</button>
       <button class="nav-item is-planned" data-planned="R10" data-label="Training">🏋️ Training<span class="nav-badge">R10</span></button>
       <button class="nav-item is-planned" data-planned="R9" data-label="Evaluation">📐 Evaluation<span class="nav-badge">R9</span></button>
     </details>
@@ -553,6 +553,42 @@
             </thead>
             <tbody id="ml-anomalies-body">
               <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Models ===== -->
+    <div class="tab-content" id="tab-ml-models">
+      <section class="panel" id="ml-models-panel">
+        <h2>📦 Models</h2>
+        <p class="panel-note">
+          Versões do modelo de ML registadas em <code>scripts/models/vN/</code> (metadados em
+          <code>metadata.json</code>); a versão ativa é a indicada por <code>scripts/models/ACTIVE</code>.
+          Só leitura — adotar, treinar ou ativar uma versão é operação de CLI, nunca a partir do dashboard.
+          Depois de adotar ou treinar, reinicia o backend para ele passar a usar a nova versão
+          (o modelo fica em memória por processo).
+        </p>
+
+        <div class="filter-row">
+          <button id="mlm-models-reload" type="button">Atualizar</button>
+        </div>
+        <div id="mlm-models-notice" class="panel-note" role="status"></div>
+
+        <div class="table-scroll">
+          <table id="mlm-models-table">
+            <thead>
+              <tr>
+                <th>Versão</th>
+                <th>Estado</th>
+                <th>Origem</th>
+                <th>Treinado em</th>
+                <th>Avaliação</th>
+              </tr>
+            </thead>
+            <tbody id="mlm-models-body">
+              <tr><td colspan="5" class="empty-state">A carregar...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1161,5 +1197,6 @@
   <script src="network_soc.js"></script>
   <script src="detections.js"></script>
   <script src="metrics.js"></script>
+  <script src="ml_models.js"></script>
 </body>
 </html>
