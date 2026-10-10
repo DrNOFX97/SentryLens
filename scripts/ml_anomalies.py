@@ -84,6 +84,30 @@ def loaded_version() -> str | None:
     return _loaded_from
 
 
+def load_version_artifacts(source) -> tuple:
+    """Desserializa os artefactos de uma versão ARBITRÁRIA (D-02) a partir de
+    um `ArtifactSource` do registo — os bytes JÁ VERIFICADOS contra o
+    SHA-256 do metadata.json, lidos uma só vez (SEC-01, T-01-08).
+
+    É o mesmo caminho de `load_model` (`joblib.load(io.BytesIO(...))`), pelo
+    que este módulo continua a ser o ÚNICO ponto de desserialização do projecto
+    (Pitfall 7): o motor de avaliação nunca chama o joblib por si.
+
+    Diferença deliberada em relação a `load_model`: NÃO escreve em
+    `_model`/`_scaler`/`_loaded_from`. Avaliar a vN não muda o modelo que o
+    processo está a usar nas deteções — o `loaded` do dashboard continua a
+    dizer a verdade (D-02), e a cache continua a ser só do `load_model`.
+
+    `source` None é TypeError: é um erro de programação, não de dados.
+    """
+    if source is None:
+        raise TypeError("load_version_artifacts precisa de um ArtifactSource do registo")
+    artefatos = [joblib.load(io.BytesIO(dados))
+                 for dados in (source.model_bytes, source.scaler_bytes)]
+    model, scaler = artefatos
+    return model, scaler
+
+
 def build_ml_anomalies_report(alerts: list[dict], model, scaler) -> dict:
     """Função pura: aplica o modelo já carregado aos alertas e devolve o
     relatório lado a lado com a classificação por regras (rule_flagged,

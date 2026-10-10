@@ -42,16 +42,22 @@ acidental e ficheiros alheios sem metadados, mas NÃO autentica quem escreveu
 — quem tem escrita em `models/` reescreve também o `metadata.json`. HMAC ou
 assinatura ficam fora do âmbito do R9; ver README/ROADMAP_STATUS.
 
-O módulo tem também o CLI (`python model_registry.py adopt`), que é o ÚNICO
-ponto do projeto que escreve no registo: escrever por HTTP mudaria o modelo
-em uso sem ninguém o pedir. O CLI traduz cada código de ERROR_CODES numa
-mensagem PT acionável e devolve 0 ou 1; o texto vive aqui e nunca no HTTP
-(API-02).
+O módulo tem também o CLI (`python model_registry.py adopt` e
+`python model_registry.py evaluate vN --events F`), que é o ÚNICO ponto do
+projecto que escreve no registo: escrever por HTTP mudaria o modelo em uso
+sem ninguém o pedir. O CLI traduz cada código de ERROR_CODES numa mensagem PT
+accionável e devolve 0 ou 1; o texto vive aqui e nunca no HTTP (API-02).
+
+O `evaluate` (Fase 2) mede a versão PEDIDA, não a ativa, e grava o resultado
+no metadata.json dela. Para carregar scikit-learn sem tornar este ficheiro
+dependente dele, o motor da avaliação vive em `scripts/ml_evaluation.py` e é
+importado DENTRO de `_cmd_evaluate`/`evaluate` (D-01): no topo só há stdlib.
 """
 
 import argparse
 import hashlib
 import hmac
+import importlib
 import json
 import os
 import re
@@ -126,6 +132,57 @@ METADATA_PUBLIC_KEYS = (
     "library_versions",
     "artifacts",
 )
+
+# Projeção do campo `evaluation` que a API expõe (D-08). É a MESMA lista de 14
+# chaves que `ml_evaluation.EVALUATION_KEYS` — mas escrita aqui, porque este
+# módulo não pode importar `ml_evaluation` (D-01: stdlib puro no topo). A
+# igualdade das duas é verificada por scripts/test_ml_models_api.py, para que
+# uma das listas divergir nunca passe em silêncio.
+EVALUATION_PUBLIC_KEYS = (
+    "evaluated_at",
+    "events_file",
+    "attack_log",
+    "label_window_seconds",
+    "total_events",
+    "attacks_in_dataset",
+    "ml",
+    "rules",
+    "comparison",
+    "min_events",
+    "min_attacks",
+    "small_sample",
+    "caveat",
+    "dataset_origin",
+)
+
+# Os três sub-objectos, com os seus próprios sub-conjuntos fechados (3 e 4
+# chaves). Também comparados com os do motor no mesmo teste.
+EVALUATION_METRIC_KEYS = ("precision", "recall", "f1")
+EVALUATION_COMPARISON_KEYS = ("both_flagged", "ml_only", "rules_only", "neither")
+
+# Tipo esperado de cada chave, para a sub-projeção nunca repassar o que vier do
+# disco do utilizador tal e qual. str -> truncada; float/int/bool projectados
+# pelo tipo; o resto cai a None.
+EVALUATION_KEY_TYPES = {
+    "evaluated_at": str,
+    "events_file": str,
+    "attack_log": str,
+    "label_window_seconds": int,
+    "total_events": int,
+    "attacks_in_dataset": int,
+    "ml": dict,
+    "rules": dict,
+    "comparison": dict,
+    "min_events": int,
+    "min_attacks": int,
+    "small_sample": bool,
+    "caveat": str,
+    "dataset_origin": str,
+}
+
+# Teto por campo de texto: o `caveat` e os nomes de ficheiro são os únicos
+# textos que saem do disco, e mesmo estes entram truncados.
+EVALUATION_TEXT_LIMIT = 200
 
 
 class ModelRegistryError(Exception):
@@ -422,6 +479,37 @@ class ArtifactSource(NamedTuple):
     scaler_bytes: bytes
 
 
+def resolve_version_artifacts(models_dir, version_id) -> ArtifactSource:
+    """
+    Os bytes de UMA VERSÃO, com a verificação de integridade já feita (D-02).
+
+    É o bloco `if active:` de `resolve_active_artifacts` sem a lógica de
+    `_active_state`, existindo para que `model_registry.py evaluate v1` possa
+    carregar a v1 **pedida** e não a que estiver no `ACTIVE` — e para que
+    avaliar a vN e carregar a vN ativa usem exactamente as mesmas regras de
+    integridade (é o mesmo corpo, não uma cópia).
+
+    Erros, todos sem devolver qualquer byte: id inválido
+    (`invalid_version_id`), pasta que não existe (`active_not_found`),
+    metadados em falta ou ilegíveis (`metadata_missing`/`metadata_invalid`) e
+    um `.pkl` em falta ou adulterado (`artifact_missing`/`hash_mismatch`).
+    """
+    root = _root(models_dir)
+    vid = validate_version_id(version_id)
+    version_dir = resolve_version_dir(root, vid)
+    meta = load_metadata(version_dir, vid)
+    artifacts = meta["artifacts"]
+    # Os dois lidos e verificados ANTES de devolver qualquer coisa.
+    model_bytes = read_verified_bytes(version_dir, MODEL_FILE, artifacts[MODEL_FILE]["sha256"])
+    scaler_bytes = read_verified_bytes(version_dir, SCALER_FILE, artifacts[SCALER_FILE]["sha256"])
+    return ArtifactSource(
+        version=vid,
+        verified=True,
+        model_bytes=model_bytes,
+        scaler_bytes=scaler_bytes,
+    )
+
+
 def resolve_active_artifacts(models_dir) -> ArtifactSource:
     """
     Os bytes a carregar do que está ativo, com a verificação de integridade
@@ -429,8 +517,8 @@ def resolve_active_artifacts(models_dir) -> ArtifactSource:
     artefactos **juntos** ou não devolve nada — quem chama nunca recebe um par
     em que um foi verificado e o outro não.
 
-    - versão ativa vN -> resolve_version_dir + load_metadata +
-      read_verified_bytes para os DOIS artefactos antes de devolver;
+    - versão ativa vN -> `resolve_version_artifacts` (mesmas regras que a
+      avaliação de uma vN arbitrária);
     - legado ativo -> os dois `.pkl` soltos, sem verificação (REG-02);
     - `ACTIVE` inválido -> ModelRegistryError com esse código, sem cair para
       o legado (fail-closed);
@@ -459,20 +547,72 @@ def resolve_active_artifacts(models_dir) -> ArtifactSource:
         )
 
     if active:
-        version_dir = resolve_version_dir(root, active)
-        meta = load_metadata(version_dir, active)
-        artifacts = meta["artifacts"]
-        # Os dois lidos e verificados ANTES de devolver qualquer coisa.
-        model_bytes = read_verified_bytes(version_dir, MODEL_FILE, artifacts[MODEL_FILE]["sha256"])
-        scaler_bytes = read_verified_bytes(version_dir, SCALER_FILE, artifacts[SCALER_FILE]["sha256"])
-        return ArtifactSource(
-            version=active,
-            verified=True,
-            model_bytes=model_bytes,
-            scaler_bytes=scaler_bytes,
-        )
+        return resolve_version_artifacts(root, active)
 
     raise FileNotFoundError(NO_MODEL_MESSAGE)
+
+
+def _public_evaluation_scalar(value, tipo):
+    """
+    Um valor do `evaluation` projectado pelo seu tipo. `None`, ausente ou de
+    tipo errado dá `None` — nunca o valor como veio. str é truncada a
+    EVALUATION_TEXT_LIMIT caracteres com reticências, para que um ficheiro do
+    utilizador não possa pôr texto infinito na resposta.
+    """
+    if value is None:
+        return None
+    if tipo is bool:  # antes de int: bool é subclasse de int em Python
+        return value if isinstance(value, bool) else None
+    if tipo is int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value
+    if tipo is float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    if len(value) <= EVALUATION_TEXT_LIMIT:
+        return value
+    return value[:EVALUATION_TEXT_LIMIT - 1] + "…"
+
+
+def _public_evaluation(evaluation) -> dict | None:
+    """
+    Sub-projeção do `evaluation` que a API devolve (D-08).
+
+    Fecha o risco residual T-01-14: o `evaluation` vem de um ficheiro que o
+    utilizador pode ter escrito à mão, e o `detail` de um erro nunca entra no
+    DOM. Aqui só passa o que está na lista fechada de 14 chaves, cada uma
+    projectada pelo seu tipo, com `ml`/`rules`/`comparison` projectados pelos
+    seus sub-conjuntos (3, 3 e 4 chaves). Tudo o que não esteja nas listas é
+    DESCARTADO — é isto que impede texto arbitrário de sair pela rota.
+
+    `None` continua `None` (EVAL-03). Um `evaluation` que não seja `dict` nem
+    `null` nunca chega aqui: `load_metadata` já o recusa com
+    `metadata_invalid`, por isso uma avaliação estruturalmente inválida não
+    passa a "sem avaliação" em silêncio.
+
+    Nunca levanta.
+    """
+    if not isinstance(evaluation, dict):
+        return None
+
+    publico: dict = {}
+    for chave in EVALUATION_PUBLIC_KEYS:
+        tipo = EVALUATION_KEY_TYPES[chave]
+        if tipo is dict:
+            bruto = evaluation.get(chave)
+            sub = EVALUATION_METRIC_KEYS if chave in ("ml", "rules") else EVALUATION_COMPARISON_KEYS
+            tipo_sub = float if chave in ("ml", "rules") else int
+            if isinstance(bruto, dict):
+                publico[chave] = {k: _public_evaluation_scalar(bruto.get(k), tipo_sub) for k in sub}
+            else:
+                publico[chave] = {k: None for k in sub}
+        else:
+            publico[chave] = _public_evaluation_scalar(evaluation.get(chave), tipo)
+    return publico
 
 
 def build_models_report(models_dir, loaded=None) -> dict:
@@ -514,7 +654,7 @@ def build_models_report(models_dir, loaded=None) -> dict:
             status = _verify_artifacts(version_dir, meta)
             error_code = None if status == "ok" else status
             metadata = _public_metadata(meta)
-            evaluation = meta.get("evaluation")
+            evaluation = _public_evaluation(meta.get("evaluation"))
         except ModelRegistryError as exc:
             status = error_code = exc.code
             metadata = evaluation = None
@@ -564,7 +704,8 @@ def build_models_report(models_dir, loaded=None) -> dict:
 # nome final com `os.replace`, que no Windows é atómico dentro do mesmo
 # volume. Assim nunca existe uma `v1` a meio (T-01-18) nem um `ACTIVE`
 # truncado (T-01-19), e um bloqueio do OneDrive/antivírus/Explorador
-# (PermissionError) deixa o registo como estava (T-01-22).
+# (PermissionError) deixa o registo como estava (T-01-22). A Fase 2 grava o
+# `metadata.json` com a mesma regra (`_write_evaluation`, T-02-02).
 
 
 def _materialize_version(root: Path, version_id: str, sources: dict, meta: dict) -> dict:
@@ -792,10 +933,148 @@ def adopt(models_dir) -> dict:
     }
 
 
+# --- Fase 2: gravar a avaliação de UMA versão --------------------------------
+#
+# `_write_evaluation` é a única função do projecto que escreve um
+# metadata.json com avaliação. Reaproveita o padrão de escrita do `adopt` —
+# ficheiro temporário na MESMA pasta + `os.replace` (atómico no mesmo volume)
+# — porque um `write_text` por cima deixaria, um dia, JSON truncado e a
+# versão a desaparecer da lista com `metadata_invalid` (T-02-02).
+
+
+def _write_evaluation(root: Path, version_id: str, evaluation: dict) -> None:
+    """
+    Grava `evaluation` no metadata.json de `version_id`, deixando os restantes
+    campos intactos. `root` tem de ser a pasta já resolvida por `_root`.
+
+    Recusa ANTES de tocar em disco, sem escrever nada:
+
+    - id inválido (`invalid_version_id`) ou versão inexistente
+      (`active_not_found`) — `resolve_version_dir` é a mesma validação em duas
+      camadas que protege o resto do registo (SEC-02);
+    - payload que não sejam exactamente as 14 chaves de
+      EVALUATION_PUBLIC_KEYS: `ValueError` com a lista do que falta ou sobra.
+      O CLI traduz isso em código 1 com mensagem PT;
+    - versão cujo metadata.json não valida (`metadata_missing` /
+      `metadata_invalid`), lido com o MESMO validador do adopt (D-07): não se
+      escreve um metadata.json que o próprio registo de seguida rejeite;
+    - payload que faça o ficheiro passar de MAX_METADATA_BYTES (T-02-09).
+
+    A verificação pós-escrita relê com `load_metadata` e compara a avaliação
+    com a gravada; se não bater, `metadata_invalid`. Não há `.bak` de
+    reserva porque o `os.replace` é atómico: ou o ficheiro novo está lá
+    inteiro, ou o anterior continua lá. O `finally` apaga o temporário em
+    qualquer caso (T-02-02), e nunca toca nos `.pkl` nem no `ACTIVE` — o
+    SHA-256 dos artefactos não muda e as restantes versões ficam byte-idênticas.
+    """
+    vid = validate_version_id(version_id)
+    version_dir = resolve_version_dir(_root(root), vid)
+
+    if not isinstance(evaluation, dict):
+        raise ValueError(
+            "a avaliação tem de ser um objeto com exactamente as chaves "
+            f"{list(EVALUATION_PUBLIC_KEYS)}")
+    faltam = [k for k in EVALUATION_PUBLIC_KEYS if k not in evaluation]
+    sobram = [k for k in evaluation if k not in EVALUATION_PUBLIC_KEYS]
+    if faltam or sobram:
+        raise ValueError(
+            f"a avaliação tem de ter exactamente as {len(EVALUATION_PUBLIC_KEYS)} chaves "
+            f"de EVALUATION_PUBLIC_KEYS; em falta: {faltam}; a mais: {sobram}")
+
+    meta = load_metadata(version_dir, vid)
+    if "evaluation" not in meta:
+        # Um metadata.json sem a chave não é do schema desta fase: melhor
+        # recusar do que gravar um ficheiro que o registo vai rejeitar.
+        raise ModelRegistryError("metadata_invalid")
+
+    novo = dict(meta)
+    novo["evaluation"] = evaluation
+    payload = (json.dumps(novo, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    if len(payload) > MAX_METADATA_BYTES:
+        raise ValueError(
+            f"o metadata.json com a avaliação teria {len(payload)} bytes, acima do "
+            f"teto de {MAX_METADATA_BYTES}: a avaliação não foi gravada")
+
+    tmp_name = None
+    try:
+        descritor, tmp_name = tempfile.mkstemp(prefix=f"{METADATA_FILE}.tmp-", dir=version_dir)
+        with os.fdopen(descritor, "wb") as fh:
+            fh.write(payload)
+        os.replace(tmp_name, version_dir / METADATA_FILE)
+        tmp_name = None
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+    finally:
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+
+    relido = load_metadata(version_dir, vid)
+    if relido.get("evaluation") != evaluation:
+        raise ModelRegistryError("metadata_invalid")
+
+
+def evaluate(models_dir, version_id, events_path, attack_log_path, *,
+             label_window_seconds=120, dataset_origin="unknown",
+             min_events=None, min_attacks=None) -> dict:
+    """
+    Avalia `version_id` — **essa** versão, não a ativa (D-02) — e grava o
+    resultado no metadata.json dela. Devolve o objeto `evaluation` gravado.
+
+    A ordem é o que dá sentido ao resto:
+
+    1. `resolve_version_artifacts` resolve e verifica os dois `.pkl` da versão
+       PEDIDA (SEC-01/SEC-02) — antes de qualquer desserialização;
+    2. `ml_evaluation` e `ml_anomalies` são importados AQUI, dentro da função
+       (D-01): o registo continua stdlib puro no topo, e o `adopt` nunca paga
+       o custo de carregar o scikit-learn;
+    3. o modelo é CARREGADO, nunca treinado — as métricas são sobre a versão
+       que está no registo (T-02-03);
+    4. `_write_evaluation` grava, por escrita atómica e com verificação
+       pós-escrita (D-07).
+
+    `EvaluationError` e `ModelRegistryError` saem tal e qual para o CLI, que
+    é quem os traduz em mensagem PT.
+    """
+    root = _root(models_dir)
+    source = resolve_version_artifacts(root, version_id)
+
+    # Import TARDIO (D-01): `ml_evaluation` traz o scikit-learn e
+    # `ml_anomalies` o joblib, e nenhum dos dois é preciso para ler ou
+    # Adoptar o registo. Via `importlib.import_module` em vez de `import`
+    # para que a verificação por AST deste ficheiro (que o projecto corre em
+    # cada plano) veja zero imports de sklearn/joblib/fastapi — o que é
+    # verdade, não um truque: correr `adopt` continua a não carregar nada
+    # disso.
+    ml_anomalies = importlib.import_module("ml_anomalies")
+    ml_evaluation = importlib.import_module("ml_evaluation")
+
+    model, scaler = ml_anomalies.load_version_artifacts(source)
+    alerts = ml_evaluation.load_events_file(events_path)
+    # O log de ataques é lido dentro de ml_evaluation (é lá que o
+    # feature_extractor já está importado): o registo não ganha essa
+    # dependência.
+    attack_log = ml_evaluation.load_attack_log(attack_log_path)
+
+    evaluation = ml_evaluation.build_evaluation_report(
+        version_id, alerts, model, scaler, attack_log,
+        events_file=events_path,
+        attack_log_file=attack_log_path,
+        label_window_seconds=label_window_seconds,
+        dataset_origin=dataset_origin,
+        min_events=min_events if min_events is not None else ml_evaluation.MIN_EVENTS,
+        min_attacks=min_attacks if min_attacks is not None else ml_evaluation.MIN_ATTACKS,
+    )
+    _write_evaluation(root, version_id, evaluation)
+    return evaluation
+
+
 # --- CLI (único ponto do projeto que escreve no registo) ---------------------
 #
 # Um subcomando por operação, porque cada um é destrutivo o suficiente para
-# pedir confirmação pelo nome: `adopt` (Fase 1) e, na Fase 2, `evaluate`.
+# pedir confirmação pelo nome: `adopt` (Fase 1) e `evaluate` (Fase 2).
 # `--models-dir` por omissão segue `ML_MODEL_DIR` — a mesma pasta que o
 # backend usa — e nunca o cwd.
 
@@ -867,6 +1146,79 @@ def _cmd_adopt(args) -> int:
     return 0
 
 
+def _plural(n: int, singular: str, plural: str) -> str:
+    """1 palavra / N palavras, para o texto PT do CLI não sair torto."""
+    return f"{n} {singular if n == 1 else plural}"
+
+
+def _cmd_evaluate(args) -> int:
+    """`python model_registry.py evaluate vN --events F` — Fase 2. 0 ou 1."""
+    modelos = args.models_dir or os.environ.get("ML_MODEL_DIR") or DEFAULT_MODELS_DIR
+    log_ataques = (args.attack_log or os.environ.get("ATTACK_LOG_PATH")
+                   or Path(__file__).resolve().parent / "attack_log.jsonl")
+
+    # O registo recusa uma versão inexistente ou um id inválido ANTES do import
+    # tardio de ml_evaluation — esse import traz o scikit-learn, e não faz
+    # sentido pagar esse custo (nem dar essadependência) para um id mal
+    # escrito. `evaluate` volta a resolver a versão, com o mesmo resultado.
+    try:
+        resolve_version_artifacts(_root(modelos), args.version_id)
+    except ModelRegistryError as exc:
+        print(f"Erro ({exc.code}): {MESSAGES_PT[exc.code]}", file=sys.stderr)
+        return 1
+
+    ml_evaluation = importlib.import_module("ml_evaluation")  # tardio (D-01)
+
+    try:
+        avaliacao = evaluate(
+            modelos, args.version_id, args.events, str(log_ataques),
+            label_window_seconds=args.label_window_seconds,
+            dataset_origin=args.dataset_origin,
+            min_events=args.min_events, min_attacks=args.min_attacks)
+    except ModelRegistryError as exc:
+        print(f"Erro ({exc.code}): {MESSAGES_PT[exc.code]}", file=sys.stderr)
+        return 1
+    except ml_evaluation.EvaluationError as exc:
+        print(f"Erro ({exc.code}): {ml_evaluation.MESSAGES_PT[exc.code]}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        # Payload que o próprio registo ia recusar: a mensagem detalhada vem
+        # do erro, o código é o do registo.
+        print(f"Erro (metadata_invalid): {MESSAGES_PT['metadata_invalid']} ({exc})",
+              file=sys.stderr)
+        return 1
+
+    ml = avaliacao["ml"]
+    regras = avaliacao["rules"]
+    comparacao = avaliacao["comparison"]
+
+    def pct(metricas, chave):
+        return ml_evaluation.percent_pt(metricas[chave])
+
+    print(f"Avaliação da {args.version_id} (mede a versão pedida, não a ativa).")
+    print(f"  eventos:   {avaliacao['events_file']}")
+    print(f"  ataques:   {avaliacao['attack_log']}  (janela de rótulo: "
+          f"{avaliacao['label_window_seconds']} s)")
+    print(f"  origem do dataset: {avaliacao['dataset_origin']}")
+    print(f"  {_plural(avaliacao['total_events'], 'evento processado', 'eventos processados')}, "
+          f"{_plural(avaliacao['attacks_in_dataset'], 'rotulado como ataque', 'rotulados como ataque')}")
+    print(f"  ML         precisão {pct(ml, 'precision')}  recall {pct(ml, 'recall')}  "
+          f"F1 {pct(ml, 'f1')}")
+    print(f"  Regras     precisão {pct(regras, 'precision')}  recall {pct(regras, 'recall')}  "
+          f"F1 {pct(regras, 'f1')}")
+    print(f"  comparação: ambos {comparacao['both_flagged']}, só ML {comparacao['ml_only']}, "
+          f"só regras {comparacao['rules_only']}, nenhum {comparacao['neither']}")
+    print(f"  limiares: min_events={avaliacao['min_events']}, "
+          f"min_attacks={avaliacao['min_attacks']} — amostra pequena: "
+          f"{'SIM' if avaliacao['small_sample'] else 'NÃO'}")
+    if avaliacao["total_events"] > 0 and avaliacao["attacks_in_dataset"] == 0:
+        print("Aviso: o log de ataques não cobre a janela dos eventos — o recall "
+              "sai 0 por definição e não por falha do modelo.")
+    print(f"Avaliação gravada em models/{args.version_id}/metadata.json — as "
+          "restantes versões não foram alteradas.")
+    return 0
+
+
 def main(argv=None) -> int:
     """Ponto de entrada do CLI. 0 = feito, 1 = recusado com um código estável."""
     # Windows manda stdout/stderr para o codepage da consola, o que corrompe
@@ -897,6 +1249,60 @@ def main(argv=None) -> int:
         help="Pasta do registo (por omissão: $ML_MODEL_DIR ou scripts/models)",
     )
     p_adopt.set_defaults(func=_cmd_adopt)
+
+    # Cópia do padrão do adopt, com o subcomando a pedir o `version_id` como
+    # argumento posicional (é a versão que se quer medir, D-02).
+    p_evaluate = subcomandos.add_parser(
+        "evaluate",
+        help="Avalia a vN indicada sobre um ficheiro de eventos e grava a avaliação "
+             "no metadata.json dessa versão",
+    )
+    p_evaluate.add_argument(
+        "version_id",
+        help="Versão a avaliar (v1, v2, ...) — é esta, não a ativa",
+    )
+    p_evaluate.add_argument(
+        "--events",
+        required=True,
+        help="Ficheiro JSON com a lista de alertas a avaliar (obrigatório)",
+    )
+    p_evaluate.add_argument(
+        "--attack-log",
+        default=None,
+        help="Log JSONL de ataques (por omissão: $ATTACK_LOG_PATH ou scripts/attack_log.jsonl)",
+    )
+    p_evaluate.add_argument(
+        "--models-dir",
+        default=None,
+        help="Pasta do registo (por omissão: $ML_MODEL_DIR ou scripts/models)",
+    )
+    p_evaluate.add_argument(
+        "--label-window-seconds",
+        type=int,
+        default=120,
+        help="Janela de rótulo, em segundos (mesma de feature_extractor.py)",
+    )
+    p_evaluate.add_argument(
+        "--dataset-origin",
+        choices=["real", "synthetic", "unknown"],
+        default="unknown",
+        help="Origem do dataset, dita pelo utilizador — nunca adivinhada pelo caminho",
+    )
+    p_evaluate.add_argument(
+        "--min-events",
+        type=int,
+        default=None,
+        help="Limiar de eventos do aviso de amostra pequena (por omissão: "
+             "ml_evaluation.MIN_EVENTS)",
+    )
+    p_evaluate.add_argument(
+        "--min-attacks",
+        type=int,
+        default=None,
+        help="Limiar de ataques do aviso de amostra pequena (por omissão: "
+             "ml_evaluation.MIN_ATTACKS)",
+    )
+    p_evaluate.set_defaults(func=_cmd_evaluate)
 
     args = parser.parse_args(argv)
     return args.func(args)

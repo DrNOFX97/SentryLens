@@ -1076,6 +1076,285 @@ def test_cli_recuperacao(tmp: Path) -> None:
           str(falha) not in texto and str(falha.resolve()) not in texto)
 
 
+# --- Fase 2: resolve_version_artifacts e _write_evaluation (D-02, D-07, D-08) --
+#
+# O payload de avaliação que serve de fixture a todos os casos abaixo. Tem as
+# MESMAS 14 chaves que EVALUATION_PUBLIC_KEYS, com valores plausíveis: é o
+# contrato que scripts/ml_evaluation.py escreve e que o registo aceita.
+
+EVALUATION_EXEMPLO = {
+    "evaluated_at": "2026-10-10T09:30:00+00:00",
+    "events_file": "eventos.json",
+    "attack_log": "attack_log.jsonl",
+    "label_window_seconds": 120,
+    "total_events": 35,
+    "attacks_in_dataset": 20,
+    "ml": {"precision": 0.8571, "recall": 0.3, "f1": 0.4444},
+    "rules": {"precision": 0.875, "recall": 0.35, "f1": 0.5},
+    "comparison": {"both_flagged": 5, "ml_only": 2, "rules_only": 3, "neither": 25},
+    "min_events": 50,
+    "min_attacks": 10,
+    "small_sample": True,
+    "caveat": (
+        "Dataset pequeno (35 eventos, 20 ataques; limiares: min_events=50, "
+        "min_attacks=10) — não é uma estimativa robusta de taxa de deteção."
+    ),
+    "dataset_origin": "real",
+}
+
+
+def test_resolve_version_artifacts(tmp: Path) -> None:
+    secao("Fase 2 — resolve_version_artifacts: a versão PEDIDA, com a mesma integridade")
+
+    model_bytes, scaler_bytes = b"modelo-da-v1", b"scaler-da-v1"
+
+    # 1. versão registada e íntegra -> os bytes do ficheiro, verificados.
+    ok = tmp / "rva-ok"
+    make_version(ok, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+    write_active(ok, "v1")
+    fonte = model_registry.resolve_version_artifacts(ok, "v1")
+    check("resolve_version_artifacts: version 'v1'", fonte.version == "v1")
+    check("resolve_version_artifacts: verified True", fonte.verified is True)
+    check("resolve_version_artifacts: devolve os bytes do ficheiro do modelo",
+          fonte.model_bytes == model_bytes)
+    check("resolve_version_artifacts: devolve os bytes do ficheiro do scaler",
+          fonte.scaler_bytes == scaler_bytes)
+
+    # 2. o mesmo conteúdo que resolve_active_artifacts dá para a versão ativa:
+    #    avaliar a vN e carregar a vN ativa usam as mesmas regras de integridade.
+    ativa = model_registry.resolve_active_artifacts(ok)
+    check("resolve_version_artifacts == resolve_active_artifacts para a ativa",
+          fonte == ativa)
+    check("e o tipo continua a ser ArtifactSource",
+          isinstance(fonte, model_registry.ArtifactSource))
+
+    # 3. D-02: pede-se a v2 com a v1 ativa — são artefactos diferentes.
+    duas = tmp / "rva-duas"
+    make_version(duas, "v1", model_bytes=b"modelo-v1", scaler_bytes=b"scaler-v1")
+    make_version(duas, "v2", model_bytes=b"modelo-v2", scaler_bytes=b"scaler-v2")
+    write_active(duas, "v1")
+    fonte_v2 = model_registry.resolve_version_artifacts(duas, "v2")
+    check("D-02: pedir a v2 com a v1 ativa devolve a v2",
+          fonte_v2.version == "v2" and fonte_v2.model_bytes == b"modelo-v2"
+          and fonte_v2.verified is True)
+
+    # 4. ids inválidos -> invalid_version_id, sem devolver bytes.
+    for valor in ("../x", "v1\n", "vX", 5, None, "", "V1", b"v1"):
+        exc = espera_erro(model_registry.resolve_version_artifacts, ok, valor)
+        check(f"resolve_version_artifacts({valor!r}) -> invalid_version_id",
+              exc is not None and exc.code == "invalid_version_id")
+
+    # 5. versão inexistente -> active_not_found.
+    exc = espera_erro(model_registry.resolve_version_artifacts, ok, "v9")
+    check("resolve_version_artifacts('v9') -> active_not_found",
+          exc is not None and exc.code == "active_not_found")
+
+    # 6. sem metadata.json -> metadata_missing.
+    sem_meta = tmp / "rva-sem-meta"
+    make_version(sem_meta, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+    (sem_meta / "v1" / model_registry.METADATA_FILE).unlink()
+    exc = espera_erro(model_registry.resolve_version_artifacts, sem_meta, "v1")
+    check("resolve_version_artifacts sem metadata.json -> metadata_missing",
+          exc is not None and exc.code == "metadata_missing")
+
+    # 7. metadata.json inválido -> metadata_invalid.
+    meta_mau = tmp / "rva-meta-mau"
+    make_version(meta_mau, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+    (meta_mau / "v1" / model_registry.METADATA_FILE).write_text("{nao-json", encoding="utf-8")
+    exc = espera_erro(model_registry.resolve_version_artifacts, meta_mau, "v1")
+    check("resolve_version_artifacts com JSON inválido -> metadata_invalid",
+          exc is not None and exc.code == "metadata_invalid")
+
+    # 8. artefacto em falta -> artifact_missing.
+    sem_pkl = tmp / "rva-sem-pkl"
+    make_version(sem_pkl, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+    (sem_pkl / "v1" / MODEL_FILE).unlink()
+    exc = espera_erro(model_registry.resolve_version_artifacts, sem_pkl, "v1")
+    check("resolve_version_artifacts sem o .pkl do modelo -> artifact_missing",
+          exc is not None and exc.code == "artifact_missing")
+
+    # 9. um byte trocado -> hash_mismatch, e nenhum byte é devolvido.
+    adulterado = tmp / "rva-adulterado"
+    make_version(adulterado, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+    flip_byte(adulterado / "v1" / MODEL_FILE)
+    exc = espera_erro(model_registry.resolve_version_artifacts, adulterado, "v1")
+    check("resolve_version_artifacts com um byte trocado -> hash_mismatch",
+          exc is not None and exc.code == "hash_mismatch")
+    check("hash_mismatch: a mensagem é o código, sem caminho",
+          exc is not None and str(exc) == "hash_mismatch"
+          and str(adulterado) not in str(exc))
+
+
+def test_write_evaluation(tmp: Path) -> None:
+    secao("Fase 2 — _write_evaluation: escrita atómica, validação e rollback")
+
+    root = tmp / "we-ok"
+    make_version(root, "v1")
+    antes_meta = json.loads((root / "v1" / model_registry.METADATA_FILE).read_text(encoding="utf-8"))
+    antes_bytes = (root / "v1" / model_registry.METADATA_FILE).read_bytes()
+    antes_pkl = {n: (root / "v1" / n).read_bytes() for n in model_registry.ARTIFACT_FILES}
+
+    devolvido = model_registry._write_evaluation(
+        model_registry._root(root), "v1", dict(EVALUATION_EXEMPLO))
+    check("_write_evaluation devolve None", devolvido is None)
+
+    relido = model_registry.load_metadata(root / "v1", "v1")
+    check("_write_evaluation: a relitura com load_metadata dá a mesma avaliação",
+          relido["evaluation"] == EVALUATION_EXEMPLO)
+    check("_write_evaluation: os .pkl ficam byte-idênticos",
+          all((root / "v1" / n).read_bytes() == antes_pkl[n]
+              for n in model_registry.ARTIFACT_FILES))
+    check("_write_evaluation: artifacts/sha256/size_bytes intactos",
+          relido["artifacts"] == antes_meta["artifacts"])
+    check("_write_evaluation: as restantes chaves do metadata.json intactas",
+          {k: v for k, v in relido.items() if k != "evaluation"}
+          == {k: v for k, v in antes_meta.items() if k != "evaluation"})
+    report = model_registry.build_models_report(root)
+    check("_write_evaluation: a listagem devolve a mesma avaliação",
+          versoes_por_id(report)["v1"]["evaluation"] == EVALUATION_EXEMPLO)
+    check("_write_evaluation: a versão continua íntegra",
+          versoes_por_id(report)["v1"]["status"] == "ok")
+    check("_write_evaluation: não sobrou nenhum metadata.json.tmp-*",
+          restos(root / "v1", "metadata.json.tmp-") == [])
+
+    # (a) payload com uma chave a mais OU a menos -> ValueError e nada escrito.
+    for rotulo, payload in (
+        ("chave a mais", {**EVALUATION_EXEMPLO, "nota_qualquer": "x"}),
+        ("chave a menos", {k: v for k, v in EVALUATION_EXEMPLO.items() if k != "caveat"}),
+        ("não é um dict", ["nao", "e", "um", "dict"]),
+    ):
+        intacto = (root / "v1" / model_registry.METADATA_FILE).read_bytes()
+        try:
+            model_registry._write_evaluation(model_registry._root(root), "v1", payload)
+            erro = None
+        except ValueError as exc:
+            erro = exc
+        check(f"_write_evaluation ({rotulo}) -> ValueError", erro is not None)
+        check(f"_write_evaluation ({rotulo}): o metadata.json anterior fica byte-idêntico",
+              (root / "v1" / model_registry.METADATA_FILE).read_bytes() == intacto)
+        check(f"_write_evaluation ({rotulo}): não sobrou temporário nenhum",
+              restos(root / "v1", "metadata.json.tmp-") == [])
+
+    # (b) os.replace bloqueado -> registry_unavailable, ficheiro intacto, sem lixo.
+    bloqueado = tmp / "we-bloqueado"
+    make_version(bloqueado, "v1")
+    intacto = (bloqueado / "v1" / model_registry.METADATA_FILE).read_bytes()
+    pkl_antes = {n: (bloqueado / "v1" / n).read_bytes() for n in model_registry.ARTIFACT_FILES}
+    original = replace_bloqueado(model_registry.METADATA_FILE)
+    try:
+        exc = espera_erro(model_registry._write_evaluation,
+                          model_registry._root(bloqueado), "v1", dict(EVALUATION_EXEMPLO))
+    finally:
+        model_registry.os.replace = original
+    check("_write_evaluation: os.replace bloqueado -> registry_unavailable",
+          exc is not None and exc.code == "registry_unavailable")
+    check("_write_evaluation: o metadata.json anterior fica byte-idêntico",
+          (bloqueado / "v1" / model_registry.METADATA_FILE).read_bytes() == intacto)
+    check("_write_evaluation: os .pkl intactos",
+          all((bloqueado / "v1" / n).read_bytes() == pkl_antes[n]
+              for n in model_registry.ARTIFACT_FILES))
+    check("_write_evaluation: não sobra nenhum metadata.json.tmp-*",
+          restos(bloqueado / "v1", "metadata.json.tmp-") == [])
+    check("_write_evaluation: a versão continua na listagem com status 'ok'",
+          versoes_por_id(model_registry.build_models_report(bloqueado))["v1"]["status"] == "ok")
+
+    # (c) só a versão pedida muda: a v2 e o ACTIVE ficam byte-idênticos.
+    varias = tmp / "we-varias"
+    make_version(varias, "v1")
+    make_version(varias, "v2")
+    write_active(varias, "v2")
+    meta_v2_antes = (varias / "v2" / model_registry.METADATA_FILE).read_bytes()
+    pkl_v2_antes = {n: (varias / "v2" / n).read_bytes() for n in model_registry.ARTIFACT_FILES}
+    ativo_antes = (varias / model_registry.ACTIVE_FILE).read_bytes()
+    model_registry._write_evaluation(
+        model_registry._root(varias), "v1", dict(EVALUATION_EXEMPLO))
+    check("_write_evaluation: o metadata.json da v2 fica byte-idêntico",
+          (varias / "v2" / model_registry.METADATA_FILE).read_bytes() == meta_v2_antes)
+    check("_write_evaluation: os .pkl da v2 ficam byte-idênticos",
+          all((varias / "v2" / n).read_bytes() == pkl_v2_antes[n]
+              for n in model_registry.ARTIFACT_FILES))
+    check("_write_evaluation: o ACTIVE fica byte-idêntico",
+          (varias / model_registry.ACTIVE_FILE).read_bytes() == ativo_antes)
+    relatorio = versoes_por_id(model_registry.build_models_report(varias))
+    check("_write_evaluation: a v2 continua sem avaliação",
+          relatorio["v2"]["evaluation"] is None)
+    check("_write_evaluation: a v1 tem a avaliação",
+          relatorio["v1"]["evaluation"] == EVALUATION_EXEMPLO)
+
+    # (d) id inválido ou versão inexistente -> nada escrito em lado nenhum.
+    antes_tudo = {p: p.read_bytes() for p in varias.rglob("*") if p.is_file()}
+    exc = espera_erro(model_registry._write_evaluation,
+                      model_registry._root(varias), "../x", dict(EVALUATION_EXEMPLO))
+    check("_write_evaluation('../x') -> invalid_version_id",
+          exc is not None and exc.code == "invalid_version_id")
+    exc = espera_erro(model_registry._write_evaluation,
+                      model_registry._root(varias), "v9", dict(EVALUATION_EXEMPLO))
+    check("_write_evaluation('v9') -> active_not_found",
+          exc is not None and exc.code == "active_not_found")
+    check("_write_evaluation com id mau não escreve nada",
+          {p: p.read_bytes() for p in varias.rglob("*") if p.is_file()} == antes_tudo)
+
+    # (e) a verificação pós-escrita relê com load_metadata (D-07): se o que
+    #     voltou do disco não for o que foi gravado, metadata_invalid.
+    mentiroso = tmp / "we-mentiroso"
+    make_version(mentiroso, "v1")
+    original_load = model_registry.load_metadata
+    chamadas = {"n": 0}
+
+    def load_que_mente(version_dir, version_id):
+        chamadas["n"] += 1
+        meta = original_load(version_dir, version_id)
+        if chamadas["n"] > 1:  # a relidação pós-escrita
+            return {**meta, "evaluation": None}
+        return meta
+
+    model_registry.load_metadata = load_que_mente
+    try:
+        exc = espera_erro(model_registry._write_evaluation,
+                          model_registry._root(mentiroso), "v1", dict(EVALUATION_EXEMPLO))
+    finally:
+        model_registry.load_metadata = original_load
+    check("_write_evaluation: relitura que não bate -> metadata_invalid",
+          exc is not None and exc.code == "metadata_invalid")
+    check("_write_evaluation: a verificação pós-escrita relê mesmo (load_metadata chamado 2x)",
+          chamadas["n"] == 2)
+
+
+def test_cli_evaluate(tmp: Path) -> None:
+    secao("CLI evaluate — o subcomando existe e recusa antes do motor de avaliação")
+
+    vazia = tmp / "cli-eval-vazia"
+    vazia.mkdir(parents=True)
+    eventos = tmp / "cli-eval-eventos.json"
+    eventos.write_text("[]", encoding="utf-8")
+
+    proc = correr_cli("evaluate", "--help")
+    check("CLI evaluate: 'evaluate --help' -> código 0", proc.returncode == 0)
+    check("CLI evaluate: o help mostra --events", "--events" in proc.stdout)
+    check("CLI evaluate: o help mostra --attack-log", "--attack-log" in proc.stdout)
+    check("CLI evaluate: o help mostra --dataset-origin", "--dataset-origin" in proc.stdout)
+
+    proc = correr_cli("--help")
+    check("CLI evaluate: o --help geral mostra adopt e evaluate",
+          "adopt" in proc.stdout and "evaluate" in proc.stdout)
+
+    # O registo recusa antes do import tardio de ml_evaluation (que traria
+    # sklearn): por isso estas duas recusas nem precisam dele.
+    proc = correr_cli("evaluate", "v9", "--events", str(eventos), "--models-dir", str(vazia))
+    check("CLI evaluate: versão inexistente -> código 1", proc.returncode == 1)
+    check("CLI evaluate: versão inexistente -> active_not_found em stderr",
+          "active_not_found" in proc.stderr)
+    check("CLI evaluate: nada em stdout", proc.stdout.strip() == "")
+
+    proc = correr_cli("evaluate", "../x", "--events", str(eventos), "--models-dir", str(vazia))
+    check("CLI evaluate: id inválido -> código 1", proc.returncode == 1)
+    check("CLI evaluate: id inválido -> invalid_version_id em stderr",
+          "invalid_version_id" in proc.stderr)
+
+    check("CLI evaluate: nenhuma das recusas criou nada na pasta",
+          list(vazia.iterdir()) == [])
+
+
 def run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         raiz = Path(tmp)
@@ -1094,6 +1373,9 @@ def run() -> None:
         test_adopt_retomas_recusadas(raiz)
         test_cli_adopt(raiz)
         test_cli_recuperacao(raiz)
+        test_resolve_version_artifacts(raiz)
+        test_write_evaluation(raiz)
+        test_cli_evaluate(raiz)
 
     print()
     if failures:

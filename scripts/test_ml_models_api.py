@@ -20,6 +20,8 @@ import hashlib
 import io
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -41,6 +43,18 @@ main.app.router.on_startup.clear()
 API_KEY = os.environ["SENTRYLENS_API_KEY"]
 HEADERS = {"X-API-Key": API_KEY}
 MODEL_FILE, SCALER_FILE = model_registry.ARTIFACT_FILES
+
+# "C:" no início de um valor seria um caminho de drive a vazar (Pitfall 5/API-02).
+DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def _modulos_de(modulo) -> set[str]:
+    """Nomes de todos os módulos que o ficheiro carrega (para provas negativas:
+    'o motor não tem isto', 'o registo não importou aquilo')."""
+    return set(getattr(modulo, "__dict__", {})) | {
+        valor.__name__ for valor in vars(modulo).values()
+        if type(valor).__name__ == "module" and hasattr(valor, "__name__")
+    }
 
 failures: list[str] = []
 
@@ -359,6 +373,7 @@ def run() -> None:
 
     carregamento_verificado(client)
     adocao_ponta_a_ponta(client)
+    avaliacao_ponta_a_ponta(client)
 
     main.ML_MODEL_DIR = original_dir
 
@@ -671,6 +686,233 @@ def adocao_ponta_a_ponta(client) -> None:
                   all(hashlib.sha256((partido / nome).read_bytes()).hexdigest() == digest
                       for nome, digest in soltos.items()))
         finally:
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def correr_cli_evaluate(registo, eventos, log, *, origin="real", version="v1", extra=()):
+    """Corre `python model_registry.py evaluate ...` como o utilizador o corre:
+    num processo novo, com cwd=scripts/ (é de lá que os módulos se importam)."""
+    return subprocess.run(
+        [sys.executable, "-X", "utf8", str(SCRIPT_DIR / "model_registry.py"),
+         "evaluate", version, "--events", str(eventos), "--attack-log", str(log),
+         "--models-dir", str(registo), "--dataset-origin", origin, *extra],
+        capture_output=True, text=True, encoding="utf-8",
+        cwd=str(SCRIPT_DIR), timeout=180,
+    )
+
+
+def avaliacao_ponta_a_ponta(client) -> None:
+    """
+    Fase 2: o comando `evaluate` a sério (pickles REAIS) e a avaliação a
+    chegar ao dashboard pela rota, já sub-projectada.
+
+    Cobre o caminho feliz (ACTIVE -> v2 e `evaluate v1`, D-02), as recusas
+    (hash adulterado com ZERO chamadas a joblib.load, id inválido, versão
+    inexistente) e a sub-projeção do `evaluation` escrito à mão (D-08).
+    """
+    print("\n--- avaliação ponta a ponta (EVAL-01/02/03, D-02/D-08) ---")
+
+    original_dir = main.ML_MODEL_DIR
+    original_joblib = ml_anomalies.joblib
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        model_bytes, scaler_bytes = real_model_bytes()
+
+        eventos = raiz / "eventos.json"
+        eventos.write_text(json.dumps(MOCK_ALERTS, ensure_ascii=False), encoding="utf-8")
+        # Um ataque que cobre UM evento só (o das 03:05:00, com janela de 120 s).
+        log = raiz / "attack_log.jsonl"
+        log.write_text(
+            json.dumps({"timestamp": "2026-09-02T03:05:00Z", "type": "brute_force"}) + "\n",
+            encoding="utf-8")
+
+        def registo_com_duas(nome):
+            pasta = raiz / nome
+            make_version(pasta, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            make_version(pasta, "v2", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            write_active(pasta, "v2")
+            return pasta
+
+        def por_id(body):
+            return {v.get("id"): v for v in body.get("versions") or []}
+
+        # D-01/D-08: o registo e o motor têm de ter a MESMA lista de chaves,
+        # pela mesma ordem. São duas listas escritas à mão (o registo não pode
+        # importar o motor, D-01), e este é o teste que ata essa costura.
+        import ml_evaluation  # noqa: PLC0415 — só no teste, para comparar
+
+        check("(s) EVALUATION_KEYS do motor == EVALUATION_PUBLIC_KEYS do registo",
+              tuple(ml_evaluation.EVALUATION_KEYS)
+              == tuple(model_registry.EVALUATION_PUBLIC_KEYS)
+              and len(ml_evaluation.EVALUATION_KEYS) == 14)
+        check("(s) METRIC_KEYS do motor == EVALUATION_METRIC_KEYS do registo",
+              tuple(ml_evaluation.METRIC_KEYS) == tuple(model_registry.EVALUATION_METRIC_KEYS))
+        check("(s) COMPARISON_KEYS do motor == EVALUATION_COMPARISON_KEYS do registo",
+              tuple(ml_evaluation.COMPARISON_KEYS)
+              == tuple(model_registry.EVALUATION_COMPARISON_KEYS))
+        check("(s) o motor não tem train_model (avaliar não é treinar, T-02-03)",
+              not hasattr(ml_evaluation, "train_model")
+              and "train_anomaly_model" not in _modulos_de(ml_evaluation))
+        check("(s) o motor não toca em joblib (só ml_anomalies desserializa, Pitfall 7)",
+              "joblib" not in _modulos_de(ml_evaluation))
+
+        try:
+            # (s) caminho feliz: ACTIVE -> v2, mas o comando avalia a v1 (D-02).
+            registo = registo_com_duas("aval-ok")
+            meta_v2_antes = (registo / "v2" / "metadata.json").read_bytes()
+            pkl_v1_antes = {n: (registo / "v1" / n).read_bytes() for n in model_registry.ARTIFACT_FILES}
+            proc = correr_cli_evaluate(registo, eventos, log, origin="real", version="v1")
+            check("(s) evaluate v1 -> código 0", proc.returncode == 0)
+            check("(s) o stdout diz que avaliou a v1", "v1" in proc.stdout)
+            check("(s) o stdout diz os eventos processados e os ataques",
+                  "10 eventos processados" in proc.stdout and "1 rotulado como ataque" in proc.stdout)
+            check("(s) o stdout diz onde foi gravado",
+                  "metadata.json" in proc.stdout and "restantes versões não foram alteradas" in proc.stdout)
+            check("(s) nada em stderr", proc.stderr.strip() == "")
+
+            main.ML_MODEL_DIR = str(registo)
+            resp = client.get("/api/ml/models")
+            check("(s) /api/ml/models -> 200", resp.status_code == 200)
+            body = resp.json()
+            versoes = por_id(body)
+            check("(s) a ativa continua a ser a v2", body.get("active") == "v2")
+            check("(s) D-02: a avaliação foi para a v1 pedida",
+                  versoes["v1"]["evaluation"] is not None)
+            check("(s) D-02: a v2 continua sem avaliação",
+                  versoes["v2"]["evaluation"] is None)
+            avaliacao = versoes["v1"]["evaluation"] or {}
+            check("(s) total_events == 10", avaliacao.get("total_events") == 10)
+            check("(s) attacks_in_dataset == 1", avaliacao.get("attacks_in_dataset") == 1)
+            check("(s) a avaliação tem EXACTAMENTE as 14 chaves do registo",
+                  set(avaliacao) == set(model_registry.EVALUATION_PUBLIC_KEYS)
+                  and len(avaliacao) == 14)
+            check("(s) ml e rules têm as três métricas",
+                  set(avaliacao.get("ml") or {}) == set(model_registry.EVALUATION_METRIC_KEYS)
+                  and set(avaliacao.get("rules") or {}) == set(model_registry.EVALUATION_METRIC_KEYS))
+            check("(s) comparison tem as quatro contagens",
+                  set(avaliacao.get("comparison") or {})
+                  == set(model_registry.EVALUATION_COMPARISON_KEYS))
+            check("(s) as quatro contagens somam total_events",
+                  sum((avaliacao.get("comparison") or {}).values()) == avaliacao.get("total_events"))
+            check("(s) os limiares gravados são os do motor",
+                  avaliacao.get("min_events") == 50 and avaliacao.get("min_attacks") == 10)
+            check("(s) small_sample True (10 eventos, 1 ataque)", avaliacao.get("small_sample") is True)
+            check("(s) events_file é só o nome, sem caminho",
+                  avaliacao.get("events_file") == "eventos.json"
+                  and "/" not in str(avaliacao.get("events_file"))
+                  and "\\" not in str(avaliacao.get("events_file")))
+            check("(s) dataset_origin real", avaliacao.get("dataset_origin") == "real")
+            check("(s) nenhum valor da avaliação traz um caminho",
+                  not any("/" in str(v) or "\\" in str(v) or DRIVE_RE.match(str(v))
+                          for v in avaliacao.values() if isinstance(v, str)))
+            check("(s) o metadata.json da v2 ficou byte-idêntico",
+                  (registo / "v2" / "metadata.json").read_bytes() == meta_v2_antes)
+            check("(s) os .pkl da v1 ficaram byte-idênticos",
+                  all((registo / "v1" / n).read_bytes() == pkl_v1_antes[n]
+                      for n in model_registry.ARTIFACT_FILES))
+            check("(s) a v1 listada continua íntegra",
+                  versoes["v1"]["status"] == "ok")
+            no_leaks_pasta("(s) /api/ml/models", resp, registo)
+
+            # (t) um byte trocado no .pkl -> hash_mismatch e ZERO joblib.load.
+            #     O `evaluate` é chamado no próprio processo porque um contador
+            #     de chamadas a joblib.load não atravessa um subprocesso.
+            adulterado = registo_com_duas("aval-adulterado")
+            flip_byte(adulterado / "v1" / MODEL_FILE)
+            contador = ContadorJoblib()
+            ml_anomalies.joblib = contador
+            try:
+                try:
+                    model_registry.evaluate(str(adulterado), "v1", str(eventos), str(log),
+                                             dataset_origin="real")
+                    exc = None
+                except model_registry.ModelRegistryError as raised:
+                    exc = raised
+                check("(t) evaluate com .pkl adulterado -> hash_mismatch",
+                      exc is not None and exc.code == "hash_mismatch")
+                check("(t) ZERO chamadas a joblib.load com bytes não verificados",
+                      contador.chamadas == 0)
+                check("(t) nada foi gravado na v1 adulterada",
+                      json.loads((adulterado / "v1" / "metadata.json").read_text(encoding="utf-8"))["evaluation"]
+                      is None)
+            finally:
+                ml_anomalies.joblib = original_joblib
+
+            proc = correr_cli_evaluate(adulterado, eventos, log, origin="real", version="v1")
+            check("(t) o CLI com .pkl adulterado -> código 1", proc.returncode == 1)
+            check("(t) e stderr traz hash_mismatch", "hash_mismatch" in proc.stderr)
+            check("(t) e a mensagem não traz caminho", str(adulterado) not in proc.stderr)
+
+            # (u) id inválido e versão inexistente -> 1 com o código certo.
+            proc = correr_cli_evaluate(registo, eventos, log, origin="real", version="v9")
+            check("(u) evaluate v9 -> código 1", proc.returncode == 1)
+            check("(u) evaluate v9 -> active_not_found em stderr",
+                  "active_not_found" in proc.stderr)
+            proc = correr_cli_evaluate(registo, eventos, log, origin="real", version="../x")
+            check("(u) evaluate ../x -> código 1", proc.returncode == 1)
+            check("(u) evaluate ../x -> invalid_version_id em stderr",
+                  "invalid_version_id" in proc.stderr)
+
+            # (v) D-08: texto arbitrário escrito à mão no metadata.json nunca
+            #     sai pela API.
+            manual = registo_com_duas("aval-manual")
+            caminho = manual / "v1" / "metadata.json"
+            meta = json.loads(caminho.read_text(encoding="utf-8"))
+            payload = {k: 0 for k in model_registry.EVALUATION_PUBLIC_KEYS}
+            payload.update({
+                "evaluated_at": "2026-10-10T09:30:00+00:00",
+                "events_file": "eventos.json",
+                "attack_log": "attack_log.jsonl",
+                "label_window_seconds": 120,
+                "total_events": 10,
+                "attacks_in_dataset": 1,
+                "ml": {"precision": 0.5, "recall": 0.5, "f1": 0.5, "nota": "<img src=x>"},
+                "rules": {"precision": 0.25, "recall": 0.25, "f1": 0.25, "nota": "<img src=x>"},
+                "comparison": {"both_flagged": 1, "ml_only": 0, "rules_only": 0,
+                               "neither": 9, "extra": "<img src=x>"},
+                "min_events": 50,
+                "min_attacks": 10,
+                "small_sample": True,
+                "caveat": "Dataset pequeno (10 eventos, 1 ataques) — não é uma estimativa robusta.",
+                "dataset_origin": "real",
+                "nota_qualquer": "<img src=x onerror=alert(1)>",
+            })
+            meta["evaluation"] = payload
+            caminho.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            main.ML_MODEL_DIR = str(manual)
+            resp = client.get("/api/ml/models")
+            check("(v) /api/ml/models -> 200 com evaluation escrito à mão", resp.status_code == 200)
+            avaliacao_v = (por_id(resp.json())["v1"]["evaluation"] or {})
+            check("(v) a chave arbitrária é descartada",
+                  "nota_qualquer" not in resp.text and "nota_qualquer" not in avaliacao_v)
+            check("(v) as chaves arbitrárias dentro de ml/rules/comparison também",
+                  set(avaliacao_v["ml"]) == set(model_registry.EVALUATION_METRIC_KEYS)
+                  and set(avaliacao_v["comparison"]) == set(model_registry.EVALUATION_COMPARISON_KEYS))
+            check("(v) o HTML arbitrário nunca sai na resposta", "<img" not in resp.text)
+            check("(v) as chaves sub-projetadas continuam presentes",
+                  set(avaliacao_v) == set(model_registry.EVALUATION_PUBLIC_KEYS))
+            check("(v) a v2 sem avaliação continua null", por_id(resp.json())["v2"]["evaluation"] is None)
+            no_leaks_pasta("(v) /api/ml/models", resp, manual)
+
+            # (w) o teto por campo: um caveat gigante é truncado, não devolvido
+            #     inteiro, e um valor do tipo errado cai a None.
+            caminho.write_text(json.dumps(
+                {**meta, "evaluation": {**payload, "caveat": "X" * 5000, "total_events": "dez"}},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            resp = client.get("/api/ml/models")
+            avaliacao_w = (por_id(resp.json())["v1"]["evaluation"] or {})
+            check("(w) um texto gigante é truncado ao teto",
+                  isinstance(avaliacao_w["caveat"], str)
+                  and len(avaliacao_w["caveat"]) <= model_registry.EVALUATION_TEXT_LIMIT
+                  and avaliacao_w["caveat"].endswith("…"))
+            check("(w) um valor do tipo errado cai a None", avaliacao_w["total_events"] is None)
+        finally:
+            ml_anomalies.joblib = original_joblib
             ml_anomalies.reset_cache()
             main.ML_MODEL_DIR = original_dir
 
