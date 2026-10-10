@@ -100,10 +100,26 @@ const {
 // Os helpers da Evaluation vivem agora em ml_evaluation.js (D-09): saem do
 // MESMO contexto, depois de o segundo ficheiro ter carregado.
 const helpersEval = vm.runInContext(
-  "({ mleEmptyState, mlePercent, mleMetricCell, mleBuildEvalRows, mleEvalNoticeText })",
+  "({ mleEmptyState, mlePercent, mleMetricCell, mleBuildEvalRows, mleEvalNoticeText,"
+  + "   mleOriginHtml, mleSmallSampleNotice, mleBuildLiveAgreement, mleLiveErrorHtml,"
+  + "   mleLiveErrorMessage, MLE_LIVE_SEM_DADOS, MLE_LIVE_TRUNCADO, MLE_ORIGIN_AVISO })",
   ctx
 );
-const { mleEmptyState, mlePercent, mleMetricCell, mleBuildEvalRows, mleEvalNoticeText } = helpersEval;
+const {
+  mleEmptyState,
+  mlePercent,
+  mleMetricCell,
+  mleBuildEvalRows,
+  mleEvalNoticeText,
+  mleOriginHtml,
+  mleSmallSampleNotice,
+  mleBuildLiveAgreement,
+  mleLiveErrorHtml,
+  mleLiveErrorMessage,
+  MLE_LIVE_SEM_DADOS,
+  MLE_LIVE_TRUNCADO,
+  MLE_ORIGIN_AVISO,
+} = helpersEval;
 
 // --- relatórios reais gerados pelo wrapper ------------------------------------
 
@@ -119,6 +135,24 @@ const reportEmpty = JSON.parse(fs.readFileSync(path.join(fixturesDir, "report_em
 const reportEvaluated = JSON.parse(
   fs.readFileSync(path.join(fixturesDir, "report_evaluated.json"), "utf8"));
 const evaluateStdout = fs.readFileSync(path.join(fixturesDir, "evaluate_stdout.txt"), "utf8");
+
+// As três janelas de /api/ml-anomalies, reais (o Indexer mockado, no wrapper).
+// Uma falta aqui é um wrapper desatualizado, não um teste a falhar por outra
+// coisa: mensagem explícita e saída 1, para não se testar um ficheiro vazio.
+const LIVE_FIXTURES = ["ml_report_ok.json", "ml_report_vazio.json", "ml_report_truncado.json"];
+for (const nome of LIVE_FIXTURES) {
+  const caminho = path.join(fixturesDir, nome);
+  if (!fs.existsSync(caminho)) {
+    console.log(`[FALHOU] fixture ${nome} em falta — regenera com test_ml_models_ui.py`);
+    process.exit(1);
+  }
+}
+check("as três janelas de /api/ml-anomalies chegaram do wrapper", true);
+const mlReportOk = JSON.parse(fs.readFileSync(path.join(fixturesDir, "ml_report_ok.json"), "utf8"));
+const mlReportVazio = JSON.parse(
+  fs.readFileSync(path.join(fixturesDir, "ml_report_vazio.json"), "utf8"));
+const mlReportTruncado = JSON.parse(
+  fs.readFileSync(path.join(fixturesDir, "ml_report_truncado.json"), "utf8"));
 
 // --- mlmErrorText: cada código de D-06 traduzido, nunca em bruto -------------
 
@@ -689,14 +723,33 @@ check("mleMetricCell(undefined) -> '—'", mleMetricCell(undefined) === "—");
 check("mleMetricCell({}) -> três '—' e nenhum '0 %'",
   (mleMetricCell({}).match(/—/g) || []).length === 3 && !mleMetricCell({}).includes("0,0 %"));
 
-// mleBuildEvalRows: uma linha por versão, e "Sem avaliação" é visível (EVAL-03).
+// mleBuildEvalRows: uma linha por versão com SEIS células, e "Sem avaliação"
+// é visível (EVAL-03).
 
 const evalV1 = mleBuildEvalRows(reportV1);
 check("Evaluation com v1 sem avaliação: diz 'Sem avaliação'", evalV1.includes("Sem avaliação"));
 check("Evaluation com v1 sem avaliação: marca a versão ativa", evalV1.includes("mlm-badge-active"));
 check("Evaluation sem versões: diz que ainda não há modelos registados",
   mleBuildEvalRows(reportEmpty).includes("Sem dados — ainda não há modelos registados."));
-check("Evaluation sem versões: colspan=4", mleBuildEvalRows(reportEmpty).includes('colspan="4"'));
+check("Evaluation sem versões: colspan=6", mleBuildEvalRows(reportEmpty).includes('colspan="6"'));
+check("Evaluation sem versões: a linha vazia tem as seis colunas",
+  mleBuildEvalRows(reportEmpty).includes('colspan="6" class="empty-state"'));
+check("Evaluation sem versões: o valor 4 nunca fica no colspan",
+  !mleBuildEvalRows(reportEmpty).includes('colspan="4"'));
+
+// Seis <td> na linha da versão: Versão | Ativa | Dataset | Origem | ML | Regras.
+const seisCelulas = (html, id) => {
+  const linha = (html.split("<tr").find((p) => p.includes(`>${id}<`)) || "");
+  return (linha.match(/<td/g) || []).length;
+};
+check("Evaluation: a linha da versão tem seis <td>",
+  seisCelulas(mleBuildEvalRows({
+    versions: [versaoAvaliada("v9", true, avaliacao())],
+  }), "v9") === 6);
+check("Evaluation: a coluna Dataset traz eventos e ataques",
+  mleBuildEvalRows({ versions: [versaoAvaliada("v9", false, avaliacao())] })
+    .includes("35 eventos") && mleBuildEvalRows({ versions: [versaoAvaliada("v9", false, avaliacao())] })
+    .includes("20 ataques"));
 
 // [INVERSÃO D-11] A Fase 1 fixava que NENHUM número era mostrado. A Fase 2
 // precisa do contrário: a precisão do ML e a das regras aparecem, em
@@ -826,6 +879,207 @@ if (v2DoRelatorio) {
   check("fecho do tracer: a linha da v2 não mostra percentagem nenhuma",
     !linhaDe(linhasReais, "v2").includes("%"));
 }
+
+// --- mleOriginHtml: a origem DECLARADA dos dados (D-06, D-08) ---------------
+//
+// A origem nunca é adivinhada pelo caminho nem pelo número: o backend só
+// projecta "real" | "synthetic" | "unknown", e um valor fora desses três cai
+// no badge cinza em vez de ser desenhado em bruto (D-08, T-02-28).
+
+const origemReal = mleOriginHtml("real");
+check("origem 'real': badge verde com 'dados reais'",
+  origemReal.includes("mle-origin-real") && origemReal.includes("dados reais"));
+const origemSintetica = mleOriginHtml("synthetic");
+check("origem 'synthetic': badge âmbar com 'dados sintéticos'",
+  origemSintetica.includes("mle-origin-synthetic") && origemSintetica.includes("dados sintéticos"));
+const origemNaoDeclarada = mleOriginHtml("unknown");
+check("origem 'unknown': badge cinza com 'origem não declarada'",
+  origemNaoDeclarada.includes("mle-origin-unknown")
+  && origemNaoDeclarada.includes("origem não declarada"));
+check("origem 'unknown': o badge diz sempre o que 'não declarada' significa",
+  origemNaoDeclarada.includes(MLE_ORIGIN_AVISO));
+check("MLE_ORIGIN_AVISO diz que não se assume que são reais",
+  MLE_ORIGIN_AVISO.includes("não foi declarada") && MLE_ORIGIN_AVISO.includes("não assumimos"));
+for (const valor of [null, undefined, "", "inventada", "<img src=x onerror=alert(1)>"]) {
+  const badge = mleOriginHtml(valor);
+  check(`origem fora do contrato (${JSON.stringify(valor)}) -> badge cinza 'origem desconhecida'`,
+    badge.includes("mle-origin-unknown") && badge.includes("origem desconhecida"));
+  // A string vazia não é desenhada em bruto por definição (includes("")
+  // é sempre verdadeiro), por isso o teste só vale para valores não vazios.
+  if (String(valor) !== "") {
+    check(`origem fora do contrato (${JSON.stringify(valor)}) nunca é desenhada em bruto`,
+      !badge.includes(String(valor)));
+  }
+}
+check("origem fora do contrato: '<img' nunca chega ao HTML",
+  !mleOriginHtml("<img src=x onerror=alert(1)>").includes("<img"));
+
+// --- mleSmallSampleNotice: os DOIS limiares nomeados (D-05) -------------------
+//
+// Os limiares vêm no payload (min_events/min_attacks gravados pelo motor): o
+// frontend nunca os recalcula nem os adivinha. Sem small_sample === true não
+// há aviso — e nunca há um número inventado.
+
+const avisoAmostra = mleSmallSampleNotice({
+  total_events: 35, attacks_in_dataset: 20, min_events: 50, min_attacks: 10, small_sample: true,
+});
+check("aviso de amostra pequena: traz os números reais E os dois limiares",
+  ["35", "20", "50", "10"].every((n) => avisoAmostra.includes(n)));
+check("aviso de amostra pequena: nomeia os dois limiares",
+  avisoAmostra.includes("eventos") && avisoAmostra.includes("ataques"));
+check("aviso de amostra pequena: small_sample false -> nada",
+  mleSmallSampleNotice(avaliacao({ small_sample: false })) === "");
+check("aviso de amostra pequena: sem avaliação -> nada",
+  mleSmallSampleNotice(null) === "" && mleSmallSampleNotice(undefined) === "");
+check("aviso de amostra pequena: payload sem chaves -> nada (nunca inventa)",
+  mleSmallSampleNotice({}) === "");
+const avisoSemLimiares = mleSmallSampleNotice({
+  total_events: 35, attacks_in_dataset: 2, small_sample: true,
+});
+check("aviso de amostra pequena: limiar em falta -> '—', não um número inventado",
+  avisoSemLimiares.includes("35") && avisoSemLimiares.includes("—")
+  && !avisoSemLimiares.includes("50"));
+check("aviso de amostra pequena: o texto vem escapado",
+  !mleSmallSampleNotice({ total_events: "<img src=x>", attacks_in_dataset: 1, small_sample: true })
+    .includes("<img"));
+
+// O aviso entra na MESMA linha da versão (colspan), e só quando small_sample
+// é true — uma linha de aviso que aparece sempre seria ruído.
+const comAmostraPequena = mleBuildEvalRows({
+  versions: [versaoAvaliada("v1", true, avaliacao())],
+});
+check("linha da versão com amostra pequena traz a linha de aviso",
+  comAmostraPequena.includes('class="mle-warning"')
+  && comAmostraPequena.includes(escapeHtml(mleSmallSampleNotice(avaliacao()))));
+const semAmostraPequena = mleBuildEvalRows({
+  versions: [versaoAvaliada("v1", true, avaliacao({ small_sample: false }))],
+});
+check("linha da versão sem amostra pequena NÃO traz a linha de aviso",
+  !semAmostraPequena.includes("mle-warning"));
+
+// --- mleBuildLiveAgreement: a concordância ao vivo (D-10) ---------------------
+//
+// Só o que /api/ml-anomalies já dá. Nada é calculado no browser para além da
+// divisão agree/total, e uma janela sem amostra é "Sem dados", nunca "0,0 %"
+// (Pitfall 3). Um ERRO nunca é desenhado como "Sem dados" — esse é um caso
+// separado, com a sua própria mensagem.
+
+const liveOk = mleBuildLiveAgreement({
+  total: 10, agree_count: 8, diverge_count: 2, ml_anomalies_count: 4, rule_flagged_count: 6,
+  alerts_truncated: false,
+});
+check("concordância ao vivo com amostra: state 'ok'", liveOk.state === "ok");
+check("concordância ao vivo com amostra: a percentagem é agree/total em pt-PT",
+  liveOk.html.includes("80,0 %"));
+check("concordância ao vivo com amostra: as quatro contagens vêm da rota",
+  ["10", "4", "6", "2"].every((n) => liveOk.html.includes(n)));
+check("concordância ao vivo: nenhuma contagem é recalculada no browser",
+  !liveOk.html.includes("agree_count") && !liveOk.html.includes("diverge_count"));
+
+const liveVazio = mleBuildLiveAgreement({ total: 0, agree_count: 0, diverge_count: 0 });
+check("concordância ao vivo sem amostra: state 'sem_dados'", liveVazio.state === "sem_dados");
+check("concordância ao vivo sem amostra: escreve 'Sem dados'", liveVazio.html.includes("Sem dados"));
+check("concordância ao vivo sem amostra: NUNCA '0,0 %' (Pitfall 3)",
+  !liveVazio.html.includes("%") && !liveVazio.html.includes("0,0 %"));
+for (const resposta of [null, undefined, {}, "texto", 42]) {
+  const semDados = mleBuildLiveAgreement(resposta);
+  check(`concordância ao vivo com resposta ausente/inválida (${JSON.stringify(resposta)}): 'sem_dados'`,
+    semDados.state === "sem_dados" && semDados.html.includes("Sem dados")
+    && !semDados.html.includes("%"));
+}
+
+// Janela truncada: o aviso é obrigatório, o valor é o MESMO de sempre.
+const liveTruncado = mleBuildLiveAgreement({
+  total: 10, agree_count: 8, diverge_count: 2, ml_anomalies_count: 4, rule_flagged_count: 6,
+  alerts_truncated: true,
+});
+check("janela truncada: a linha de aviso entra", liveTruncado.html.includes("mle-warning"));
+check("janela truncada: o aviso diz o tecto de 1000 alertas",
+  liveTruncado.html.includes(escapeHtml(MLE_LIVE_TRUNCADO)) && liveTruncado.html.includes("1000"));
+check("janela truncada: a percentagem continua a ser agree/total",
+  liveTruncado.html.includes("80,0 %") && liveTruncado.state === "ok");
+
+// Valores que não são números: nada de "NaN %" nem de excepção.
+for (const mlReport of [
+  { total: "abc", agree_count: 8 },
+  { total: 10, agree_count: "abc" },
+  { total: 10, agree_count: null },
+  { total: null, agree_count: 8 },
+  { total: 10 },
+]) {
+  let resultado = null;
+  let levantou = false;
+  try {
+    resultado = mleBuildLiveAgreement(mlReport);
+  } catch (_) { levantou = true; }
+  check(`concordância ao vivo com ${JSON.stringify(mlReport)} não levanta nem escreve NaN`,
+    !levantou && resultado !== null
+    && !resultado.html.includes("NaN") && !resultado.html.includes("undefined"));
+}
+
+// As três janelas REAIS da rota (Indexer mockado no wrapper).
+const liveRealOk = mleBuildLiveAgreement(mlReportOk);
+check("rota real com amostra: state 'ok' e percentagem calculada a partir dela",
+  liveRealOk.state === "ok" && liveRealOk.html.includes(mlReportOk.total)
+  && !liveRealOk.html.includes("NaN"));
+check("rota real com amostra: a percentagem bate com agree/total",
+  liveRealOk.html.includes(`${((mlReportOk.agree_count / mlReportOk.total) * 100).toFixed(1)
+    .replace(".", ",")} %`));
+const liveRealVazio = mleBuildLiveAgreement(mlReportVazio);
+check("rota real com a janela vazia: 'Sem dados', nunca '0,0 %'",
+  liveRealVazio.state === "sem_dados" && liveRealVazio.html.includes("Sem dados")
+  && !liveRealVazio.html.includes("%"));
+const liveRealTruncado = mleBuildLiveAgreement(mlReportTruncado);
+check("rota real truncada: o aviso de truncagem entra e o valor mantém-se",
+  liveRealTruncado.html.includes("mle-warning")
+  && liveRealTruncado.html.includes(`${((mlReportTruncado.agree_count / mlReportTruncado.total) * 100)
+    .toFixed(1).replace(".", ",")} %`));
+
+// Contagens com HTML: nada disso entra no DOM. As contagens do bloco ao vivo
+// são NÚMEROS — um valor que não seja número é "—", nunca o texto que vinha
+// no payload (T-02-24).
+const liveXss = mleBuildLiveAgreement({
+  total: 10, agree_count: 8, diverge_count: 2,
+  ml_anomalies_count: "<img src=x onerror=alert(1)>", rule_flagged_count: 6, alerts_truncated: false,
+});
+check("XSS na concordância ao vivo: <img> nunca chega ao HTML",
+  !liveXss.html.includes("<img") && !liveXss.html.includes("onerror"));
+check("XSS na concordância ao vivo: uma contagem não numérica vira '—', não texto cru",
+  liveXss.html.includes("—") && liveXss.state === "ok");
+const liveXssTotal = mleBuildLiveAgreement({
+  total: "<img src=x onerror=alert(1)>", agree_count: 8, ml_anomalies_count: 4,
+});
+check("XSS num total não numérico: 'Sem dados' e nunca o HTML",
+  liveXssTotal.state === "sem_dados" && !liveXssTotal.html.includes("<img"));
+
+// --- mleLiveErrorHtml: um erro NUNCA é "Sem dados" e nunca mostra o código ----
+//
+// A rota devolve um `detail` que pode trazer texto de exceção (o da 502 traz a
+// excepção do httpx). Entra como CHAVE de lookup em mlmErrorText e sai já
+// traduzido — o código nunca chega ao DOM (T-02-23).
+
+const erroHash = mleLiveErrorHtml("hash_mismatch");
+check("erro live: hash_mismatch dá a mensagem de mlmErrorText",
+  erroHash.includes(escapeHtml(mlmErrorText("hash_mismatch"))));
+check("erro live: o código em bruto nunca aparece no HTML", !erroHash.includes("hash_mismatch"));
+const erro502 = mleLiveErrorHtml("http_502");
+check("erro live: 502 fala do Wazuh Indexer", erro502.toLowerCase().includes("indexer"));
+check("erro live: 502 não mostra o código", !erro502.includes("http_502"));
+check("erro live: 502 NÃO é desenhado como 'Sem dados'", !erro502.includes("Sem dados"));
+const erro503 = mleLiveErrorHtml("http_503");
+check("erro live: 503 diz que o modelo não está carregado",
+  erro503.includes("modelo") && !erro503.includes("http_503"));
+const erro401 = mleLiveErrorHtml("unauthorized");
+check("erro live: 401 dá a mensagem da API key",
+  erro401.includes(escapeHtml(mlmErrorText("unauthorized"))) && !erro401.includes("unauthorized"));
+for (const codigo of ["codigo_inventado", undefined, "<img src=x>", ""]) {
+  const html = mleLiveErrorHtml(codigo);
+  check(`erro live com código ${JSON.stringify(codigo)}: mensagem traduzida, sem HTML cru`,
+    typeof html === "string" && !html.includes("<img") && html.length > 0);
+}
+check("mleLiveErrorHtml nunca devolve a mensagem de erro em cru",
+  mleLiveErrorMessage("http_502") !== "<div></div>"
+  && !mleLiveErrorMessage("http_502").includes("<"));
 
 // --- fim ---------------------------------------------------------------------
 

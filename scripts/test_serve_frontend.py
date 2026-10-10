@@ -167,13 +167,33 @@ def check_static_frontend() -> None:
           index_html.index('<script src="ml_evaluation.js"></script>')
           > index_html.index('<script src="ml_models.js"></script>'))
 
-    # A tabela de Evaluation tem de ter as quatro colunas que o helper desenha
-    # (colspan="4" na linha de estado vazio included).
+    # A tabela de Evaluation tem de ter as SEIS colunas que o helper desenha
+    # (colspan="6" nas linhas de estado vazio, de aviso e de "Sem avaliação").
     thead = re.search(r'<table id="mlm-eval-table">.*?</thead>', index_html, re.S)
-    check("a tabela de Evaluation tem quatro <th>",
-          bool(thead) and len(re.findall(r"<th>", thead.group(0))) == 4)
-    check("o corpo da tabela de Evaluation usa colspan=\"4\"",
-          'colspan="4"' in index_html)
+    check("a tabela de Evaluation tem seis <th>",
+          bool(thead) and len(re.findall(r"<th>", thead.group(0))) == 6)
+    check('o corpo da tabela de Evaluation usa colspan="6"',
+          '<td colspan="6" class="empty-state">A carregar...</td>' in index_html)
+    check('o cabeçalho da tabela de Evaluation declara as seis colunas',
+          bool(thead) and all(coluna in thead.group(0) for coluna in (
+              ">Versão<", ">Ativa<", ">Dataset<", ">Origem<", ">ML (", ">Regras (")))
+
+    # O bloco de concordância ao vivo (D-10): select de janela, aviso e corpo.
+    for marker in ('id="mle-live-block"', 'id="mle-live-hours"',
+                   'id="mle-live-notice"', 'id="mle-live-body"',
+                   'for="mle-live-hours"'):
+        check(f"index.html contém {marker}", marker in index_html)
+    check("o select da janela só oferece janelas dentro do ge=1/le=168 da rota",
+          all(f'value="{h}"' in index_html for h in (1, 24, 72, 168)))
+    check("o botão de recarregar da Evaluation continua a ser mlm-eval-reload",
+          'id="mlm-eval-reload"' in index_html)
+    # O bloco ao vivo fica DENTRO do mesmo section da tabela: um section novo
+    # duplicaria o banner do renderPanelError por cima do bloco.
+    painel = re.search(r'<section class="panel" id="ml-evaluation-panel">(.*?)</section>',
+                       index_html, re.S)
+    check("o bloco ao vivo está dentro do mesmo painel da tabela",
+          bool(painel) and 'id="mle-live-body"' in painel.group(1)
+          and 'id="mlm-eval-table"' in painel.group(1))
 
     check("index.html já não tem nenhum marcador de planeado R9", 'data-planned="R9"' not in index_html)
 
@@ -210,11 +230,22 @@ def check_static_frontend() -> None:
                     "mlmCodeFromResponse", "mlmCell", "mlmRefresh", "mlmInit",
                     "mlmRequest", "mlmIsShown", "escapeHtml", "API_BASE",
                     "API_KEY", "renderPanelError"}
+    # Intersecção com TUDO o que ml_models.js declara de topo (não só a lista
+    # de globais conhecidos): um nome mlm*/MLM_* novo que aparecesse nos dois
+    # ficheiros partiria o browser inteiro na mesma (Pitfall 9).
+    declaracoes_mlm = set(re.findall(
+        r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)",
+        ml_models_js, re.M))
     repetidos = sorted(reutilizados.intersection(declaracoes_mle))
+    colisao_mlm = sorted(declaracoes_mlm.intersection(declaracoes_mle))
     check("ml_evaluation.js não redeclara nada de ml_models.js ou app.js",
           not repetidos)
     if repetidos:
         print(f"       nomes redeclarados: {repetidos}")
+    check("ml_evaluation.js não repete nenhum identificador de topo de ml_models.js",
+          not colisao_mlm)
+    if colisao_mlm:
+        print(f"       colisoes com ml_models.js: {colisao_mlm}")
     check("ml_evaluation.js não volta a ter mlmBuildEvalRows/mlmRenderEvaluation/mlmEvalTab",
           not any(x in ml_evaluation_js for x in ("mlmBuildEvalRows", "mlmRenderEvaluation", "mlmEvalTab")))
     check("ml_models.js deixou de ter a Evaluation (D-09)",

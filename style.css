@@ -820,3 +820,15 @@ tr.rb-stale td { font-style: italic; }
 .mlm-badge-adopted { background: #fdecc8; }
 .mlm-badge-legacy { background: #e0e0e0; color: #666; }
 .mlm-badge-error { background: #f8d7da; }
+
+/* ===== Aba Evaluation (Roadmap v2, R9) — ml_evaluation.js ===== */
+/* Mesma forma e mesma paleta dos badges acima (.mlm-badge-*), sem tocar em
+   nenhuma regra existente. */
+.mle-metric { display: inline-block; margin-right: 10px; }
+.mle-metric-label { font-weight: 600; color: #666; }
+.mle-warning { background: #fdecc8; color: var(--ink-900); font-size: 12px; padding: 4px 8px; }
+.mle-origin { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.mle-origin-real { background: #d4efdf; }
+.mle-origin-synthetic { background: #fdecc8; }
+.mle-origin-unknown { background: #e0e0e0; color: #666; }
+.mle-live-error { background: #f8d7da; }

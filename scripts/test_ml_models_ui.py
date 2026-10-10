@@ -19,6 +19,13 @@ as mesmas percentagens que o CLI imprimiu.
 Nunca toca no scripts/models real. Sem `node` no PATH falha com mensagem
 explícita (fail-closed) — nunca passa em silêncio.
 
+As três fixtures ml_report_ok.json / ml_report_vazio.json /
+ml_report_truncado.json são as respostas REAIS de GET /api/ml-anomalies nos
+três estados da janela (com amostra / vazia / a encher o tecto de 1000
+alertas), com o Indexer mockado e o modelo treinado em memória — o bloco de
+concordância ao vivo (D-10) é testado contra a rota, não contra um JSON
+escrito à mão.
+
 Correr (a partir de scripts/):
     python test_ml_models_ui.py
 """
@@ -32,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao")
 
@@ -129,6 +137,57 @@ def real_model_bytes() -> tuple[bytes, bytes]:
     return buf_model.getvalue(), buf_scaler.getvalue()
 
 
+# Tecto do pedido ao Indexer: o mesmo de get_recent_alerts(size=1000) em
+# main.py, e o mesmo critério de alerts_truncated.
+TETO_ALERTAS = 1000
+
+
+def ml_anomalies_fixtures(client, out_dir) -> None:
+    """Escreve as três respostas de GET /api/ml-anomalies que o bloco de
+    concordância ao vivo consome.
+
+    O Indexer NUNCA é chamado: `main.indexer_client.get_recent_alerts` é
+    trocado por um AsyncMock (o mesmo padrão de test_ml_anomalies.py) e o
+    modelo é injectado em ml_anomalies._model/_scaler, portanto nada nesta
+    função depende do laboratório estar ligado. O cliente e o modelo são
+    restaurados num finally — a mutação não pode escapar para os outros
+    pedidos do processo.
+    """
+    import ml_anomalies
+
+    original_indexer = main.indexer_client.get_recent_alerts
+    original_model, original_scaler = ml_anomalies._model, ml_anomalies._scaler
+    modelo, scaler = train_model(
+        vectorize(extract_features(MOCK_ALERTS)), contamination=0.3, random_state=1)
+    ml_anomalies._model, ml_anomalies._scaler = modelo, scaler
+
+    casos = (
+        ("ml_report_ok.json", MOCK_ALERTS, len(MOCK_ALERTS), False),
+        ("ml_report_vazio.json", [], 0, False),
+        ("ml_report_truncado.json",
+         [dict(MOCK_ALERTS[0]) for _ in range(TETO_ALERTAS)], TETO_ALERTAS, True),
+    )
+    try:
+        for nome, alertas, esperado_total, esperada_truncagem in casos:
+            main.indexer_client.get_recent_alerts = AsyncMock(return_value=alertas)
+            resp = client.get("/api/ml-anomalies")
+            check(f"GET /api/ml-anomalies ({nome}) -> 200", resp.status_code == 200)
+            corpo = resp.json()
+            Path(out_dir, nome).write_text(
+                json.dumps(corpo, ensure_ascii=False, indent=2), encoding="utf-8")
+            check(f"{nome}: total == {esperado_total}", corpo.get("total") == esperado_total)
+            check(f"{nome}: alerts_fetched == {esperado_total}",
+                  corpo.get("alerts_fetched") == esperado_total)
+            check(f"{nome}: alerts_truncated é {esperada_truncagem}",
+                  corpo.get("alerts_truncated") is esperada_truncagem)
+            check(f"{nome}: agree_count + diverge_count == total",
+                  corpo.get("agree_count", 0) + corpo.get("diverge_count", 0)
+                  == corpo.get("total"))
+    finally:
+        main.indexer_client.get_recent_alerts = original_indexer
+        ml_anomalies._model, ml_anomalies._scaler = original_model, original_scaler
+
+
 def run() -> None:
     node = shutil.which("node")
     if node is None:
@@ -201,6 +260,10 @@ def run() -> None:
                   (por_id.get("v2") or {}).get("evaluation") is None)
 
             main.ML_MODEL_DIR = original_dir
+
+            # As três janelas de /api/ml-anomalies: com amostra, vazia e a
+            # encher o tecto de 1000 alertas (o caso alerts_truncated).
+            ml_anomalies_fixtures(client, out_dir)
 
             proc = subprocess.run(
                 [node, str(Path(__file__).with_name("test_ml_models_ui.cjs")), out_dir],
