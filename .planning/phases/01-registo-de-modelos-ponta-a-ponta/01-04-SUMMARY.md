@@ -27,7 +27,7 @@ affects: [fase-2-avalicao, fase-3-treino, doc-01, r10-ativar-versoes]
 actuals:
   tokens: 13014
   tasks: 2
-  commits: 3
+  commits: 4
 
 # Tech tracking
 tech-stack:
@@ -180,6 +180,8 @@ Cada task foi commitada atomicamente:
 
 1. **Task 1: `adopt()` copia o legado para v1 de forma atómica, escreve ACTIVE só se não existir e retoma um adopt interrompido** — `5a861e8` (feat)
 2. **Task 2: CLI `python model_registry.py adopt` e verificação ponta a ponta depois de adoptar** — `f6ea5c7` (feat)
+3. *(não é uma task)* **Summary do plano** — `38472e2` (docs)
+4. *(não é uma task)* **Correcção de um docstring** — `eec7471` (fix): "em qualquer outcome" → "em qualquer caso", em `_materialize_version`. Só texto; nenhum teste foi tocado.
 
 _Note: as duas tasks têm `tdd="true"`. Os casos de comportamento foram acrescentados primeiro a `scripts/test_model_registry.py` e corridos a falhar — `AttributeError: module 'model_registry' has no attribute 'adopt'` — e só depois o `model_registry.py` foi implementado. Na Task 1 a implementação também divergiu do plano uma vez durante o ciclo TDD: a primeira versão da retoma propagava o erro original (ver Deviation 1)._
 
