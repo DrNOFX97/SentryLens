@@ -41,14 +41,22 @@ Limite honesto desta verificação (D-04): o SHA-256 deteta corrupção, troca
 acidental e ficheiros alheios sem metadados, mas NÃO autentica quem escreveu
 — quem tem escrita em `models/` reescreve também o `metadata.json`. HMAC ou
 assinatura ficam fora do âmbito do R9; ver README/ROADMAP_STATUS.
+
+O módulo tem também o CLI (`python model_registry.py adopt`), que é o ÚNICO
+ponto do projeto que escreve no registo: escrever por HTTP mudaria o modelo
+em uso sem ninguém o pedir. O CLI traduz cada código de ERROR_CODES numa
+mensagem PT acionável e devolve 0 ou 1; o texto vive aqui e nunca no HTTP
+(API-02).
 """
 
+import argparse
 import hashlib
 import hmac
 import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -782,3 +790,117 @@ def adopt(models_dir) -> dict:
         "active_written": active_written,
         "resumed": False,
     }
+
+
+# --- CLI (único ponto do projeto que escreve no registo) ---------------------
+#
+# Um subcomando por operação, porque cada um é destrutivo o suficiente para
+# pedir confirmação pelo nome: `adopt` (Fase 1) e, na Fase 2, `evaluate`.
+# `--models-dir` por omissão segue `ML_MODEL_DIR` — a mesma pasta que o
+# backend usa — e nunca o cwd.
+
+MESSAGES_PT = {
+    "invalid_version_id": (
+        "Identificador de versão inválido: tem de ser 'v' seguido de 1 a 4 dígitos "
+        "(ex.: 'v1'). O models/ACTIVE tem de ter esse nome numa linha, em UTF-8."
+    ),
+    "active_not_found": (
+        "O models/ACTIVE aponta para uma versão que não existe em models/. Cria a "
+        "pasta da versão ou apaga/corrige o models/ACTIVE."
+    ),
+    "metadata_missing": (
+        "A versão não tem metadata.json. Volta a adotar o modelo para a escrever."
+    ),
+    "metadata_invalid": (
+        "O metadata.json da versão é inválido (JSON, schema_version ou hashes). Volta "
+        "a registar a versão para o reescrever."
+    ),
+    "artifact_missing": (
+        "Falta um dos artefactos .pkl da versão. Repõe o ficheiro em falta a partir "
+        "da cópia de segurança."
+    ),
+    "hash_mismatch": "A cópia não bate com o original (SHA-256); nada foi registado. Repete o comando.",
+    "already_adopted": (
+        "O modelo legado já foi adotado: models/v1 já existe e o models/ACTIVE também "
+        "(ou a v1 existente não corresponde ao modelo legado). Nada foi alterado."
+    ),
+    "no_legacy_model": (
+        "Não há modelo legado para adotar: faltam isolation_forest.pkl e/ou scaler.pkl "
+        "em models/."
+    ),
+    "registry_unavailable": (
+        "Não foi possível escrever em models/ — fecha o que tiver a pasta aberta "
+        "(Explorador, OneDrive, antivírus) e volta a correr o comando; se a v1 já "
+        "tiver ficado criada, o adopt só completa o models/ACTIVE. Os ficheiros "
+        "originais não foram alterados."
+    ),
+}
+
+
+def _cmd_adopt(args) -> int:
+    """`python model_registry.py adopt` — REG-03. Devolve 0 ou 1."""
+    modelos = args.models_dir or os.environ.get("ML_MODEL_DIR") or DEFAULT_MODELS_DIR
+    try:
+        resultado = adopt(modelos)
+    except ModelRegistryError as exc:
+        print(f"Erro ({exc.code}): {MESSAGES_PT[exc.code]}", file=sys.stderr)
+        return 1
+
+    artefatos = (resultado["metadata"].get("artifacts") or {})
+    if resultado["resumed"]:
+        print("Adopt retomado: a v1 de um adopt interrompido foi verificada "
+              "(SHA-256 igual ao do modelo legado); nada foi copiado.")
+    else:
+        print("Modelo legado adotado como v1 por cópia — os originais em models/ "
+              "não foram alterados.")
+    for nome in ARTIFACT_FILES:
+        entrada = artefatos.get(nome) or {}
+        print(f"  {nome}  sha256={entrada.get('sha256')}  {entrada.get('size_bytes')} bytes")
+    if resultado["active_written"]:
+        print("models/ACTIVE -> v1")
+    else:
+        print("Aviso: models/ACTIVE já existia e não foi alterado; para ativar a v1 "
+              "escreve v1 nesse ficheiro (UTF-8).")
+    # A cache do modelo é por processo (D-02): sem isto, o backend continua a
+    # servir o modelo antigo e o dashboard diz "ativa: v1" a mentir.
+    print("Reinicia o backend (scripts/start-backend.ps1) para carregar a v1.")
+    return 0
+
+
+def main(argv=None) -> int:
+    """Ponto de entrada do CLI. 0 = feito, 1 = recusado com um código estável."""
+    # Windows manda stdout/stderr para o codepage da consola, o que corrompe
+    # os acentos quando a saída é redirecionada (ver main.py).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except (AttributeError, ValueError, OSError):
+                pass
+
+    parser = argparse.ArgumentParser(
+        prog="model_registry.py",
+        description=(
+            "Registo de versões de modelo ML do SentryLens. Escrita só por linha de "
+            "comando: o backend nunca escreve no registo."
+        ),
+    )
+    subcomandos = parser.add_subparsers(dest="command", required=True)
+
+    p_adopt = subcomandos.add_parser(
+        "adopt",
+        help="Adota os .pkl soltos de models/ como a versão v1 (copia, nunca move)",
+    )
+    p_adopt.add_argument(
+        "--models-dir",
+        default=None,
+        help="Pasta do registo (por omissão: $ML_MODEL_DIR ou scripts/models)",
+    )
+    p_adopt.set_defaults(func=_cmd_adopt)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

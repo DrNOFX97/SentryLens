@@ -358,6 +358,7 @@ def run() -> None:
             model_registry.build_models_report = original_report
 
     carregamento_verificado(client)
+    adocao_ponta_a_ponta(client)
 
     main.ML_MODEL_DIR = original_dir
 
@@ -535,6 +536,141 @@ def carregamento_verificado(client) -> None:
             check("(p) e loaded_version() passa a None", ml_anomalies.loaded_version() is None)
         finally:
             ml_anomalies.joblib = original_joblib
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
+
+
+def replace_bloqueado(*nomes):
+    """Troca `model_registry.os.replace` por uma função que levanta
+    PermissionError quando o destino tem um destes nomes — o bloqueio do
+    OneDrive/antivírus/Explorador (01-RESEARCH Pitfall 5) — e delega no
+    os.replace real nos restantes. Devolve a original para o finally."""
+    original = model_registry.os.replace
+
+    def bloqueado(src, dst, *args, **kwargs):
+        if Path(dst).name in nomes:
+            raise PermissionError(13, "Permission denied", str(dst))
+        return original(src, dst, *args, **kwargs)
+
+    model_registry.os.replace = bloqueado
+    return original
+
+
+def adocao_ponta_a_ponta(client) -> None:
+    """
+    01-04: o fluxo completo depois de adotar o legado, com pickles REAIS.
+
+    (1) adopt numa pasta temporária -> GET /api/ml/models mostra a v1 ativa,
+    adotada, com a data de treino estimada e sem entrada legacy;
+    GET /api/ml-anomalies carrega-a (200) e o `loaded` passa a 'v1'; os .pkl
+    soltos continuam em models/ com o SHA-256 original (REG-02/REG-03).
+
+    (2) O adopt interrompido (falha só na escrita do ACTIVE): a deteção dá
+    503 enquanto não há nada ativo, a listagem mostra a v1 íntegra e sem
+    erro de ACTIVE, e depois de o adopt ser retomado o mesmo pedido dá 200
+    com a v1 verificada em memória.
+    """
+    print("\n--- adoção ponta a ponta (REG-03, 01-04) ---")
+
+    original_dir = main.ML_MODEL_DIR
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        model_bytes, scaler_bytes = real_model_bytes()
+        soltos = {
+            MODEL_FILE: hashlib.sha256(model_bytes).hexdigest(),
+            SCALER_FILE: hashlib.sha256(scaler_bytes).hexdigest(),
+        }
+
+        def usar(pasta) -> None:
+            main.ML_MODEL_DIR = str(pasta)
+            ml_anomalies.reset_cache()
+
+        try:
+            # (q) adopt completo -> v1 ativa, sem legado, a carregar.
+            adotado = make_legacy(raiz / "adotado", model_bytes=model_bytes,
+                                  scaler_bytes=scaler_bytes)
+            resultado = model_registry.adopt(adotado)
+            check("(q) adopt devolve version 'v1' e active_written True",
+                  resultado["version"] == "v1" and resultado["active_written"] is True)
+            usar(adotado)
+
+            resp = client.get("/api/ml/models")
+            body = resp.json()
+            check("(q) /api/ml/models -> 200", resp.status_code == 200)
+            check("(q) active == 'v1'", body.get("active") == "v1")
+            check("(q) active_error null", body.get("active_error") is None)
+            check("(q) total 1", body.get("total") == 1)
+            versoes = body.get("versions") or []
+            v1 = versoes[0] if versoes else {}
+            check("(q) versions[0].id == 'v1' e kind 'versioned'",
+                  v1.get("id") == "v1" and v1.get("kind") == "versioned")
+            check("(q) a v1 está ativa e íntegra",
+                  v1.get("active") is True and v1.get("status") == "ok")
+            metadata = v1.get("metadata") or {}
+            check("(q) metadata.adopted True", metadata.get("adopted") is True)
+            check("(q) metadata.origin == 'adopted'", metadata.get("origin") == "adopted")
+            check("(q) metadata.trained_at_estimated True",
+                  metadata.get("trained_at_estimated") is True)
+            check("(q) evaluation None", v1.get("evaluation") is None)
+            check("(q) nenhuma entrada kind 'legacy' (D-03)",
+                  [e for e in versoes if e.get("kind") == "legacy"] == [])
+            no_leaks_pasta("(q) /api/ml/models", resp, adotado)
+
+            resp = client.get("/api/ml-anomalies")
+            check("(q) /api/ml-anomalies -> 200 com a v1 adotada", resp.status_code == 200)
+            check("(q) e classifica os alertas mockados",
+                  resp.status_code == 200 and resp.json()["total"] == len(MOCK_ALERTS))
+            check("(q) loaded == 'v1' depois de carregar (D-02)",
+                  client.get("/api/ml/models").json()["loaded"] == "v1")
+            check("(q) os .pkl soltos continuam em models/ com o SHA-256 original",
+                  all(hashlib.sha256((adotado / nome).read_bytes()).hexdigest() == digest
+                      for nome, digest in soltos.items()))
+            no_leaks_pasta("(q) /api/ml-anomalies", resp, adotado)
+
+            # (r) adopt interrompido na escrita do ACTIVE -> 503 -> retomado -> 200.
+            partido = make_legacy(raiz / "partido", model_bytes=model_bytes,
+                                  scaler_bytes=scaler_bytes)
+            original = replace_bloqueado("ACTIVE")
+            try:
+                try:
+                    model_registry.adopt(partido)
+                    exc = None
+                except model_registry.ModelRegistryError as raised:
+                    exc = raised
+            finally:
+                model_registry.os.replace = original
+            check("(r) adopt interrompido -> registry_unavailable",
+                  exc is not None and exc.code == "registry_unavailable")
+
+            usar(partido)
+            resp = client.get("/api/ml/models")
+            body = resp.json()
+            check("(r) /api/ml/models -> 200 no estado interrompido", resp.status_code == 200)
+            check("(r) active None e active_error None",
+                  body.get("active") is None and body.get("active_error") is None)
+            check("(r) a v1 aparece na lista com status 'ok'",
+                  [e for e in (body.get("versions") or []) if e.get("id") == "v1"][0].get("status")
+                  == "ok")
+            no_leaks_pasta("(r) /api/ml/models interrompido", resp, partido)
+
+            resp = client.get("/api/ml-anomalies")
+            check("(r) /api/ml-anomalies -> 503 (nada ativo)", resp.status_code == 503)
+            no_leaks_pasta("(r) /api/ml-anomalies interrompido", resp, partido)
+
+            retomado = model_registry.adopt(partido)
+            check("(r) o adopt retomado devolve resumed True", retomado["resumed"] is True)
+            usar(partido)
+            resp = client.get("/api/ml-anomalies")
+            check("(r) /api/ml-anomalies -> 200 depois de retomado", resp.status_code == 200)
+            body = client.get("/api/ml/models").json()
+            check("(r) active == 'v1' e loaded == 'v1' depois de retomado",
+                  body.get("active") == "v1" and body.get("loaded") == "v1")
+            check("(r) os .pkl soltos continuam com o SHA-256 original",
+                  all(hashlib.sha256((partido / nome).read_bytes()).hexdigest() == digest
+                      for nome, digest in soltos.items()))
+        finally:
             ml_anomalies.reset_cache()
             main.ML_MODEL_DIR = original_dir
 

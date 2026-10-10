@@ -14,9 +14,12 @@ Correr (a partir de scripts/):
     python test_model_registry.py
 """
 
+import contextlib
 import hashlib
+import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -936,6 +939,143 @@ def test_adopt_retomas_recusadas(tmp: Path) -> None:
     check("retoma (iv): os originais intactos", fotografar(treinada) == antes_treinada)
 
 
+# --- CLI: python model_registry.py adopt -------------------------------------
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def correr_cli(*args, timeout=60):
+    """Corre o CLI como o utilizador o corre, num processo novo. `cwd` é a
+    pasta scripts/, como no run_all_tests.py."""
+    return subprocess.run(
+        [sys.executable, "-X", "utf8", str(SCRIPT_DIR / "model_registry.py"), *args],
+        capture_output=True, text=True, encoding="utf-8",
+        cwd=str(SCRIPT_DIR), timeout=timeout,
+    )
+
+
+def test_cli_adopt(tmp: Path) -> None:
+    secao("CLI adopt — códigos de saída 0/1 e mensagens PT acionáveis")
+
+    # (a) modelo legado presente -> 0
+    root = make_legacy(tmp / "cli-ok")
+    antes = fotografar(root)
+    proc = correr_cli("adopt", "--models-dir", str(root))
+    check("CLI (a): adopt com legado -> código 0", proc.returncode == 0)
+    check("CLI (a): stdout diz que o modelo foi adotado como v1", "v1" in proc.stdout)
+    check("CLI (a): a pasta v1 foi criada", (root / "v1" / MODEL_FILE).is_file())
+    check("CLI (a): o ACTIVE ficou a v1",
+          (root / model_registry.ACTIVE_FILE).read_bytes() == b"v1\n")
+    check("CLI (a): mostra o SHA-256 dos dois artefactos",
+          antes[MODEL_FILE]["sha256"] in proc.stdout
+          and antes[SCALER_FILE]["sha256"] in proc.stdout)
+    check("CLI (a): diz que os originais não foram alterados",
+          "não foram alterados" in proc.stdout)
+    check("CLI (a): diz models/ACTIVE -> v1", "models/ACTIVE -> v1" in proc.stdout)
+    check("CLI (a): manda reiniciar o backend", "Reinicia o backend" in proc.stdout)
+    check("CLI (a): nada em stderr", proc.stderr.strip() == "")
+    check("CLI (a): os originais intactos", fotografar(root) == antes)
+
+    # (b) segunda execução -> 1 com o código de erro em stderr
+    proc = correr_cli("adopt", "--models-dir", str(root))
+    check("CLI (b): segundo adopt -> código 1", proc.returncode == 1)
+    check("CLI (b): stderr traz already_adopted", "already_adopted" in proc.stderr)
+    check("CLI (b): a mensagem diz que nada foi alterado",
+          "Nada foi alterado" in proc.stderr)
+    check("CLI (b): nada em stdout", proc.stdout.strip() == "")
+    check("CLI (c): os originais continuam intactos", fotografar(root) == antes)
+
+    # (c) pasta vazia -> 1 com no_legacy_model
+    vazia = tmp / "cli-vazia"
+    vazia.mkdir(parents=True)
+    proc = correr_cli("adopt", "--models-dir", str(vazia))
+    check("CLI (c): pasta vazia -> código 1", proc.returncode == 1)
+    check("CLI (c): stderr traz no_legacy_model", "no_legacy_model" in proc.stderr)
+    check("CLI (c): a mensagem diz o que falta",
+          "isolation_forest.pkl" in proc.stderr)
+
+    # (d) ACTIVE já existente (D-01) -> 0 com aviso, ACTIVE intacto
+    com_active = make_legacy(tmp / "cli-active")
+    make_version(com_active, "v2")
+    write_active(com_active, b"v2\n")
+    ativo = (com_active / model_registry.ACTIVE_FILE).read_bytes()
+    proc = correr_cli("adopt", "--models-dir", str(com_active))
+    check("CLI (d): adopt com ACTIVE prévio -> código 0", proc.returncode == 0)
+    check("CLI (d): stdout traz o Aviso de D-01", "Aviso" in proc.stdout)
+    check("CLI (d): o aviso diz como ativar a v1 à mão",
+          "não foi alterado" in proc.stdout and "escreve v1" in proc.stdout)
+    check("CLI (d): os bytes do ACTIVE ficaram iguais",
+          (com_active / model_registry.ACTIVE_FILE).read_bytes() == ativo)
+
+    # (e) --help
+    proc = correr_cli("--help")
+    check("CLI (e): --help -> código 0", proc.returncode == 0)
+    check("CLI (e): --help mostra o subcomando adopt", "adopt" in proc.stdout)
+    proc = correr_cli("adopt", "--help")
+    check("CLI (e): 'adopt --help' -> código 0 com --models-dir",
+          proc.returncode == 0 and "--models-dir" in proc.stdout)
+
+    # (f) main() chamado no próprio processo
+    in_process = make_legacy(tmp / "cli-in-process")
+    with contextlib.redirect_stdout(io.StringIO()):
+        codigo_ok = model_registry.main(["adopt", "--models-dir", str(in_process)])
+    check("CLI (f): main([...]) devolve 0", codigo_ok == 0)
+    check("CLI (f): e a v1 foi criada", (in_process / "v1" / MODEL_FILE).is_file())
+
+    sem_legado = tmp / "cli-in-process-vazia"
+    sem_legado.mkdir(parents=True)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        codigo_erro = model_registry.main(["adopt", "--models-dir", str(sem_legado)])
+    check("CLI (f): main([...]) numa pasta vazia devolve 1", codigo_erro == 1)
+
+
+def test_cli_recuperacao(tmp: Path) -> None:
+    secao("CLI adopt — recuperação de um adopt interrompido e mensagem de falha")
+
+    # (g) o CLI completa um adopt interrompido na escrita do ACTIVE
+    root = make_legacy(tmp / "cli-retoma")
+    antes = fotografar(root)
+    original = replace_bloqueado(model_registry.ACTIVE_FILE)
+    try:
+        primeira = espera_erro(model_registry.adopt, root)
+    finally:
+        model_registry.os.replace = original
+    check("CLI (g): o estado partido foi criado", primeira is not None
+          and primeira.code == "registry_unavailable"
+          and not (root / model_registry.ACTIVE_FILE).exists())
+
+    proc = correr_cli("adopt", "--models-dir", str(root))
+    check("CLI (g): o CLI completa o adopt -> código 0", proc.returncode == 0)
+    check("CLI (g): stdout diz que foi retomado", "retomado" in proc.stdout)
+    check("CLI (g): stdout diz models/ACTIVE -> v1", "models/ACTIVE -> v1" in proc.stdout)
+    check("CLI (g): o ACTIVE contém b'v1\\n'",
+          (root / model_registry.ACTIVE_FILE).read_bytes() == b"v1\n")
+    check("CLI (g): os originais intactos", fotografar(root) == antes)
+    proc = correr_cli("adopt", "--models-dir", str(root))
+    check("CLI (g): a seguir já está adotado -> código 1",
+          proc.returncode == 1 and "already_adopted" in proc.stderr)
+
+    # (h) falha de escrita: mensagem PT acionável em stderr
+    falha = make_legacy(tmp / "cli-falha")
+    original = replace_bloqueado(model_registry.ACTIVE_FILE)
+    capturado = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(capturado):
+            codigo = model_registry.main(["adopt", "--models-dir", str(falha)])
+    finally:
+        model_registry.os.replace = original
+    texto = capturado.getvalue()
+    check("CLI (h): main() devolve 1 quando a escrita falha", codigo == 1)
+    check("CLI (h): stderr traz 'Erro (registry_unavailable)'",
+          "Erro (registry_unavailable)" in texto)
+    check("CLI (h): a mensagem manda fechar a pasta e voltar a correr",
+          "volta a correr o comando" in texto)
+    check("CLI (h): e diz que nada foi registado / originais intactos",
+          "não foram alterados" in texto)
+    check("CLI (h): a mensagem não contém o caminho da pasta",
+          str(falha) not in texto and str(falha.resolve()) not in texto)
+
+
 def run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         raiz = Path(tmp)
@@ -952,6 +1092,8 @@ def run() -> None:
         test_adopt_falha_a_criar_a_v1(raiz)
         test_adopt_falha_so_no_active_e_retoma(raiz)
         test_adopt_retomas_recusadas(raiz)
+        test_cli_adopt(raiz)
+        test_cli_recuperacao(raiz)
 
     print()
     if failures:
