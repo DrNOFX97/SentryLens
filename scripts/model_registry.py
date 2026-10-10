@@ -46,7 +46,10 @@ assinatura ficam fora do âmbito do R9; ver README/ROADMAP_STATUS.
 import hashlib
 import hmac
 import json
+import os
 import re
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -543,4 +546,239 @@ def build_models_report(models_dir, loaded=None) -> dict:
         "loaded": loaded,
         "total": len(versions),
         "versions": versions,
+    }
+
+
+# --- Escrita no registo (só por CLI, nunca por HTTP) --------------------------
+#
+# A escrita segue sempre a mesma forma: tudo o que fica visível na listagem é
+# escrito primeiro numa pasta/ficheiro temporário e só depois movido para o
+# nome final com `os.replace`, que no Windows é atómico dentro do mesmo
+# volume. Assim nunca existe uma `v1` a meio (T-01-18) nem um `ACTIVE`
+# truncado (T-01-19), e um bloqueio do OneDrive/antivírus/Explorador
+# (PermissionError) deixa o registo como estava (T-01-22).
+
+
+def _materialize_version(root: Path, version_id: str, sources: dict, meta: dict) -> dict:
+    """
+    Cria `models/<version_id>/` a partir de `sources` (mapeamento nome ->
+    caminho), preenchendo `meta["artifacts"]` com o SHA-256 e o tamanho de
+    cada cópia. Devolve o mesmo `meta`, já com os artefactos.
+
+    A pasta temporária chama-se `<version_id>.tmp-<aleatorio>`: um nome que
+    NÃO casa `VERSION_ID_RE`, logo uma versão a meio é invisível para
+    `build_models_report` mesmo que o processo seja interrompido entre a
+    cópia e o `os.replace`. O `finally` apaga a temporária em qualquer
+   outcome — o disco nunca fica com sobras `v1.tmp-*`.
+
+    Os originais são só lidos: `shutil.copy2` copia e preserva o mtime (a data
+    de treino estimada sai daqui), e o SHA-256 é conferido entre a cópia e o
+    original antes de a versão se tornar visível (T-01-20). Qualquer
+    `OSError` — do `copy2`, da escrita ou do `replace` — é
+    `registry_unavailable`; um hash que não bate é `hash_mismatch`.
+
+    Helper privado, mas reutilizável pela Fase 3 (treino a criar vN).
+    """
+    vid = validate_version_id(version_id)
+    target = root / vid
+    tmp = None
+    try:
+        tmp = Path(tempfile.mkdtemp(prefix=f"{vid}.tmp-", dir=root))
+        artifacts = meta.setdefault("artifacts", {})
+        for nome in ARTIFACT_FILES:
+            origem = Path(sources[nome])
+            destino = tmp / nome
+            shutil.copy2(origem, destino)
+            digest_copia = sha256_file(destino)
+            digest_original = sha256_file(origem)
+            if not hmac.compare_digest(digest_copia, digest_original):
+                raise ModelRegistryError("hash_mismatch")
+            artifacts[nome] = {"sha256": digest_copia, "size_bytes": destino.stat().st_size}
+        (tmp / METADATA_FILE).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        os.replace(tmp, target)
+        tmp = None
+    except ModelRegistryError:
+        raise
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+    finally:
+        if tmp is not None and tmp.exists():
+            shutil.rmtree(tmp, ignore_errors=True)
+    return meta
+
+
+def _write_active_atomic(root: Path, version_id: str) -> None:
+    """
+    Escreve `models/ACTIVE` com uma linha UTF-8 (o `newline` final é o que o
+    `echo` do POSIX produz; `read_active` faz `strip()`, portanto também
+    aceitaria a ausência dele). Por ficheiro temporário + `os.replace`: um
+    `ACTIVE` nunca fica truncado, e um bloqueio a meio deixa o ficheiro
+    anterior intacto em vez de o substituir por lixo (T-01-19).
+
+    Não decide se deve ou não escrever — quem decide é o chamador (D-01:
+    `adopt` só escreve quando não existe nenhum).
+    """
+    vid = validate_version_id(version_id)
+    tmp_name = None
+    try:
+        descritor, tmp_name = tempfile.mkstemp(prefix=f"{ACTIVE_FILE}.tmp-", dir=root)
+        with os.fdopen(descritor, "wb") as fh:
+            fh.write((vid + "\n").encode("utf-8"))
+        os.replace(tmp_name, root / ACTIVE_FILE)
+        tmp_name = None
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+    finally:
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+
+
+def _resume_adoption(root: Path) -> dict:
+    """
+    Recupera um `adopt` interrompido entre o `os.replace` da `v1` e a escrita
+    do `ACTIVE` (T-01-23): verifica a `v1` existente e escreve só o `ACTIVE`
+    em falta, sem recopiar nada.
+
+    Recusa — sempre `already_adopted` e sem escrever uma linha sequer:
+
+    - o `ACTIVE` existe (adopt completo, ou D-01 com outro `ACTIVE`);
+    - a `v1` não resolve para dentro de `models/` (junction/symlink para fora,
+      via `resolve_version_dir`);
+    - o `metadata.json` está em falta ou é inválido;
+    - `origin` não é `"adopted"` ou `adopted` não é `True`;
+    - o SHA-256 dos `.pkl` da `v1` não bate com o próprio `metadata.json`
+      (`_verify_artifacts` != "ok");
+    - o SHA-256 do `metadata.json` não é igual ao dos `.pkl` legados.
+
+    A última condição é a que impede ativar uma v1 alheia com metadados
+    coerentes (T-01-24): o que se ativa tem de ser, byte a byte, o modelo que
+    se ia adotar. Falhar aqui é sempre preferível a ficar a servir o modelo
+    errado em silêncio; a falha a escrever o `ACTIVE` volta a ser
+    `registry_unavailable` e o utilizador repete o comando.
+    """
+    active_path = root / ACTIVE_FILE
+    if active_path.exists() or active_path.is_symlink():
+        raise ModelRegistryError("already_adopted")
+
+    try:
+        v1_dir = resolve_version_dir(root, "v1")
+        meta = load_metadata(v1_dir, "v1")
+        if meta.get("origin") != "adopted" or meta.get("adopted") is not True:
+            raise ModelRegistryError("already_adopted")
+        if _verify_artifacts(v1_dir, meta) != "ok":
+            raise ModelRegistryError("already_adopted")
+        artifacts = meta["artifacts"]
+        for nome in ARTIFACT_FILES:
+            hash_legado = sha256_file(root / nome)
+            if not hmac.compare_digest(str(artifacts[nome]["sha256"]).lower(), hash_legado):
+                raise ModelRegistryError("already_adopted")
+    except Exception as exc:  # noqa: BLE001 — fail-closed: nunca ativar por dúvida
+        # `invalid_version_id`, `metadata_missing`, `metadata_invalid`,
+        # `hash_mismatch`, `artifact_missing`, `registry_unavailable` — e
+        # qualquer outra coisa inesperada — valem o mesmo: `already_adopted`,
+        # nada escrito. O código original fica na `__cause__` para o log.
+        raise ModelRegistryError("already_adopted") from exc
+
+    _write_active_atomic(root, "v1")
+    return {"version": "v1", "metadata": meta, "active_written": True, "resumed": True}
+
+
+def adopt(models_dir) -> dict:
+    """
+    Adota o modelo legado (`models/isolation_forest.pkl` + `scaler.pkl`) como
+    a versão `v1` do registo (REG-03).
+
+    Copia, nunca move: os `.pkl` soltos são o ficheiro local que já era
+    carregado (REG-02) e continuam em `models/` intactos, com o mesmo SHA-256,
+    tamanho e mtime — nenhum caminho desta função os abre para escrita, os
+    move ou os apaga (T-01-17).
+
+    A ordem das escritas é fixa e é o que torna o comando recuperável:
+
+        1. `models/v1` por pasta temporária + `os.replace` (atómico);
+        2. confirmação final com `load_metadata` + `_verify_artifacts`;
+        3. `models/ACTIVE`, **só se ainda não existir** (D-01).
+
+    Se o passo 3 falhar, a `v1` fica criada e sem `ACTIVE` — a deteção dá 503
+    e o utilizador repete o comando, que entra em `_resume_adoption` e escreve
+    só o `ACTIVE` em falta. A ordem inversa (ACTIVE primeiro) foi descartada
+    porque a reversão também pode falhar pelo mesmo bloqueio e deixaria o
+    `ACTIVE` a apontar para uma `v1` inexistente.
+
+    Devolve `{"version", "metadata", "active_written", "resumed"}`. Códigos:
+    `no_legacy_model` (não há os dois `.pkl` soltos), `already_adopted`
+    (adopt completo, ou uma `v1` que não é a adoção do legado),
+    `hash_mismatch` (a cópia não bate com o original) e `registry_unavailable`
+    (bloqueio de I/O — nada fica a meio).
+    """
+    root = _root(models_dir)
+    if not root.is_dir() or detect_legacy(root) is None:
+        raise ModelRegistryError("no_legacy_model")
+
+    v1_path = root / "v1"
+    if v1_path.exists() or v1_path.is_symlink():
+        # Nunca `already_adopted` direto: um adopt interrompido na escrita do
+        # ACTIVE tem de se recuperar voltando a correr o comando (T-01-23).
+        return _resume_adoption(root)
+
+    try:
+        mtime = (root / MODEL_FILE).stat().st_mtime
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+
+    meta = {
+        "schema_version": SCHEMA_VERSION,
+        "version": "v1",
+        "origin": "adopted",
+        "adopted": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        # Data de treino ESTIMADA pela data do ficheiro: o modelo foi
+        # treinado fora do registo e ninguém sabe quando (o adopt não
+        # desserializa o pickle para o descobrir — SEC-01).
+        "trained_at": datetime.fromtimestamp(mtime, timezone.utc).isoformat(),
+        "trained_at_estimated": True,
+        "model_type": "IsolationForest",
+        "parameters": None,
+        "dataset": {"name": None, "size": None, "attacks": None, "synthetic": None},
+        "library_versions": None,
+        "artifacts": {},
+        "evaluation": None,
+    }
+    sources = {nome: root / nome for nome in ARTIFACT_FILES}
+    _materialize_version(root, "v1", sources, meta)
+
+    # Confirmação final com o que ficou em disco (e não com o dict em memória):
+    # se algo tiver mudado entre a cópia e agora, melhor falhar aqui do que
+    # deixar um ACTIVE a apontar para uma versão que não verifica.
+    v1_dir = root / "v1"
+    try:
+        confirmado = load_metadata(v1_dir, "v1")
+        status = _verify_artifacts(v1_dir, confirmado)
+    except ModelRegistryError:
+        raise
+    except OSError as exc:
+        raise ModelRegistryError("registry_unavailable") from exc
+    if status != "ok":
+        raise ModelRegistryError(status)
+
+    active_path = root / ACTIVE_FILE
+    if active_path.exists() or active_path.is_symlink():
+        # D-01: um ACTIVE existente foi escrito pelo utilizador ou aponta para
+        # outra versão; reescrevê-lo mudaria em silêncio o modelo usado nas
+        # deteções. Deixa-se como está e o CLI diz como ativar a v1 à mão.
+        active_written = False
+    else:
+        _write_active_atomic(root, "v1")
+        active_written = True
+
+    return {
+        "version": "v1",
+        "metadata": meta,
+        "active_written": active_written,
+        "resumed": False,
     }

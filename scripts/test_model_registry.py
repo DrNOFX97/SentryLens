@@ -19,7 +19,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import model_registry
@@ -576,6 +576,366 @@ def test_root_e_inexistente(tmp: Path) -> None:
         model_registry.DEFAULT_MODELS_DIR = original
 
 
+# --- REG-03: adopt — cópia atómica, ACTIVE só se não existir, retoma --------
+
+# Data de treino "estimada" determinística: o adopt deriva-a do mtime de
+# isolation_forest.pkl (SKELETON.md), por isso os testes fixam-no em vez de
+# depender do relógio do sistema.
+MTIME_FIXO = datetime(2026, 9, 14, 15, 40, tzinfo=timezone.utc)
+
+
+def fixar_mtime(root) -> float:
+    """Fixa o mtime dos dois .pkl soltos (shutil.utime) e devolve-o."""
+    alvo = MTIME_FIXO.timestamp()
+    for nome in model_registry.ARTIFACT_FILES:
+        os.utime(Path(root) / nome, (alvo, alvo))
+    return alvo
+
+
+def fotografar(root) -> dict:
+    """
+    Fotografia dos dois `.pkl` soltos: SHA-256, tamanho e mtime. É a prova de
+    T-01-17 — o adopt só os lê, e o teste compara esta fotografia antes e
+    depois (inclusive no caminho de falha e no de retoma).
+    """
+    foto = {}
+    for nome in model_registry.ARTIFACT_FILES:
+        path = Path(root) / nome
+        st = path.stat()
+        foto[nome] = {
+            "sha256": model_registry.sha256_file(path),
+            "size_bytes": st.st_size,
+            "mtime": st.st_mtime,
+        }
+    return foto
+
+
+def restos(root, prefixo) -> list:
+    """Nomes que começam por `prefixo` em `root` — nenhuma pasta `v1.tmp-*`
+    nem ficheiro `ACTIVE.tmp-*` pode sobrar de um adopt."""
+    return [n for n in os.listdir(root) if n.startswith(prefixo)]
+
+
+def replace_bloqueado(*nomes):
+    """
+    Troca `model_registry.os.replace` por uma função que levanta
+    PermissionError quando o destino tem um destes nomes — é o bloqueio do
+    OneDrive/antivírus/Explorador (Pitfall 5) — e delega no os.replace real
+    nos restantes destinos. Devolve a função original para o `finally` a
+    restaurar.
+    """
+    original = model_registry.os.replace
+
+    def bloqueado(src, dst, *args, **kwargs):
+        if Path(dst).name in nomes:
+            raise PermissionError(13, "Permission denied", str(dst))
+        return original(src, dst, *args, **kwargs)
+
+    model_registry.os.replace = bloqueado
+    return original
+
+
+def test_adopt_copia_o_legado(tmp: Path) -> None:
+    secao("REG-03 — adopt copia o legado para v1, escreve ACTIVE e não toca nos originais")
+
+    root = make_legacy(tmp / "reg03-ok", model_bytes=b"modelo-adotado", scaler_bytes=b"scaler-adotado")
+    mtime = fixar_mtime(root)
+    antes = fotografar(root)
+
+    resultado = model_registry.adopt(root)
+    v1 = Path(root) / "v1"
+
+    check("REG-03: devolve version 'v1'", resultado["version"] == "v1")
+    check("REG-03: devolve resumed False", resultado["resumed"] is False)
+    check("REG-03: devolve active_written True", resultado["active_written"] is True)
+
+    meta = json.loads((v1 / model_registry.METADATA_FILE).read_text(encoding="utf-8"))
+    check("REG-03: schema_version == 1", meta["schema_version"] == model_registry.SCHEMA_VERSION)
+    check("REG-03: version == 'v1'", meta["version"] == "v1")
+    check("REG-03: origin == 'adopted'", meta["origin"] == "adopted")
+    check("REG-03: adopted is True", meta["adopted"] is True)
+    check("REG-03: trained_at == mtime de isolation_forest.pkl em UTC",
+          meta["trained_at"] == datetime.fromtimestamp(mtime, timezone.utc).isoformat())
+    check("REG-03: trained_at_estimated is True", meta["trained_at_estimated"] is True)
+    check("REG-03: model_type 'IsolationForest'", meta["model_type"] == "IsolationForest")
+    check("REG-03: parameters None", meta["parameters"] is None)
+    check("REG-03: dataset com os quatro campos a None",
+          meta["dataset"] == {"name": None, "size": None, "attacks": None, "synthetic": None})
+    check("REG-03: library_versions None", meta["library_versions"] is None)
+    check("REG-03: evaluation None", meta["evaluation"] is None)
+    try:
+        datetime.fromisoformat(meta["created_at"])
+        criado_valido = True
+    except ValueError:
+        criado_valido = False
+    check("REG-03: created_at é um ISO-8601 válido", criado_valido)
+
+    artefatos = meta["artifacts"]
+    check("REG-03: artifacts só com os dois nomes constantes",
+          set(artefatos) == set(model_registry.ARTIFACT_FILES))
+    for nome in model_registry.ARTIFACT_FILES:
+        check(f"REG-03: artifacts[{nome}].sha256 é o do original",
+              artefatos[nome]["sha256"] == antes[nome]["sha256"])
+        check(f"REG-03: artifacts[{nome}].size_bytes é o do original",
+              artefatos[nome]["size_bytes"] == antes[nome]["size_bytes"])
+        check(f"REG-03: a cópia de {nome} tem os mesmos bytes",
+              (v1 / nome).read_bytes() == (Path(root) / nome).read_bytes())
+        check(f"REG-03: a cópia de {nome} tem o mtime do original (copy2)",
+              (v1 / nome).stat().st_mtime == mtime)
+
+    check("REG-03: os originais ficam com SHA-256, tamanho e mtime iguais",
+          fotografar(root) == antes)
+    check("REG-03: os originais continuam em models/",
+          all((Path(root) / n).is_file() for n in model_registry.ARTIFACT_FILES))
+    check("REG-03: ACTIVE contém exactamente b'v1\\n'",
+          (Path(root) / model_registry.ACTIVE_FILE).read_bytes() == b"v1\n")
+
+    report = model_registry.build_models_report(root)
+    check("REG-03: report active == 'v1'", report["active"] == "v1")
+    check("REG-03: report total == 1", report["total"] == 1)
+    entrada = versoes_por_id(report)["v1"]
+    check("REG-03: a v1 listada tem status 'ok' e error_code None",
+          entrada["status"] == "ok" and entrada["error_code"] is None)
+    check("REG-03: a v1 listada está ativa", entrada["active"] is True)
+    check("REG-03: os metadados públicos trazem adopted e trained_at_estimated",
+          (entrada["metadata"] or {}).get("adopted") is True
+          and (entrada["metadata"] or {}).get("trained_at_estimated") is True)
+    check("REG-03: nenhuma entrada legacy depois do adopt (D-03)",
+          entradas_legacy(report) == [])
+
+    fonte = model_registry.resolve_active_artifacts(root)
+    check("REG-03: resolve_active_artifacts -> v1 verificada",
+          fonte.version == "v1" and fonte.verified is True)
+    check("REG-03: os bytes devolvidos são os do original",
+          fonte.model_bytes == b"modelo-adotado" and fonte.scaler_bytes == b"scaler-adotado")
+
+    check("REG-03: não sobra nenhuma pasta v1.tmp-*", restos(root, "v1.tmp-") == [])
+    check("REG-03: não sobra nenhum ficheiro ACTIVE.tmp-*", restos(root, "ACTIVE.tmp-") == [])
+
+    # Segundo adopt sobre um adopt completo: nada é escrito.
+    ativo_antes = (Path(root) / model_registry.ACTIVE_FILE).read_bytes()
+    meta_antes = (v1 / model_registry.METADATA_FILE).read_bytes()
+    exc = espera_erro(model_registry.adopt, root)
+    check("REG-03: segundo adopt -> already_adopted",
+          exc is not None and exc.code == "already_adopted")
+    check("REG-03: o segundo adopt não mexe no ACTIVE",
+          (Path(root) / model_registry.ACTIVE_FILE).read_bytes() == ativo_antes)
+    check("REG-03: o segundo adopt não mexe no metadata.json",
+          (v1 / model_registry.METADATA_FILE).read_bytes() == meta_antes)
+    check("REG-03: os originais continuam iguais depois do segundo adopt",
+          fotografar(root) == antes)
+
+
+def test_adopt_d01(tmp: Path) -> None:
+    secao("D-01 — adopt cria a v1 mas não altera um ACTIVE já existente")
+
+    root = make_legacy(tmp / "reg03-d01")
+    make_version(root, "v2")  # outra versão, já ativa
+    write_active(root, b"v2\n")
+    ativo_antes = (root / model_registry.ACTIVE_FILE).read_bytes()
+    antes = fotografar(root)
+
+    resultado = model_registry.adopt(root)
+    check("D-01: a v1 foi criada a partir do legado", (root / "v1" / MODEL_FILE).is_file())
+    check("D-01: active_written False", resultado["active_written"] is False)
+    check("D-01: resumed False", resultado["resumed"] is False)
+    check("D-01: os bytes do ACTIVE ficaram exatamente iguais",
+          (root / model_registry.ACTIVE_FILE).read_bytes() == ativo_antes)
+    check("D-01: o ACTIVE continua a apontar para v2",
+          model_registry.build_models_report(root)["active"] == "v2")
+    check("D-01: os originais ficaram intactos", fotografar(root) == antes)
+    check("D-01: não sobrou nenhum temporário",
+          restos(root, "v1.tmp-") == [] and restos(root, "ACTIVE.tmp-") == [])
+
+    exc = espera_erro(model_registry.adopt, root)
+    check("D-01: adopt seguinte -> already_adopted (o ACTIVE existe)",
+          exc is not None and exc.code == "already_adopted")
+    check("D-01: e o ACTIVE continua exatamente igual",
+          (root / model_registry.ACTIVE_FILE).read_bytes() == ativo_antes)
+    check("D-01: os originais continuam intactos", fotografar(root) == antes)
+
+
+def test_adopt_pre_condicoes(tmp: Path) -> None:
+    secao("REG-03 — sem os dois .pkl soltos: no_legacy_model")
+
+    vazia = tmp / "reg03-vazia"
+    vazia.mkdir(parents=True)
+    exc = espera_erro(model_registry.adopt, vazia)
+    check("REG-03: pasta vazia -> no_legacy_model",
+          exc is not None and exc.code == "no_legacy_model")
+
+    inexistente = tmp / "reg03-nao-existe"
+    exc = espera_erro(model_registry.adopt, inexistente)
+    check("REG-03: pasta inexistente -> no_legacy_model",
+          exc is not None and exc.code == "no_legacy_model")
+
+    so_modelo = tmp / "reg03-so-modelo"
+    so_modelo.mkdir(parents=True)
+    (so_modelo / MODEL_FILE).write_bytes(b"so-o-modelo")
+    exc = espera_erro(model_registry.adopt, so_modelo)
+    check("REG-03: só isolation_forest.pkl -> no_legacy_model",
+          exc is not None and exc.code == "no_legacy_model")
+
+    so_scaler = tmp / "reg03-so-scaler"
+    so_scaler.mkdir(parents=True)
+    (so_scaler / SCALER_FILE).write_bytes(b"so-o-scaler")
+    exc = espera_erro(model_registry.adopt, so_scaler)
+    check("REG-03: só scaler.pkl -> no_legacy_model",
+          exc is not None and exc.code == "no_legacy_model")
+
+    check("REG-03: nenhuma tentativa criou v1 nem ACTIVE",
+          not (so_modelo / "v1").exists()
+          and not (so_scaler / model_registry.ACTIVE_FILE).exists()
+          and not (vazia / model_registry.ACTIVE_FILE).exists())
+    check("REG-03: e nenhuma deixou temporários",
+          not any(restos(p, "v1.tmp-") or restos(p, "ACTIVE.tmp-")
+                  for p in (vazia, so_modelo, so_scaler)))
+
+
+def test_adopt_falha_a_criar_a_v1(tmp: Path) -> None:
+    secao("REG-03/T-01-18 — os.replace bloqueado ao criar a v1: registry_unavailable sem lixo")
+
+    root = make_legacy(tmp / "reg03-os-replace")
+    antes = fotografar(root)
+    original = replace_bloqueado("v1")
+    try:
+        exc = espera_erro(model_registry.adopt, root)
+    finally:
+        model_registry.os.replace = original
+
+    check("REG-03: os.replace bloqueado -> registry_unavailable",
+          exc is not None and exc.code == "registry_unavailable")
+    check("REG-03: models/v1 não existe", not (root / "v1").exists())
+    check("REG-03: não sobra nenhuma pasta v1.tmp-*", restos(root, "v1.tmp-") == [])
+    check("REG-03: não foi criado nenhum ACTIVE", not (root / model_registry.ACTIVE_FILE).exists())
+    check("REG-03: não sobrou nenhum ACTIVE.tmp-*", restos(root, "ACTIVE.tmp-") == [])
+    check("REG-03: os originais estão intactos", fotografar(root) == antes)
+
+    # Desbloqueado, o mesmo adopt completa sem nada ter ficado a meio.
+    resultado = model_registry.adopt(root)
+    check("REG-03: voltar a correr o adopt conclui",
+          resultado["version"] == "v1" and resultado["resumed"] is False
+          and (root / model_registry.ACTIVE_FILE).read_bytes() == b"v1\n")
+    check("REG-03: e os originais continuam intactos", fotografar(root) == antes)
+
+
+def test_adopt_falha_so_no_active_e_retoma(tmp: Path) -> None:
+    secao("T-01-23 — adopt interrompido na escrita do ACTIVE e a retoma pelo próprio adopt")
+
+    root = make_legacy(tmp / "reg03-retoma")
+    antes = fotografar(root)
+    original = replace_bloqueado(model_registry.ACTIVE_FILE)
+    try:
+        exc = espera_erro(model_registry.adopt, root)
+    finally:
+        model_registry.os.replace = original
+
+    check("retoma: falha só na escrita do ACTIVE -> registry_unavailable",
+          exc is not None and exc.code == "registry_unavailable")
+    v1 = root / "v1"
+    check("retoma: a v1 ficou criada", (v1 / MODEL_FILE).is_file() and (v1 / SCALER_FILE).is_file())
+    check("retoma: a v1 tem metadata válido e íntegro",
+          model_registry._verify_artifacts(v1, model_registry.load_metadata(v1, "v1")) == "ok")
+    check("retoma: o ACTIVE não existe", not (root / model_registry.ACTIVE_FILE).exists())
+    check("retoma: não sobrou nenhum ACTIVE.tmp-*", restos(root, "ACTIVE.tmp-") == [])
+    check("retoma: não sobrou nenhuma pasta v1.tmp-*", restos(root, "v1.tmp-") == [])
+    check("retoma: _active_state == (None, None)",
+          model_registry._active_state(model_registry._root(root)) == (None, None))
+    try:
+        model_registry.resolve_active_artifacts(root)
+        erro = None
+    except FileNotFoundError as exc_fn:
+        erro = exc_fn
+    check("retoma: resolve_active_artifacts -> FileNotFoundError (estado partido)",
+          isinstance(erro, FileNotFoundError))
+    check("retoma: a mensagem não contém o caminho",
+          erro is not None and str(root) not in str(erro))
+    check("retoma: os originais intactos depois da falha", fotografar(root) == antes)
+
+    # Retoma: não recopia nada, escreve só o ACTIVE em falta.
+    meta_bytes = (v1 / model_registry.METADATA_FILE).read_bytes()
+    pkl_bytes = {n: (v1 / n).read_bytes() for n in model_registry.ARTIFACT_FILES}
+    pkl_mtimes = {n: (v1 / n).stat().st_mtime for n in model_registry.ARTIFACT_FILES}
+
+    retomado = model_registry.adopt(root)
+    check("retoma: devolve version 'v1'", retomado["version"] == "v1")
+    check("retoma: devolve active_written True", retomado["active_written"] is True)
+    check("retoma: devolve resumed True", retomado["resumed"] is True)
+    check("retoma: o ACTIVE contém exactamente b'v1\\n'",
+          (root / model_registry.ACTIVE_FILE).read_bytes() == b"v1\n")
+    check("retoma: o metadata.json da v1 não foi reescrito",
+          (v1 / model_registry.METADATA_FILE).read_bytes() == meta_bytes)
+    check("retoma: os .pkl da v1 não foram recopiados",
+          all((v1 / n).read_bytes() == pkl_bytes[n] for n in model_registry.ARTIFACT_FILES)
+          and all((v1 / n).stat().st_mtime == pkl_mtimes[n] for n in model_registry.ARTIFACT_FILES))
+    fonte = model_registry.resolve_active_artifacts(root)
+    check("retoma: resolve_active_artifacts -> v1 verificada",
+          fonte.version == "v1" and fonte.verified is True)
+    report = model_registry.build_models_report(root)
+    check("retoma: report active 'v1' e active_error None",
+          report["active"] == "v1" and report["active_error"] is None)
+    check("retoma: a v1 listada está íntegra",
+          versoes_por_id(report)["v1"]["status"] == "ok")
+    check("retoma: nenhuma entrada legacy", entradas_legacy(report) == [])
+    check("retoma: os originais continuam intactos", fotografar(root) == antes)
+    check("retoma: não sobrou nenhum temporário",
+          restos(root, "v1.tmp-") == [] and restos(root, "ACTIVE.tmp-") == [])
+    exc_terceiro = espera_erro(model_registry.adopt, root)
+    check("retoma: um terceiro adopt -> already_adopted",
+          exc_terceiro is not None and exc_terceiro.code == "already_adopted")
+
+
+def test_adopt_retomas_recusadas(tmp: Path) -> None:
+    secao("T-01-24 — a retoma recusa uma v1 que não é a adoção do legado, sem escrever nada")
+
+    # (i) v1 criada pelo adopt, ACTIVE apagado à mão e um byte trocado no .pkl.
+    adulterada = make_legacy(tmp / "reg03-retoma-adulterada")
+    antes_adulterada = fotografar(adulterada)
+    model_registry.adopt(adulterada)
+    (adulterada / model_registry.ACTIVE_FILE).unlink()
+    flip_byte(adulterada / "v1" / MODEL_FILE)
+    exc = espera_erro(model_registry.adopt, adulterada)
+    check("retoma (i): v1 adulterada -> already_adopted",
+          exc is not None and exc.code == "already_adopted")
+    check("retoma (i): o ACTIVE continua a não existir",
+          not (adulterada / model_registry.ACTIVE_FILE).exists())
+    check("retoma (i): os originais intactos", fotografar(adulterada) == antes_adulterada)
+
+    # (ii) v1 alheia (bytes diferentes dos .pkl legados) e sem ACTIVE.
+    alheia = make_legacy(tmp / "reg03-retoma-alheia")
+    antes_alheia = fotografar(alheia)
+    make_version(alheia, "v1", model_bytes=b"outro-modelo", scaler_bytes=b"outro-scaler")
+    exc = espera_erro(model_registry.adopt, alheia)
+    check("retoma (ii): v1 que não corresponde ao legado -> already_adopted",
+          exc is not None and exc.code == "already_adopted")
+    check("retoma (ii): o ACTIVE continua a não existir",
+          not (alheia / model_registry.ACTIVE_FILE).exists())
+    check("retoma (ii): os originais intactos", fotografar(alheia) == antes_alheia)
+
+    # (iii) metadata.json inválido e sem ACTIVE.
+    invalida = make_legacy(tmp / "reg03-retoma-invalida")
+    antes_invalida = fotografar(invalida)
+    make_version(invalida, "v1")
+    (invalida / "v1" / model_registry.METADATA_FILE).write_text("{nao-json", encoding="utf-8")
+    exc = espera_erro(model_registry.adopt, invalida)
+    check("retoma (iii): metadata.json inválido -> already_adopted",
+          exc is not None and exc.code == "already_adopted")
+    check("retoma (iii): o ACTIVE continua a não existir",
+          not (invalida / model_registry.ACTIVE_FILE).exists())
+    check("retoma (iii): os originais intactos", fotografar(invalida) == antes_invalida)
+
+    # (iv) versão de treino feita à mão (origin != "adopted") e sem ACTIVE.
+    treinada = make_legacy(tmp / "reg03-retoma-trained")
+    antes_treinada = fotografar(treinada)
+    make_version(treinada, "v1", origin="trained", adopted=False)
+    exc = espera_erro(model_registry.adopt, treinada)
+    check("retoma (iv): origin 'trained' -> already_adopted",
+          exc is not None and exc.code == "already_adopted")
+    check("retoma (iv): o ACTIVE continua a não existir",
+          not (treinada / model_registry.ACTIVE_FILE).exists())
+    check("retoma (iv): os originais intactos", fotografar(treinada) == antes_treinada)
+
+
 def run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         raiz = Path(tmp)
@@ -586,6 +946,12 @@ def run() -> None:
         test_sec02_active(raiz)
         test_sec02_junction(raiz)
         test_root_e_inexistente(raiz)
+        test_adopt_copia_o_legado(raiz)
+        test_adopt_d01(raiz)
+        test_adopt_pre_condicoes(raiz)
+        test_adopt_falha_a_criar_a_v1(raiz)
+        test_adopt_falha_so_no_active_e_retoma(raiz)
+        test_adopt_retomas_recusadas(raiz)
 
     print()
     if failures:
