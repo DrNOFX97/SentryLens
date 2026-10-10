@@ -77,6 +77,19 @@ COMPARISON_KEYS = ("both_flagged", "ml_only", "rules_only", "neither")
 
 DATASET_ORIGINS = ("real", "synthetic", "unknown")
 
+# O texto de honestidade por origem (D-06). São três frases DISTINTAS de
+# propósito: o painel tem de conseguir dizer "isto é sintético" e "isto não
+# foi validado contra o laboratório" sem interpretar o texto — a origem
+# também está no campo `dataset_origin`, mas o campo pode ser ignorado por
+# quem lê só o aviso. 'unknown' não é um terceiro valor cómodo: é o número
+# real calculado sobre um ficheiro cuja procedência ninguém declarou, que é
+# o estado em que o `evaluate` fica por omissão.
+ORIGEM_PT = {
+    "real": "Origem declarada: dados reais exportados do laboratório Wazuh",
+    "synthetic": "Origem declarada: dados SINTÉTICOS, não validados contra o laboratório",
+    "unknown": "Origem NÃO declarada: o número é real mas a procedência é desconhecida",
+}
+
 # --- Limiares nomeados (D-05) --------------------------------------------------
 #
 # Dois eixos, nunca um só: a métrica degrada por amostra pequena E por
@@ -97,6 +110,13 @@ DEFAULT_LABEL_WINDOW_SECONDS = 120
 # Teto de leitura do ficheiro de eventos. Um dataset maior é quase sempre o
 # utilizador a apontar para o ficheiro errado (T-02-09).
 MAX_EVENTS_BYTES = 8 * 1024 * 1024
+
+# Teto do texto do `caveat`. É o MESMO teto que a sub-projeção da API aplica
+# (`model_registry.EVALUATION_TEXT_LIMIT`): um aviso que a API tivesse de
+# cortar a meio perdia a própria ressalva que existe para ser lida — por
+# isso o motor escreve um aviso que caiba inteiro e `validate_evaluation`
+# recusa o que não caiba.
+CAVEAT_TEXT_LIMIT = 200
 
 EVALUATION_ERROR_CODES = (
     "events_unreadable",
@@ -234,38 +254,55 @@ def small_sample_flags(total_events, attacks_in_dataset, *,
     return total_events < min_events or attacks_in_dataset < min_attacks
 
 
-def _caveat(total_events, attacks_in_dataset, small_sample, *,
-            min_events, min_attacks, label_window_seconds) -> str:
+def _caveat(total_events, attacks_in_dataset, small_sample, dataset_origin, *,
+            events_file, min_events, min_attacks, label_window_seconds) -> str:
     """
-    O texto de aviso, sempre presente, com os limiares NOMINADOS e as três
-    coisas por esta ordem (Pitfall 10):
+    O texto de aviso, sempre presente, montado por ORIGEM DECLARADA (D-06) e
+    não pelo caminho do ficheiro: a heurística
+    `Path(events) == DEFAULT_EVENTS_PATH` de train_anomaly_model.py:72 mente
+    assim que o ficheiro real tiver outro nome.
 
-        1. log de ataques que não cobre a janela dos eventos — o caso em que
-           o recall sai 0,0 por definição e não por falha do modelo;
-        2. dataset pequeno, nos dois eixos;
-        3. ou, sem amostra pequena, que os números valem só para este dataset.
+    Ordem das partes (a primeira que jeito é a que manda):
+
+        1. cobertura — `total_events > 0 e attacks_in_dataset == 0`: o log de
+           ataques não cobre a janela dos eventos, o recall sai 0 POR
+           DEFINIÇÃO e não por falha do modelo (Pitfall 10). Quando isto
+           dispara, a parte da amostra pequena é omitida: 0 ataques é
+           pequeno por definição e repetir o mesmo facto só gastava orçamento
+           do aviso;
+        2. origem — 'real' / 'synthetic' / 'unknown' em três textos
+           distintos, com o NOME do ficheiro e nunca o caminho (T-02-15);
+        3. amostra — pequena (nos dois eixos, com os limiares NOMINADOS) ou
+           suficiente, com a janela de rótulo a que os números estão presos.
+
+    O resultado é cortado a CAVEAT_TEXT_LIMIT para que caiba inteiro no
+    `metadata.json` E no que a API devolve sem truncar.
     """
     partes: list[str] = []
-    if total_events > 0 and attacks_in_dataset == 0:
+    sem_cobertura = total_events > 0 and attacks_in_dataset == 0
+    if sem_cobertura:
         partes.append(
-            "Aviso: o log de ataques não cobre a janela dos eventos — nenhum evento "
-            "foi rotulado como ataque, por isso o recall é 0 por definição e não por "
-            "falha do modelo."
+            "Aviso: o log de ataques não cobre a janela dos eventos; recall 0 "
+            "por definição, não por falha do modelo."
         )
-    if small_sample:
-        partes.append(
-            f"Dataset pequeno ({total_events} eventos, {attacks_in_dataset} ataques; "
-            f"limiares: min_events={min_events}, min_attacks={min_attacks}) — não é uma "
-            "estimativa robusta de taxa de deteção."
-        )
-    else:
-        partes.append(
-            f"Os números valem só para este dataset ({total_events} eventos, "
-            f"{attacks_in_dataset} ataques; limiares: min_events={min_events}, "
-            f"min_attacks={min_attacks}) e para a janela de rótulo de "
-            f"{label_window_seconds}s."
-        )
-    return " ".join(partes)
+    partes.append(f"{ORIGEM_PT[dataset_origin]} ({Path(events_file).name}).")
+    if not sem_cobertura:
+        if small_sample:
+            partes.append(
+                f"Amostra pequena: {total_events} eventos, {attacks_in_dataset} "
+                f"ataques (min_events={min_events}, min_attacks={min_attacks})."
+            )
+        else:
+            partes.append(
+                f"Amostra suficiente: {total_events} eventos, "
+                f"{attacks_in_dataset} ataques (min_events={min_events}, "
+                f"min_attacks={min_attacks}), janela de rótulo de "
+                f"{label_window_seconds}s."
+            )
+    texto = " ".join(partes)
+    if len(texto) > CAVEAT_TEXT_LIMIT:
+        texto = texto[:CAVEAT_TEXT_LIMIT - 1].rstrip() + "…"
+    return texto
 
 
 def build_evaluation_report(version_id, alerts, model, scaler, attack_log, *,
@@ -338,10 +375,131 @@ def build_evaluation_report(version_id, alerts, model, scaler, attack_log, *,
         "min_attacks": int(min_attacks),
         "small_sample": bool(small_sample),
         "caveat": _caveat(total_events, attacks_in_dataset, small_sample,
+                          dataset_origin, events_file=events_file,
                           min_events=min_events, min_attacks=min_attacks,
                           label_window_seconds=label_window_seconds),
         "dataset_origin": dataset_origin,
     }
+
+
+def validate_evaluation(payload) -> None:
+    """
+    A SEGUNDA barreira antes de gravar: `build_evaluation_report` já produz
+    o contrato, e isto confirma que o que vai chegar ao `metadata.json` é
+    mesmo esse contrato e não um objeto qualquer com números plausíveis
+    (T-02-12). Devolve `None` ou levanta `ValueError` — a excepção é a
+    resposta, nunca um `False`, para que o CLI não tenha nada de opcional
+    para se esquecer de verificar.
+
+    O que é recusado, e porquê:
+
+        - as 14 chaves exactas: falta uma ou sobra uma e o registo, ou a
+          sub-projeção da API, ficariam com um campo a menos ou a mais;
+        - `total_events` inteiro >= 0 e `attacks_in_dataset` entre 0 e
+          `total_events`: mais ataques rotulados do que eventos é um log de
+          ataques que não é deste ficheiro;
+        - `comparison` com as quatro contagens que SOMAM `total_events` —
+          é a soma que fecha a reconciliação ML↔regras;
+        - `ml`/`rules` com as três métricas em [0,1]: uma precisão de 1,7 é
+          o número de outro motor (ou de uma divisão por zero que ninguém
+          apanhou), e nunca uma percentagem;
+        - `small_sample` igual ao que `small_sample_flags` diz com os
+          limiares gravados: o aviso é um facto derivado, não um campo livre
+          que o painel acredite;
+        - `dataset_origin` em DATASET_ORIGINS (D-06);
+        - os quatro textos não vazios e com tamanho <= CAVEAT_TEXT_LIMIT,
+          para que a API não tenha de cortar o aviso a meio.
+
+    `bool` nunca passa como `int`: em Python `isinstance(True, int)` é
+    True, e `small_sample: True` num campo inteiro passaria o teste errado.
+    Da mesma forma, uma métrica `numpy.float64` (o que o sklearn devolve)
+    passa — `np.float64` é subclasse de `float`.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError(f"a avaliação tem de ser um objeto, não {type(payload).__name__}")
+
+    faltam = [k for k in EVALUATION_KEYS if k not in payload]
+    sobram = [k for k in payload if k not in EVALUATION_KEYS]
+    if faltam or sobram:
+        raise ValueError(
+            f"a avaliação tem de ter exactamente as {len(EVALUATION_KEYS)} chaves de "
+            f"EVALUATION_KEYS; em falta: {faltam}; a mais: {sobram}")
+
+    for chave in ("evaluated_at", "events_file", "attack_log", "caveat"):
+        texto = payload[chave]
+        if not isinstance(texto, str) or not texto.strip():
+            raise ValueError(f"'{chave}' tem de ser um texto não vazio")
+        if len(texto) > CAVEAT_TEXT_LIMIT:
+            raise ValueError(
+                f"'{chave}' tem {len(texto)} caracteres, acima do teto de "
+                f"{CAVEAT_TEXT_LIMIT} (o que a API devolveria cortado)")
+
+    def inteiro(chave, minimo):
+        valor = payload[chave]
+        if isinstance(valor, bool) or not isinstance(valor, int):
+            raise ValueError(f"'{chave}' tem de ser um inteiro, não {valor!r}")
+        if valor < minimo:
+            raise ValueError(f"'{chave}' tem de ser >= {minimo}, não {valor!r}")
+        return valor
+
+    inteiro("label_window_seconds", 1)
+    min_events = inteiro("min_events", 1)
+    min_attacks = inteiro("min_attacks", 1)
+    total_events = inteiro("total_events", 0)
+    attacks_in_dataset = inteiro("attacks_in_dataset", 0)
+    if attacks_in_dataset > total_events:
+        raise ValueError(
+            f"'attacks_in_dataset' ({attacks_in_dataset}) não pode ser maior que "
+            f"'total_events' ({total_events}): o log de ataques não é deste ficheiro")
+
+    for chave in ("ml", "rules"):
+        metricas = payload[chave]
+        if not isinstance(metricas, dict):
+            raise ValueError(f"'{chave}' tem de ser um objeto com {list(METRIC_KEYS)}")
+        if set(metricas) != set(METRIC_KEYS):
+            raise ValueError(
+                f"'{chave}' tem de ter exactamente as chaves {list(METRIC_KEYS)}; "
+                f"recebido: {sorted(metricas)}")
+        for metrica, valor in metricas.items():
+            if isinstance(valor, bool) or not isinstance(valor, float):
+                raise ValueError(
+                    f"'{chave}.{metrica}' tem de ser um número, não {valor!r}")
+            if not 0.0 <= valor <= 1.0:
+                raise ValueError(
+                    f"'{chave}.{metrica}' tem de estar entre 0.0 e 1.0, não {valor!r}")
+
+    comparacao = payload["comparison"]
+    if not isinstance(comparacao, dict):
+        raise ValueError(f"'comparison' tem de ser um objeto com {list(COMPARISON_KEYS)}")
+    if set(comparacao) != set(COMPARISON_KEYS):
+        raise ValueError(
+            f"'comparison' tem de ter exactamente as chaves {list(COMPARISON_KEYS)}; "
+            f"recebido: {sorted(comparacao)}")
+    for nome, valor in comparacao.items():
+        if isinstance(valor, bool) or not isinstance(valor, int) or valor < 0:
+            raise ValueError(
+                f"'comparison.{nome}' tem de ser um inteiro >= 0, não {valor!r}")
+    soma = sum(comparacao.values())
+    if soma != total_events:
+        raise ValueError(
+            f"as quatro contagens de 'comparison' somam {soma} e 'total_events' é "
+            f"{total_events}: ou sobra um evento sem classificação, ou falta")
+
+    if not isinstance(payload["small_sample"], bool):
+        raise ValueError(f"'small_sample' tem de ser um booleano, não {payload['small_sample']!r}")
+    esperado = small_sample_flags(total_events, attacks_in_dataset,
+                                  min_events=min_events, min_attacks=min_attacks)
+    if payload["small_sample"] != esperado:
+        raise ValueError(
+            f"'small_sample' é {payload['small_sample']} mas com min_events={min_events} "
+            f"e min_attacks={min_attacks} e {total_events}/{attacks_in_dataset} o valor "
+            f"é {esperado}")
+
+    if payload["dataset_origin"] not in DATASET_ORIGINS:
+        raise ValueError(
+            f"'dataset_origin' tem de ser um de {list(DATASET_ORIGINS)} (D-06: a "
+            f"origem do dataset declara-se, não se adivinha), não "
+            f"{payload['dataset_origin']!r}")
 
 
 def percent_pt(valor, casas=1) -> str:

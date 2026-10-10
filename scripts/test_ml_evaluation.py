@@ -425,6 +425,167 @@ def test_leitura_eventos() -> None:
               == {"total": 36, "processable": 36})
 
 
+# --- 9. Origem declarada, nunca adivinhada (D-06) -------------------------------
+
+
+def test_origem_declarada() -> None:
+    """
+    D-06: o mesmo ficheiro com três origens declaradas dá três avisos
+    diferentes — e nenhum deles diz o caminho, só o nome. O que o painel
+    mostra tem de ser o número E a origem; um sintético apresentado como real
+    é o "valor inventado" que o PROJECT.md proíbe.
+    """
+    secao("origem do dataset declarada, nunca adivinhada (D-06)")
+    real = avaliar(dataset_origin="real")
+    sintetico = avaliar(dataset_origin="synthetic")
+    desconhecida = avaliar(dataset_origin="unknown")
+
+    check("origem: os três avisos são diferentes entre si",
+          len({real["caveat"], sintetico["caveat"], desconhecida["caveat"]}) == 3)
+    check("origem: 'synthetic' diz que os dados são sintéticos",
+          "SINTÉTICOS" in sintetico["caveat"])
+    check("origem: 'synthetic' diz que não foram validados contra o laboratório",
+          "não validados contra o laboratório" in sintetico["caveat"])
+    check("origem: 'real' diz que são dados reais do laboratório",
+          "reais exportados do laboratório" in real["caveat"])
+    check("origem: 'unknown' diz que a origem NÃO foi declarada",
+          "NÃO declarada" in desconhecida["caveat"]
+          and "procedência é desconhecida" in desconhecida["caveat"])
+    check("origem: os números não mudam com a origem declarada (é um atributo "
+          "do dataset, não da medição)",
+          (real["ml"], real["rules"], real["comparison"])
+          == (sintetico["ml"], sintetico["rules"], sintetico["comparison"])
+          == (desconhecida["ml"], desconhecida["rules"], desconhecida["comparison"]))
+    check("origem: o mesmo ficheiro com origens diferentes dá origens diferentes "
+          "gravadas", (real["dataset_origin"], sintetico["dataset_origin"],
+                       desconhecida["dataset_origin"]) == ("real", "synthetic", "unknown"))
+    check("origem: nenhum dos três avisos traz o caminho do ficheiro",
+          not any(("/" in c or "\\" in c) for c in
+                  (real["caveat"], sintetico["caveat"], desconhecida["caveat"])))
+    check("origem: 'unknown' nunca é adivinhado a partir do caminho — o mesmo "
+          "ficheiro versionado com 'real' mantém 'real'",
+          avaliar(dataset_origin="real", events_file=EVENTOS_PATH)["dataset_origin"]
+          == "real")
+    check("origem: os três avisos cabem no teto que a API devolve inteiro",
+          all(len(c) <= ml_evaluation.CAVEAT_TEXT_LIMIT
+              for c in (real["caveat"], sintetico["caveat"], desconhecida["caveat"])))
+    check("origem: os avisos do fixture de 36 eventos / 5 ataques têm amostra pequena",
+          real["small_sample"] and sintetico["small_sample"]
+          and desconhecida["small_sample"])
+    check("origem: DATASET_ORIGINS são os três e mais nenhum",
+          tuple(ml_evaluation.DATASET_ORIGINS) == ("real", "synthetic", "unknown"))
+    try:
+        avaliar(dataset_origin="inventado")
+        exc = None
+    except ValueError as raised:
+        exc = raised
+    check("origem: uma origem fora de DATASET_ORIGINS é recusada", exc is not None)
+
+
+# --- 10. Contrato do payload (EVAL-01) ------------------------------------------
+
+
+def test_validacao_payload() -> None:
+    """
+    `validate_evaluation` é a barreira antes do disco: aceita o payload do
+    motor e recusa cada incoerência que faria um número falso passar por
+    número (T-02-12/T-02-16).
+    """
+    secao("validação do payload (EVAL-01)")
+    base = avaliar()
+    ml_evaluation.validate_evaluation(base)
+
+    def com(mutacao):
+        payload = json.loads(json.dumps(base))
+        mutacao(payload)
+        return payload
+
+    def recusa(mutacao):
+        try:
+            ml_evaluation.validate_evaluation(com(mutacao))
+            return False
+        except ValueError:
+            return True
+
+    def falta_uma(payload):
+        del payload["caveat"]
+
+    def sobra_uma(payload):
+        payload["nota_extra"] = "x"
+
+    def soma_errada(payload):
+        payload["comparison"]["neither"] = 99
+
+    def metrica_fora(payload):
+        payload["ml"]["precision"] = 1.7
+
+    def small_sample_incoerente(payload):
+        payload["total_events"] = 500
+        payload["attacks_in_dataset"] = 50
+        payload["comparison"] = {"both_flagged": 250, "ml_only": 125,
+                                 "rules_only": 125, "neither": 0}
+
+    def origem_inventada(payload):
+        payload["dataset_origin"] = "inventado"
+
+    def ataques_acima_dos_eventos(payload):
+        payload["attacks_in_dataset"] = payload["total_events"] + 1
+
+    def texto_vazio(payload):
+        payload["events_file"] = "   "
+
+    def texto_gigante(payload):
+        payload["caveat"] = "X" * (ml_evaluation.CAVEAT_TEXT_LIMIT + 1)
+
+    def metrica_com_bool(payload):
+        payload["rules"]["recall"] = True
+
+    def inteiro_com_bool(payload):
+        payload["total_events"] = True
+
+    def limiar_zero(payload):
+        payload["min_attacks"] = 0
+
+    check("validação: aceita o payload devolvido por build_evaluation_report", True)
+    check("validação: falta uma das 14 chaves -> ValueError", recusa(falta_uma))
+    check("validação: uma chave a mais -> ValueError", recusa(sobra_uma))
+    check("validação: comparison a somar 99 em vez de total_events -> ValueError",
+          recusa(soma_errada))
+    check("validação: ml.precision a 1.7 -> ValueError", recusa(metrica_fora))
+    check("validação: small_sample incoerente com min_events/min_attacks -> ValueError",
+          recusa(small_sample_incoerente))
+    check("validação: dataset_origin 'inventado' -> ValueError", recusa(origem_inventada))
+    check("validação: ataques acima dos eventos -> ValueError", recusa(ataques_acima_dos_eventos))
+    check("validação: um texto só com espaços -> ValueError", recusa(texto_vazio))
+    check("validação: um texto acima do teto -> ValueError", recusa(texto_gigante))
+    check("validação: uma métrica booleana -> ValueError", recusa(metrica_com_bool))
+    check("validação: total_events booleano -> ValueError", recusa(inteiro_com_bool))
+    check("validação: um limiar a zero -> ValueError", recusa(limiar_zero))
+
+    try:
+        ml_evaluation.validate_evaluation("não sou um objeto")
+        exc = None
+    except ValueError as raised:
+        exc = raised
+    check("validação: uma string no lugar do objeto -> ValueError", exc is not None)
+
+    # O `small_sample` coerente com a mutação acima é o outro lado da moeda:
+    # a mesma mutação com o booleano certo passa, o que prova que a regra
+    # testa a COERÊNCIA e não o valor em si.
+    coerente = com(small_sample_incoerente)
+    coerente["small_sample"] = False
+    try:
+        ml_evaluation.validate_evaluation(coerente)
+        passou = True
+    except ValueError:
+        passou = False
+    check("validação: o mesmo payload com small_sample coerente passa", passou)
+
+    fonte = Path(ml_evaluation.__file__).read_text(encoding="utf-8")
+    check("validação: validate_evaluation está definido uma vez só",
+          fonte.count("def validate_evaluation") == 1)
+
+
 SECOES = (
     test_numeros_base,
     test_comparavel_com_historico,
@@ -434,6 +595,8 @@ SECOES = (
     test_prf_extremos,
     test_puridade,
     test_leitura_eventos,
+    test_origem_declarada,
+    test_validacao_payload,
 )
 
 

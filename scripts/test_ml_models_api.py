@@ -899,6 +899,99 @@ def avaliacao_ponta_a_ponta(client) -> None:
             check("(v) a v2 sem avaliação continua null", por_id(resp.json())["v2"]["evaluation"] is None)
             no_leaks_pasta("(v) /api/ml/models", resp, manual)
 
+            # (x) payload fora do contrato: o CLI recusa e o metadata.json
+            #     anterior fica BYTE-IDÉNTICO (EVAL-01, T-02-12). É a única
+            #     prova possível deste caminho: `test_model_registry.py` não
+            #     pode importar sklearn (D-01) e `test_ml_evaluation.py` é
+            #     uma suite de domínio sem disco.
+            #
+            #     Duas adulterações, porque só uma delas prova a barreira
+            #     NOVA: o `_write_evaluation` do 02-01 já contava as 14
+            #     chaves, por isso "falta uma chave" passaria sem o
+            #     `validate_evaluation`. O caso 'incoerente' traz as 14
+            #     chaves todas e uma soma que não fecha — para aí só pode
+            #     ter sido o validador a recusar.
+            #
+            #     O motor é trocado num PROCESSO NOVO (wrapper escrito na
+            #     pasta temporária): é o `validate_evaluation` do CLI a
+            #     correr a sério que apanha o payload, não o teste a fazer as
+            #     contas por ele.
+            adulterado_payload = registo_com_duas("aval-payload")
+            controlo = correr_cli_evaluate(adulterado_payload, eventos, log,
+                                           origin="real", version="v1")
+            check("(x) o comando sem adulteração -> código 0 (controlo)",
+                  controlo.returncode == 0)
+            caminho_meta = adulterado_payload / "v1" / "metadata.json"
+            bytes_antes = caminho_meta.read_bytes()
+            avaliacao_antes = json.loads(bytes_antes.decode("utf-8"))["evaluation"]
+            check("(x) o comando de controlo gravou mesmo uma avaliação",
+                  avaliacao_antes is not None)
+            pkl_antes = {n: (adulterado_payload / "v1" / n).read_bytes()
+                         for n in model_registry.ARTIFACT_FILES}
+
+            wrapper = raiz / "wrapper_payload_invalido.py"
+            wrapper.write_text(
+                "import os\n"
+                "import sys\n"
+                "\n"
+                "import ml_evaluation\n"
+                "import model_registry\n"
+                "\n"
+                "original = ml_evaluation.build_evaluation_report\n"
+                "modo = os.environ.get('ADULTERACAO', 'falta_chave')\n"
+                "\n"
+                "def adulterado(*args, **kwargs):\n"
+                "    payload = original(*args, **kwargs)\n"
+                "    if modo == 'falta_chave':\n"
+                "        payload.pop('caveat', None)\n"
+                "    elif modo == 'incoerente':\n"
+                "        payload['comparison']['neither'] = 99\n"
+                "    return payload\n"
+                "\n"
+                "ml_evaluation.build_evaluation_report = adulterado\n"
+                "sys.exit(model_registry.main(sys.argv[1:]))\n",
+                encoding="utf-8")
+
+            def correr_adulterado(modo):
+                return subprocess.run(
+                    [sys.executable, "-X", "utf8", str(wrapper),
+                     "evaluate", "v1", "--events", str(eventos),
+                     "--attack-log", str(log),
+                     "--models-dir", str(adulterado_payload),
+                     "--dataset-origin", "real"],
+                    capture_output=True, text=True, encoding="utf-8",
+                    cwd=str(SCRIPT_DIR), timeout=180,
+                    # O wrapper vive na pasta temporária, por isso `scripts/`
+                    # não está em sys.path[0] como acontece no CLI normal.
+                    env={**os.environ, "PYTHONPATH": str(SCRIPT_DIR), "ADULTERACAO": modo})
+
+            for modo, esperado in (("falta_chave", "caveat"),
+                                   ("incoerente", "comparison")):
+                proc = correr_adulterado(modo)
+                etiqueta = f"(x/{modo})"
+                check(f"{etiqueta} payload fora do contrato -> código 1",
+                      proc.returncode == 1)
+                check(f"{etiqueta} stderr diz que a avaliação é inválida",
+                      "evaluation_invalid" in proc.stderr)
+                check(f"{etiqueta} stderr diz a regra que falhou ({esperado})",
+                      esperado in proc.stderr)
+                check(f"{etiqueta} stderr não traz o caminho do registo",
+                      str(adulterado_payload) not in proc.stderr)
+                check(f"{etiqueta} nada foi escrito em stdout",
+                      proc.stdout.strip() == "")
+                check(f"{etiqueta} o metadata.json anterior ficou byte-idêntico",
+                      caminho_meta.read_bytes() == bytes_antes)
+                check(f"{etiqueta} a avaliação boa continua lá, intacta",
+                      json.loads(caminho_meta.read_text(encoding="utf-8"))["evaluation"]
+                      == avaliacao_antes)
+                check(f"{etiqueta} os .pkl ficaram byte-idênticos",
+                      all((adulterado_payload / "v1" / n).read_bytes() == pkl_antes[n]
+                          for n in model_registry.ARTIFACT_FILES))
+
+            check("(x) o comando volta a gravar depois de a adulteração passar",
+                  correr_cli_evaluate(adulterado_payload, eventos, log,
+                                      origin="real", version="v1").returncode == 0)
+
             # (w) o teto por campo: um caveat gigante é truncado, não devolvido
             #     inteiro, e um valor do tipo errado cai a None.
             caminho.write_text(json.dumps(

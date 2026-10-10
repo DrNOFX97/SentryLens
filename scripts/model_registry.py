@@ -1032,11 +1032,14 @@ def evaluate(models_dir, version_id, events_path, attack_log_path, *,
        o custo de carregar o scikit-learn;
     3. o modelo é CARREGADO, nunca treinado — as métricas são sobre a versão
        que está no registo (T-02-03);
-    4. `_write_evaluation` grava, por escrita atómica e com verificação
+    4. `ml_evaluation.validate_evaluation` fecha o contrato das 14 chaves
+       ANTES de qualquer escrita: um payload fora do contrato não chega ao
+       disco, e o `metadata.json` anterior fica byte-idêntico (T-02-12);
+    5. `_write_evaluation` grava, por escrita atómica e com verificação
        pós-escrita (D-07).
 
-    `EvaluationError` e `ModelRegistryError` saem tal e qual para o CLI, que
-    é quem os traduz em mensagem PT.
+    `EvaluationError`, `ModelRegistryError` e o `ValueError` do validador
+    saem tal e qual para o CLI, que é quem os traduz em mensagem PT.
     """
     root = _root(models_dir)
     source = resolve_version_artifacts(root, version_id)
@@ -1067,6 +1070,12 @@ def evaluate(models_dir, version_id, events_path, attack_log_path, *,
         min_events=min_events if min_events is not None else ml_evaluation.MIN_EVENTS,
         min_attacks=min_attacks if min_attacks is not None else ml_evaluation.MIN_ATTACKS,
     )
+    # Segunda barreira, ANTES de `_write_evaluation`: o motor mede, e o que
+    # ele devolve passa pelo contrato antes de tocar em disco. Se um dia o
+    # motor mudar e devolver um payload fora das 14 chaves, o comando falha
+    # com a regra que falhou e o metadata.json anterior fica intacto — em vez
+    # de gravar um número que nem o próprio registo sabe ler.
+    ml_evaluation.validate_evaluation(evaluation)
     _write_evaluation(root, version_id, evaluation)
     return evaluation
 
@@ -1182,10 +1191,13 @@ def _cmd_evaluate(args) -> int:
         print(f"Erro ({exc.code}): {ml_evaluation.MESSAGES_PT[exc.code]}", file=sys.stderr)
         return 1
     except ValueError as exc:
-        # Payload que o próprio registo ia recusar: a mensagem detalhada vem
-        # do erro, o código é o do registo.
-        print(f"Erro (metadata_invalid): {MESSAGES_PT['metadata_invalid']} ({exc})",
-              file=sys.stderr)
+        # Payload fora do contrato: ou o `validate_evaluation` o apanhou antes
+        # de escrever, ou o próprio `_write_evaluation` ia recusá-lo. Em
+        # NENHUM dos casos o disco foi tocado, por isso a mensagem é a regra
+        # que falhou — não "o metadata.json está inválido", que seria mentira
+        # (o ficheiro em disco está intacto e é o utilizador que o vai ler
+        # a seguir).
+        print(f"Erro (evaluation_invalid): {exc}", file=sys.stderr)
         return 1
 
     ml = avaliacao["ml"]
