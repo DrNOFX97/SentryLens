@@ -1,7 +1,12 @@
-// Abas "📦 Models" e "📐 Evaluation" (marco R9, registo de modelos).
-// Carregado depois de app.js e metrics.js: reutiliza os seus globais
-// (API_BASE, API_KEY, escapeHtml, renderPanelError) — não redeclarar nenhum
-// aqui. Um só pedido a GET /api/ml/models alimenta as duas abas.
+// Aba "📦 Models" (marco R9, registo de modelos). Carregado depois de app.js e
+// metrics.js: reutiliza os seus globais (API_BASE, API_KEY, escapeHtml,
+// renderPanelError) — não redeclarar nenhum aqui.
+//
+// A aba "📐 Evaluation" NÃO vive aqui desde a Fase 2: saiu para
+// ml_evaluation.js, com o seu próprio prefixo `mle` e o seu próprio ciclo de
+// dados (D-09). Os dois ficheiros partilham um só escopo global, por isso o
+// teste node:vm carrega ambos no mesmo contexto — uma colisão entre eles seria
+// um teste vermelho, não um bug em produção.
 //
 // TODOS os identificadores de topo começam por mlm ou MLM_: os scripts
 // clássicos partilham um só escopo global e um nome repetido rebenta o
@@ -358,39 +363,15 @@ function mlmBuildDetail(entry) {
     paramsHtml: mlmParamsHtml(meta ? meta.parameters : null),
     datasetHtml: mlmDatasetHtml(meta ? meta.dataset : null),
     evalText: entry && entry.evaluation !== null && entry.evaluation !== undefined
-      ? "Avaliação registada no metadata.json; a apresentação das métricas chega na Fase 2."
+      ? "Avaliação registada no metadata.json desta versão — as métricas estão na aba 📐 Evaluation."
       : "Sem avaliação",
   };
-}
-
-// Avaliação por versão (D-05). Nesta fase nenhuma versão tem avaliação, por
-// isso a coluna só distingue "não há" de "há": mostrar as métricas de uma
-// versão é trabalho da Fase 2, com o cuidado de nunca mostrar números de
-// outra versão.
-function mlmBuildEvalRows(report) {
-  const versions = (report && report.versions) || [];
-  if (!versions.length) {
-    return '<tr><td colspan="3" class="empty-state">Sem dados — ainda não há modelos registados.</td></tr>';
-  }
-  return versions.map((entry) => {
-    const ativa = entry.active ? '<span class="mlm-badge mlm-badge-active">ativa</span>' : "—";
-    const avaliacao = entry.evaluation === null || entry.evaluation === undefined
-      ? "Sem avaliação"
-      : "Avaliação registada no metadata.json; a apresentação das métricas chega na Fase 2.";
-    return `<tr>
-      <td>${escapeHtml(entry.id || entry.label || "")}</td>
-      <td>${ativa}</td>
-      <td>${escapeHtml(avaliacao)}</td>
-    </tr>`;
-  }).join("");
 }
 
 // ======================= camada DOM (só via mlmInit) ========================
 
 let mlmModelsTab = null;
 let mlmModelsWasShown = false;
-let mlmEvalTab = null;
-let mlmEvalWasShown = false;
 let mlmLoading = false;
 let mlmLastReport = null;
 let mlmSelectedKey = null;
@@ -473,59 +454,40 @@ function mlmReapplySelection() {
   mlmRenderDetail((mlmLastReport && mlmLastReport.versions)[index]);
 }
 
-function mlmRenderEvaluation(report) {
-  document.getElementById("mlm-eval-body").innerHTML = mlmBuildEvalRows(report);
-  const versions = (report && report.versions) || [];
-  const semAvaliacao = versions.filter(
-    (v) => v.evaluation === null || v.evaluation === undefined).length;
-  document.getElementById("mlm-eval-notice").textContent =
-    `${versions.length} versão(ões). ${semAvaliacao} sem avaliação.`;
-}
-
 function mlmIsShown(tab) {
   return tab.classList.contains("active") && document.visibilityState === "visible";
 }
 
-// Um só pedido alimenta as duas abas — a resposta é a mesma para Models e
-// para Evaluation, porque a avaliação é um campo por versão do mesmo
-// registo (nunca um ml_training_report.json avulso).
+// Um só pedido alimenta a aba Models. A Evaluation tem o seu próprio pedido,
+// em ml_evaluation.js (D-09).
 async function mlmRefresh() {
   if (mlmLoading) return;
   mlmLoading = true;
   try {
     const report = await mlmRequest("/api/ml/models");
     renderPanelError("#ml-models-panel", "");
-    renderPanelError("#ml-evaluation-panel", "");
     mlmLastReport = report;
     mlmRenderModels(report);
-    mlmRenderEvaluation(report);
   } catch (err) {
     const texto = mlmErrorText(err.message);
     mlmLastReport = null;
     mlmHideDetail();
     renderPanelError("#ml-models-panel", "Não foi possível carregar os modelos: " + texto);
-    renderPanelError("#ml-evaluation-panel", "Não foi possível carregar as avaliações: " + texto);
     document.getElementById("mlm-models-body").innerHTML =
       `<tr><td colspan="5" class="empty-state">Sem dados — ${escapeHtml(texto)}</td></tr>`;
-    document.getElementById("mlm-eval-body").innerHTML =
-      `<tr><td colspan="3" class="empty-state">Sem dados — ${escapeHtml(texto)}</td></tr>`;
   } finally {
     mlmLoading = false;
   }
 }
 
 // Ao contrário da Attack Library (que carrega uma vez), aqui recarregamos
-// SEMPRE que uma das abas passa de escondida a visível: um adopt pode ter
+// SEMPRE que a aba passa de escondida a visível: um adopt pode ter
 // corrido entretanto e o backend só passa a usar a versão nova depois de
 // reiniciado.
 function mlmOnTabChange() {
   const shown = mlmModelsTab ? mlmIsShown(mlmModelsTab) : false;
   if (shown && !mlmModelsWasShown) mlmRefresh();
   mlmModelsWasShown = shown;
-
-  const shownEval = mlmEvalTab ? mlmIsShown(mlmEvalTab) : false;
-  if (shownEval && !mlmEvalWasShown) mlmRefresh();
-  mlmEvalWasShown = shownEval;
 }
 
 function mlmInit() {
@@ -534,14 +496,8 @@ function mlmInit() {
     const observer = new MutationObserver(mlmOnTabChange);
     observer.observe(mlmModelsTab, { attributes: true, attributeFilter: ["class"] });
   }
-  mlmEvalTab = document.getElementById("tab-ml-evaluation");
-  if (mlmEvalTab) {
-    const observer = new MutationObserver(mlmOnTabChange);
-    observer.observe(mlmEvalTab, { attributes: true, attributeFilter: ["class"] });
-  }
   document.addEventListener("visibilitychange", mlmOnTabChange);
   document.getElementById("mlm-models-reload").addEventListener("click", () => mlmRefresh());
-  document.getElementById("mlm-eval-reload").addEventListener("click", () => mlmRefresh());
   // Linhas selecionáveis com rato e com teclado (Enter/Espaço), como na
   // Attack Library. O keydown delega em mlmHandleRowKey, que é puro.
   const corpo = document.getElementById("mlm-models-body");

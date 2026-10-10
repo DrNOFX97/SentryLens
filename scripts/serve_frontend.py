@@ -49,6 +49,7 @@ ALLOWED_FILES = {
     "/detections.js": "detections.js",
     "/metrics.js": "metrics.js",
     "/ml_models.js": "ml_models.js",
+    "/ml_evaluation.js": "ml_evaluation.js",
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",

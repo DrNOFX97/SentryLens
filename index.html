@@ -622,8 +622,10 @@
         <p class="panel-note">
           Avaliação de cada versão do modelo (ML contra regras). Só aparecem números guardados no
           <code>metadata.json</code> da própria versão — nunca de outra versão nem de um
-          <code>ml_training_report.json</code> avulso. Nesta fase nenhuma versão tem avaliação;
-          o comando que a calcula chega na Fase 2.
+          <code>ml_training_report.json</code> avulso. Os números são calculados por
+          <code>python model_registry.py evaluate vN --events &lt;ficheiro&gt;</code>, e cada linha
+          mostra os da sua versão. Avaliar não muda o modelo em uso: só de reiniciar o backend é que
+          a versão avaliada passa a ser a usada nas deteções.
         </p>
 
         <div class="filter-row">
@@ -637,11 +639,12 @@
               <tr>
                 <th>Versão</th>
                 <th>Ativa</th>
-                <th>Avaliação</th>
+                <th>ML (precisão / recall / F1)</th>
+                <th>Regras (precisão / recall / F1)</th>
               </tr>
             </thead>
             <tbody id="mlm-eval-body">
-              <tr><td colspan="3" class="empty-state">A carregar...</td></tr>
+              <tr><td colspan="4" class="empty-state">A carregar...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1251,5 +1254,8 @@
   <script src="detections.js"></script>
   <script src="metrics.js"></script>
   <script src="ml_models.js"></script>
+  <!-- Depois de ml_models.js: a Evaluation reutiliza mlmErrorText e
+       mlmCodeFromResponse (mesmo escopo global, D-09). -->
+  <script src="ml_evaluation.js"></script>
 </body>
 </html>

@@ -129,6 +129,8 @@ def run() -> None:
         check("/metrics.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/ml_models.js")
         check("/ml_models.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ml_evaluation.js")
+        check("/ml_evaluation.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, _, _ = get(port, "/scripts/.env")
         check("/scripts/.env continua a dar 404", status == 404)
         status, _, _ = get(port, "/.env")
@@ -143,18 +145,35 @@ def run() -> None:
 
 def check_static_frontend() -> None:
     """
-    Protege a sidebar e a forma de ml_models.js contra regressões que o
-    servidor não apanha: se alguém voltar a pôr data-planned="R9" num botão,
-    reintroduzir um nome global colidente, ou tirar um código de erro da
-    tabela PT, a aba fica em branco sem nenhum teste vermelho.
+    Protege a sidebar e a forma de ml_models.js/ml_evaluation.js contra
+    regressões que o servidor não apanha: se alguém voltar a pôr
+    data-planned="R9" num botão, reintroduzir um nome global colidente, ou
+    tirar um código de erro da tabela PT, a aba fica em branco sem nenhum
+    teste vermelho.
     """
     index_html = (serve_frontend.PROJECT_ROOT / "index.html").read_text(encoding="utf-8")
     ml_models_js = (serve_frontend.PROJECT_ROOT / "ml_models.js").read_text(encoding="utf-8")
+    ml_evaluation_js = (serve_frontend.PROJECT_ROOT / "ml_evaluation.js").read_text(encoding="utf-8")
 
     for marker in ('data-tab="ml-models"', 'data-tab="ml-evaluation"',
                    'id="tab-ml-models"', 'id="tab-ml-evaluation"',
-                   '<script src="ml_models.js"></script>'):
+                   '<script src="ml_models.js"></script>',
+                   '<script src="ml_evaluation.js"></script>'):
         check(f"index.html contém {marker}", marker in index_html)
+
+    # D-09: a Evaluation só funciona se ml_evaluation.js carregar DEPOIS de
+    # ml_models.js — é lá que estão mlmErrorText e mlmCodeFromResponse.
+    check("index.html carrega ml_evaluation.js depois de ml_models.js",
+          index_html.index('<script src="ml_evaluation.js"></script>')
+          > index_html.index('<script src="ml_models.js"></script>'))
+
+    # A tabela de Evaluation tem de ter as quatro colunas que o helper desenha
+    # (colspan="4" na linha de estado vazio included).
+    thead = re.search(r'<table id="mlm-eval-table">.*?</thead>', index_html, re.S)
+    check("a tabela de Evaluation tem quatro <th>",
+          bool(thead) and len(re.findall(r"<th>", thead.group(0))) == 4)
+    check("o corpo da tabela de Evaluation usa colspan=\"4\"",
+          'colspan="4"' in index_html)
 
     check("index.html já não tem nenhum marcador de planeado R9", 'data-planned="R9"' not in index_html)
 
@@ -174,6 +193,32 @@ def check_static_frontend() -> None:
     check("todos os identificadores de topo de ml_models.js têm prefixo mlm/MLM_", not colisoes)
     if colisoes:
         print(f"       nomes sem prefixo: {colisoes}")
+
+    # D-09: os dois ficheiros partilham um só escopo global no browser, por
+    # isso nenhum identificador de topo de ml_evaluation.js pode repetir um de
+    # ml_models.js (ou de app.js) — a colisão partiria o browser inteiro.
+    declaracoes_mle = re.findall(
+        r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)",
+        ml_evaluation_js, re.M)
+    sem_prefixo = [n for n in declaracoes_mle if not n.startswith(("mle", "MLE_"))]
+    check("todos os identificadores de topo de ml_evaluation.js têm prefixo mle/MLE_",
+          not sem_prefixo)
+    if sem_prefixo:
+        print(f"       nomes sem prefixo: {sem_prefixo}")
+
+    reutilizados = {"MLM_ERROR_TEXT", "MLM_GENERIC_ERROR", "mlmErrorText",
+                    "mlmCodeFromResponse", "mlmCell", "mlmRefresh", "mlmInit",
+                    "mlmRequest", "mlmIsShown", "escapeHtml", "API_BASE",
+                    "API_KEY", "renderPanelError"}
+    repetidos = sorted(reutilizados.intersection(declaracoes_mle))
+    check("ml_evaluation.js não redeclara nada de ml_models.js ou app.js",
+          not repetidos)
+    if repetidos:
+        print(f"       nomes redeclarados: {repetidos}")
+    check("ml_evaluation.js não volta a ter mlmBuildEvalRows/mlmRenderEvaluation/mlmEvalTab",
+          not any(x in ml_evaluation_js for x in ("mlmBuildEvalRows", "mlmRenderEvaluation", "mlmEvalTab")))
+    check("ml_models.js deixou de ter a Evaluation (D-09)",
+          not any(x in ml_models_js for x in ("mlmBuildEvalRows", "mlmRenderEvaluation", "mlmEvalTab")))
 
     codigos = ("invalid_version_id", "active_not_found", "metadata_missing", "metadata_invalid",
                "artifact_missing", "hash_mismatch", "already_adopted", "no_legacy_model",
