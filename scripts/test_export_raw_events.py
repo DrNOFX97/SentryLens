@@ -370,6 +370,29 @@ def test_cliente_real_sem_rede() -> None:
           cliente_agente.chamadas[0]["agent_name"] == "WIN-PC01")
     check("(l) e min_level é sempre 0", cliente_agente.chamadas[0]["min_level"] == 0)
 
+    # Nenhum socket aberto, mecanicamente: `_search` é o ÚNICO sítio do
+    # `wazuh_client` que constrói um `httpx.AsyncClient`. Se este teste passar
+    # com a classe trocada por uma que levanta, ninguém abriu ligação — nem
+    # à porta 9200, nem a nenhuma outra (critério "nenhum comando desta fase
+    # tentou ligar ao Indexer").
+    import wazuh_client
+
+    class ClienteQuebrado:
+        def __init__(self, *a, **k):
+            raise AssertionError("isto abriu uma ligação de rede")
+
+    http_original = wazuh_client.httpx.AsyncClient
+    wazuh_client.httpx.AsyncClient = ClienteQuebrado
+    try:
+        cliente_sem_rede = WazuhIndexerClient("https://localhost:9200", "admin", SEGREDOS[0])
+        cliente_sem_rede._search = search_falso  # tipo: ignore[method-assign]
+        documentos_sem_rede = asyncio.run(
+            export_raw_events.fetch_events(cliente_sem_rede, hours=1, size=10))
+        check("(m) nenhum socket aberto: o httpx.AsyncClient nunca foi construído",
+              len(documentos_sem_rede) == 2)
+    finally:
+        wazuh_client.httpx.AsyncClient = http_original
+
 
 def test_formato_compativel() -> None:
     secao("D-06: o ficheiro escrito é lido por feature_extractor.extract_features")
@@ -665,6 +688,15 @@ def test_help_e_pureza() -> None:
     check("(j) a escrita em disco é por temporário + os.replace (nunca um "
           "export parcial)",
           "os.replace" in codigo and "mkstemp" in codigo)
+
+    # O exemplo de uso é copiável tal e qual: um caminho escrito a partir de
+    # scripts/ que repetisse "scripts" escreveria em scripts/scripts/ — e
+    # criava a pasta sem dizer nada.
+    exemplos = [linha.strip().replace("\\\\", "\\")
+                for linha in codigo.splitlines()
+                if linha.strip().startswith("python export_raw_events.py")]
+    check("(k) o exemplo de uso aponta para dentro de scripts/ (não scripts/scripts/)",
+          bool(exemplos) and all("scripts\\scripts" not in linha for linha in exemplos))
 
     check("(k) a pasta por omissão é scripts/snapshots/",
           export_raw_events.DEFAULT_OUTPUT_DIR == SCRIPT_DIR / "snapshots")

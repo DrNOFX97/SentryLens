@@ -38,9 +38,13 @@ Limites honestos:
 Uso (a partir de scripts/, com o venv activo):
     python export_raw_events.py
     python export_raw_events.py --hours 168 --size 1000
-    python export_raw_events.py --output scripts\\snapshots\\raw_events_hoje.json
+    python export_raw_events.py --output snapshots\\raw_events_hoje.json
 
-Depois:
+    (ou, da raiz do repositório:
+     scripts\\.venv\\Scripts\\python.exe scripts\\export_raw_events.py
+     --output scripts\\snapshots\\raw_events_hoje.json)
+
+Depois, ainda em scripts/:
     python model_registry.py adopt        # se ainda não foi adotado
     python model_registry.py evaluate v1 --events <este ficheiro> \
         --attack-log attack_log.jsonl --dataset-origin real
