@@ -52,8 +52,19 @@ Plans:
   2. Uma versão sem avaliação mostra "Sem avaliação" na API e na aba Evaluation; nunca aparecem números de outra versão nem do `ml_training_report.json` avulso.
   3. A aba Evaluation mostra, por versão avaliada, o ML contra as regras (precisão, recall, F1) e o tamanho do dataset (eventos e ataques), com o aviso de amostra pequena sempre presente quando o nº de eventos é baixo.
   4. A aba Evaluation mostra a concordância ao vivo entre ML e regras, obtida de `/api/ml-anomalies` (sem criar métricas ou detetores novos); sem amostra mostra "Sem dados" em vez de um valor.
-**Plans:** TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Tracer: `resolve_version_artifacts` → `evaluate` → `metadata.json` → API → `ml_evaluation.js` (wave 1)
+- [ ] 02-02-PLAN.md — Motor de avaliação (precisão/recall/F1, limiares de amostra, comparabilidade) e suite própria (wave 2)
+- [ ] 02-03-PLAN.md — Exportador bruto do Indexer, testado sem o laboratório ligado (wave 2)
+- [ ] 02-04-PLAN.md — Aba Evaluation completa: dataset, origem, aviso de amostra e concordância ao vivo (wave 3)
+**Decisões:** `02-CONTEXT.md` (D-01..D-11, decididas pelo utilizador em 2026-10-10)
 **UI hint**: yes
+
+> **Nota de execução:** a avaliação real sobre dados do laboratório exige o Wazuh Indexer ligado
+> (está desligado em 2026-10-10). Os testes da fase não dependem dele; a execução do `evaluate`
+> sobre dados reais é um passo de execução, com o comando exacto nos `<human-check>` dos planos.
 
 ### Phase 3: Treino gera versões, testes e documentação
 **Goal:** Cada treino deixa uma versão rastreável e ativa sem passos manuais, e o marco R9 fica fechado com testes completos e documentação a refletir o registo de modelos.
@@ -74,5 +85,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Registo de modelos ponta a ponta | 4/4 | Complete | 2026-10-10 |
-| 2. Avaliação ligada à versão | 0/0 | Not started | - |
+| 2. Avaliação ligada à versão | 0/4 | Planned | - |
 | 3. Treino gera versões, testes e documentação | 0/0 | Not started | - |
