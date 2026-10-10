@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, StringConstraints
 import incident_ingest
 import jev_client
 import ml_anomalies
+import model_registry
 import soc_metrics
 from admin_activity import build_admin_activity_report
 from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
@@ -770,6 +771,32 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/ml/models", dependencies=_REQUIRE_API_KEY)
+async def get_ml_models():
+    """
+    Registo de versões do modelo ML (R9): versões em models/vN/, qual está
+    ativa (models/ACTIVE) e os metadados de cada uma. Só leitura — ativar,
+    adotar ou treinar é operação de CLI, nunca por HTTP.
+
+    O contrato da resposta está em
+    .planning/phases/01-registo-de-modelos-ponta-a-ponta/SKELETON.md e a
+    transformação dos dados é toda de model_registry.build_models_report;
+    aqui só há o mapeamento de erros. `registry_unavailable` dá sempre 503,
+    venha de um ModelRegistryError ou de uma exceção inesperada — a causa
+    dessa última fica só no log do servidor, nunca no `detail`, que carrega
+    sempre um código da lista fechada de D-06 (nunca texto de exceção nem
+    caminhos).
+    """
+    try:
+        return await run_in_threadpool(model_registry.build_models_report, ML_MODEL_DIR)
+    except model_registry.ModelRegistryError as e:
+        logger.warning("GET /api/ml/models: %s", e.code)
+        raise HTTPException(status_code=503, detail=e.code)
+    except Exception:
+        logger.exception("GET /api/ml/models: erro inesperado ao ler o registo")
+        raise HTTPException(status_code=503, detail="registry_unavailable")
 
 
 @app.get("/api/redblue/metrics", dependencies=_REQUIRE_API_KEY)

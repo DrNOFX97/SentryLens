@@ -48,6 +48,7 @@ ALLOWED_FILES = {
     "/network_soc.js": "network_soc.js",
     "/detections.js": "detections.js",
     "/metrics.js": "metrics.js",
+    "/ml_models.js": "ml_models.js",
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",
