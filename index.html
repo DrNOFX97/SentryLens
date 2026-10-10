@@ -87,7 +87,7 @@
       <button class="nav-item" data-tab="ml-anomalies">🧠 Anomalias</button>
       <button class="nav-item" data-tab="ml-models">📦 Models</button>
       <button class="nav-item is-planned" data-planned="R10" data-label="Training">🏋️ Training<span class="nav-badge">R10</span></button>
-      <button class="nav-item is-planned" data-planned="R9" data-label="Evaluation">📐 Evaluation<span class="nav-badge">R9</span></button>
+      <button class="nav-item" data-tab="ml-evaluation">📐 Evaluation</button>
     </details>
     <details class="nav-group" open>
       <summary>Vaccines</summary>
@@ -589,6 +589,39 @@
             </thead>
             <tbody id="mlm-models-body">
               <tr><td colspan="5" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Evaluation ===== -->
+    <div class="tab-content" id="tab-ml-evaluation">
+      <section class="panel" id="ml-evaluation-panel">
+        <h2>📐 Evaluation</h2>
+        <p class="panel-note">
+          Avaliação de cada versão do modelo (ML contra regras). Só aparecem números guardados no
+          <code>metadata.json</code> da própria versão — nunca de outra versão nem de um
+          <code>ml_training_report.json</code> avulso. Nesta fase nenhuma versão tem avaliação;
+          o comando que a calcula chega na Fase 2.
+        </p>
+
+        <div class="filter-row">
+          <button id="mlm-eval-reload" type="button">Atualizar</button>
+        </div>
+        <div id="mlm-eval-notice" class="panel-note" role="status"></div>
+
+        <div class="table-scroll">
+          <table id="mlm-eval-table">
+            <thead>
+              <tr>
+                <th>Versão</th>
+                <th>Ativa</th>
+                <th>Avaliação</th>
+              </tr>
+            </thead>
+            <tbody id="mlm-eval-body">
+              <tr><td colspan="3" class="empty-state">A carregar...</td></tr>
             </tbody>
           </table>
         </div>

@@ -113,10 +113,34 @@ function mlmModelsNoticeText(report) {
   return texto;
 }
 
+// Avaliação por versão (D-05). Nesta fase nenhuma versão tem avaliação, por
+// isso a coluna só distingue "não há" de "há": mostrar as métricas de uma
+// versão é trabalho da Fase 2, com o cuidado de nunca mostrar números de
+// outra versão.
+function mlmBuildEvalRows(report) {
+  const versions = (report && report.versions) || [];
+  if (!versions.length) {
+    return '<tr><td colspan="3" class="empty-state">Sem dados — ainda não há modelos registados.</td></tr>';
+  }
+  return versions.map((entry) => {
+    const ativa = entry.active ? '<span class="mlm-badge mlm-badge-active">ativa</span>' : "—";
+    const avaliacao = entry.evaluation === null || entry.evaluation === undefined
+      ? "Sem avaliação"
+      : "Avaliação registada no metadata.json; a apresentação das métricas chega na Fase 2.";
+    return `<tr>
+      <td>${escapeHtml(entry.id || entry.label || "")}</td>
+      <td>${ativa}</td>
+      <td>${escapeHtml(avaliacao)}</td>
+    </tr>`;
+  }).join("");
+}
+
 // ======================= camada DOM (só via mlmInit) ========================
 
 let mlmModelsTab = null;
 let mlmModelsWasShown = false;
+let mlmEvalTab = null;
+let mlmEvalWasShown = false;
 let mlmLoading = false;
 
 async function mlmRequest(path) {
@@ -136,34 +160,56 @@ function mlmRenderModels(report) {
   document.getElementById("mlm-models-notice").textContent = mlmModelsNoticeText(report);
 }
 
+function mlmRenderEvaluation(report) {
+  document.getElementById("mlm-eval-body").innerHTML = mlmBuildEvalRows(report);
+  const versions = (report && report.versions) || [];
+  const semAvaliacao = versions.filter(
+    (v) => v.evaluation === null || v.evaluation === undefined).length;
+  document.getElementById("mlm-eval-notice").textContent =
+    `${versions.length} versão(ões). ${semAvaliacao} sem avaliação.`;
+}
+
 function mlmIsShown(tab) {
   return tab.classList.contains("active") && document.visibilityState === "visible";
 }
 
+// Um só pedido alimenta as duas abas — a resposta é a mesma para Models e
+// para Evaluation, porque a avaliação é um campo por versão do mesmo
+// registo (nunca um ml_training_report.json avulso).
 async function mlmRefresh() {
   if (mlmLoading) return;
   mlmLoading = true;
   try {
     const report = await mlmRequest("/api/ml/models");
     renderPanelError("#ml-models-panel", "");
+    renderPanelError("#ml-evaluation-panel", "");
     mlmRenderModels(report);
+    mlmRenderEvaluation(report);
   } catch (err) {
     const texto = mlmErrorText(err.message);
     renderPanelError("#ml-models-panel", "Não foi possível carregar os modelos: " + texto);
+    renderPanelError("#ml-evaluation-panel", "Não foi possível carregar as avaliações: " + texto);
     document.getElementById("mlm-models-body").innerHTML =
       `<tr><td colspan="5" class="empty-state">Sem dados — ${escapeHtml(texto)}</td></tr>`;
+    document.getElementById("mlm-eval-body").innerHTML =
+      `<tr><td colspan="3" class="empty-state">Sem dados — ${escapeHtml(texto)}</td></tr>`;
   } finally {
     mlmLoading = false;
   }
 }
 
 // Ao contrário da Attack Library (que carrega uma vez), aqui recarregamos
-// SEMPRE que a aba passa de escondida a visível: um adopt pode ter corrido
-// entretanto e o backend só passa a usar a versão nova depois de reiniciado.
+// SEMPRE que uma das abas passa de escondida a visível: um adopt pode ter
+// corrido entretanto e o backend só passa a usar a versão nova depois de
+// reiniciado.
 function mlmOnTabChange() {
   const shown = mlmModelsTab ? mlmIsShown(mlmModelsTab) : false;
   if (shown && !mlmModelsWasShown) mlmRefresh();
   mlmModelsWasShown = shown;
+
+  const shownEval = mlmEvalTab ? mlmIsShown(mlmEvalTab) : false;
+  if (shownEval && !mlmEvalWasShown) mlmRefresh();
+  mlmEvalWasShown = shownEval;
 }
 
 function mlmInit() {
@@ -172,9 +218,16 @@ function mlmInit() {
     const observer = new MutationObserver(mlmOnTabChange);
     observer.observe(mlmModelsTab, { attributes: true, attributeFilter: ["class"] });
   }
+  mlmEvalTab = document.getElementById("tab-ml-evaluation");
+  if (mlmEvalTab) {
+    const observer = new MutationObserver(mlmOnTabChange);
+    observer.observe(mlmEvalTab, { attributes: true, attributeFilter: ["class"] });
+  }
   document.addEventListener("visibilitychange", mlmOnTabChange);
   document.getElementById("mlm-models-reload").addEventListener("click", () => mlmRefresh());
-  // Deep link #ml-models: o applyHash de app.js corre antes deste script.
+  document.getElementById("mlm-eval-reload").addEventListener("click", () => mlmRefresh());
+  // Deep link #ml-models / #ml-evaluation: o applyHash de app.js corre antes
+  // deste script.
   mlmOnTabChange();
 }
 

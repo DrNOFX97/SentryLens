@@ -61,7 +61,7 @@ check("ml_models.js carrega sem DOM (nenhuma linha de topo toca em document)", t
 
 const helpers = vm.runInContext(
   "({ MLM_ERROR_TEXT, MLM_GENERIC_ERROR, mlmErrorText, mlmCodeFromResponse, mlmCell," +
-  "   mlmBuildModelsRows, mlmModelsNoticeText })",
+  "   mlmBuildModelsRows, mlmModelsNoticeText, mlmBuildEvalRows })",
   ctx
 );
 const {
@@ -72,6 +72,7 @@ const {
   mlmCell,
   mlmBuildModelsRows,
   mlmModelsNoticeText,
+  mlmBuildEvalRows,
 } = helpers;
 
 // --- relatórios reais gerados pelo wrapper ------------------------------------
@@ -161,6 +162,34 @@ check("aviso sem versão ativa diz 'nenhuma'", mlmModelsNoticeText(reportEmpty).
 check("aviso com active_error traduz o código",
   mlmModelsNoticeText({ active: null, active_error: "active_not_found", versions: [] })
     .includes(mlmErrorText("active_not_found")));
+
+// --- mlmBuildEvalRows (aba Evaluation, D-05) --------------------------------
+
+const evalV1 = mlmBuildEvalRows(reportV1);
+check("Evaluation com v1: uma linha por versão",
+  (evalV1.match(/<tr/g) || []).length === 1);
+check("Evaluation com v1: diz que não há avaliação", evalV1.includes("Sem avaliação"));
+check("Evaluation com v1: marca a versão ativa", evalV1.includes("mlm-badge-active"));
+check("Evaluation sem versões: diz que ainda não há modelos registados",
+  mlmBuildEvalRows(reportEmpty).includes("Sem dados — ainda não há modelos registados."));
+
+// D-05: a Fase 1 não mostra métricas — só diz que existe uma avaliação.
+const evalComNumeros = mlmBuildEvalRows({
+  versions: [{
+    id: "v9",
+    label: "v9",
+    kind: "versioned",
+    active: false,
+    status: "ok",
+    error_code: null,
+    metadata: null,
+    evaluation: { precision: 0.987, recall: 0.5 },
+  }],
+});
+check("Evaluation com objeto: diz que está registada no metadata.json",
+  evalComNumeros.includes("Avaliação registada no metadata.json"));
+check("Evaluation com objeto: nenhum número é mostrado (D-05)",
+  !evalComNumeros.includes("0.987") && !evalComNumeros.includes("0.5"));
 
 // --- fim ---------------------------------------------------------------------
 

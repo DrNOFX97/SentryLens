@@ -813,3 +813,10 @@ tr.rb-stale td { font-style: italic; }
 .alib-replayable { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
 .alib-replayable-yes { background: #d4efdf; }
 .alib-replayable-no { background: #e0e0e0; color: #666; }
+
+/* ===== Registo de modelos (Roadmap v2, R9) — ml_models.js ===== */
+.mlm-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.mlm-badge-active { background: #d4efdf; }
+.mlm-badge-adopted { background: #fdecc8; }
+.mlm-badge-legacy { background: #e0e0e0; color: #666; }
+.mlm-badge-error { background: #f8d7da; }

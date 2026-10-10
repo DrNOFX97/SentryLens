@@ -17,6 +17,7 @@ Correr:
 
 import http.client
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -126,6 +127,8 @@ def run() -> None:
         check("/detections.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/metrics.js")
         check("/metrics.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ml_models.js")
+        check("/ml_models.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, _, _ = get(port, "/scripts/.env")
         check("/scripts/.env continua a dar 404", status == 404)
         status, _, _ = get(port, "/.env")
@@ -138,8 +141,52 @@ def run() -> None:
         tmp.cleanup()
 
 
+def check_static_frontend() -> None:
+    """
+    Protege a sidebar e a forma de ml_models.js contra regressões que o
+    servidor não apanha: se alguém voltar a pôr data-planned="R9" num botão,
+    reintroduzir um nome global colidente, ou tirar um código de erro da
+    tabela PT, a aba fica em branco sem nenhum teste vermelho.
+    """
+    index_html = (serve_frontend.PROJECT_ROOT / "index.html").read_text(encoding="utf-8")
+    ml_models_js = (serve_frontend.PROJECT_ROOT / "ml_models.js").read_text(encoding="utf-8")
+
+    for marker in ('data-tab="ml-models"', 'data-tab="ml-evaluation"',
+                   'id="tab-ml-models"', 'id="tab-ml-evaluation"',
+                   '<script src="ml_models.js"></script>'):
+        check(f"index.html contém {marker}", marker in index_html)
+
+    check("index.html já não tem nenhum marcador de planeado R9", 'data-planned="R9"' not in index_html)
+
+    for tab in ("ml-models", "ml-evaluation"):
+        linhas = [l for l in index_html.splitlines() if f'data-tab="{tab}"' in l]
+        check(f"o botão {tab} deixou de ser planeado",
+              bool(linhas) and not any("is-planned" in l for l in linhas))
+
+    linhas_training = [l for l in index_html.splitlines() if 'data-label="Training"' in l]
+    check("o botão Training continua planeado (R10)",
+          bool(linhas_training) and any("is-planned" in l and 'data-planned="R10"' in l for l in linhas_training))
+
+    declaracoes = re.findall(
+        r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)",
+        ml_models_js, re.M)
+    colisoes = [n for n in declaracoes if not n.startswith(("mlm", "MLM_"))]
+    check("todos os identificadores de topo de ml_models.js têm prefixo mlm/MLM_", not colisoes)
+    if colisoes:
+        print(f"       nomes sem prefixo: {colisoes}")
+
+    codigos = ("invalid_version_id", "active_not_found", "metadata_missing", "metadata_invalid",
+               "artifact_missing", "hash_mismatch", "already_adopted", "no_legacy_model",
+               "registry_unavailable")
+    em_falta = [c for c in codigos if c not in ml_models_js]
+    check("ml_models.js traduz os 9 códigos de erro de D-06", not em_falta)
+    if em_falta:
+        print(f"       códigos em falta: {em_falta}")
+
+
 if __name__ == "__main__":
     run()
+    check_static_frontend()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:
