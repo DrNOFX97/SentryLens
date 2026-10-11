@@ -55,12 +55,19 @@ MOCK_ALERTS = (
 )
 
 # Contrato de topo de /api/ml-anomalies: as chaves que já existiam, mais as
-# duas que a Fase 2 acrescentou (alerts_fetched/alerts_truncated, D-10). É
-# um conjunto exacto, não uma lista: um terceiro campo novo aparece aqui
-# como falha em vez de passar em silêncio.
+# duas que a Fase 2 acrescentou (alerts_fetched/alerts_truncated, D-10) e a
+# que o R10 acrescentou (model_version, D-06 — o relatório passou a dizer de
+# que versão veio cada número). É um conjunto exacto, não uma lista: um
+# quarto campo novo aparece aqui como falha em vez de passar em silêncio.
+#
+# Esta lista é a MESMA costura escrita à mão em `test_ml_models_api.py`
+# (secção `model_version_no_relatorio`), que a confere pelo caminho bom, pelo
+# legado e pelo relatório vazio. Duas listas, uma igualdade — nenhuma delas
+# cresce sem as duas.
 CHAVES_ESPERADAS = {
     "total", "ml_anomalies_count", "rule_flagged_count", "agree_count",
     "diverge_count", "results", "window_hours", "alerts_fetched", "alerts_truncated",
+    "model_version",
 }
 
 # Teto do pedido ao Indexer, o mesmo de /api/redblue/metrics e de
@@ -98,7 +105,7 @@ def run() -> None:
               body["alerts_fetched"] == len(MOCK_ALERTS))
         check("alerts_truncated é False com 10 alertas",
               body["alerts_truncated"] is False)
-        check("as chaves de topo são exactamente o contrato + as duas novas",
+        check("as chaves de topo são exactamente o contrato + as três novas",
               set(body) == CHAVES_ESPERADAS)
 
         # --- janela a encher o tecto: truncada, e o valor não muda ---

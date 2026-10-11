@@ -36,12 +36,20 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 import incident_ingest
 import jev_client
 import ml_anomalies
 import model_registry
+
+# `ml_training` entra por import NORMAL e não tardio, ao contrário do
+# `train_anomaly_model`/`ml_evaluation` (que o registo só carrega dentro das
+# funções, por contrato stdlib puro). A razão é o arranque: o backend já
+# carrega scikit-learn por `ml_anomalies` -> `feature_extractor`/`joblib`, e o
+# `/api/ml-anomalies` já falha se o não tiver — portanto um import tardio aqui
+# não pouparia nada e só mudaria o sítio do erro. Não trocar por `importlib`.
+import ml_training
 import soc_metrics
 from admin_activity import build_admin_activity_report
 from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
@@ -782,6 +790,21 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         # Aditivo: nenhuma chave que já existia muda de nome nem de significado.
         report["alerts_fetched"] = len(raw_alerts)
         report["alerts_truncated"] = len(raw_alerts) >= 1000
+        # D-06: o relatório não dizia que versão mediu. Durante e depois de um
+        # reset_cache um relatório pode ser de uma versão que já não é a
+        # activa, e sem esta linha o painel Evaluation diz "o modelo" e não
+        # diz qual — que é o número inventado por omissão.
+        #
+        # Ler DEPOIS do build_ml_anomalies_report é deliberado: o valor tem de
+        # ser o do load_model que carregou o modelo que produziu estes
+        # números. Lê-lo antes abriria a janela de um reset_cache concorrente
+        # a trocar `_loaded_from` entre a leitura e o `predict`.
+        #
+        # Aditivo, pela mesma regra de alerts_truncated: nenhuma chave que já
+        # existia muda de nome nem de significado. "legacy" é uma resposta
+        # honesta (o modelo sem metadados, sem hash verificado), None é
+        # "nada carregado".
+        report["model_version"] = ml_anomalies.loaded_version()
         return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
@@ -791,8 +814,16 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
 async def get_ml_models():
     """
     Registo de versões do modelo ML (R9): versões em models/vN/, qual está
-    ativa (models/ACTIVE) e os metadados de cada uma. Só leitura — ativar,
-    adotar ou treinar é operação de CLI, nunca por HTTP.
+    ativa (models/ACTIVE) e os metadados de cada uma.
+
+    Esta rota continua SÓ LEITURA sobre o registo. A escrita por HTTP existe
+    desde o R10 e vive em duas rotas novas — `POST /api/ml/train` e
+    `POST /api/ml/models/{version_id}/activate` —, não nesta. Inverteu-se a
+    afirmação anterior ("treinar é operação de CLI, nunca por HTTP"); as quatro
+    protecções que fecham a superfície nova (nenhum caminho do pedido,
+    single-flight, tetos no corpo, `Literal` de catálogo fechado) estão em
+    .planning/phases/10-ml-learning-loop/10-CONTEXT.md, decisão D-01, e o
+    risco residual aceite está em docs/SECURITY.md.
 
     `loaded` é a versão que o ml_anomalies tem de facto em memória (D-02),
     que pode não ser a ativa: a cache do modelo é por processo.
@@ -816,6 +847,216 @@ async def get_ml_models():
     except Exception:
         logger.exception("GET /api/ml/models: erro inesperado ao ler o registo")
         raise HTTPException(status_code=503, detail="registry_unavailable")
+
+
+# --- R10: escrita no registo por HTTP (D-01) -------------------------------------
+#
+# A afirmação de `get_ml_models` acima — "treinar é operação de CLI, nunca por
+# HTTP" — foi INVERTIDA por D-01. O que fica escrito aqui é o que a superfície
+# nova garante, e a lista é curta de propósito:
+#
+#   1. Nenhum caminho vem do corpo. O `dataset` é um `Literal` de um catálogo
+#      fechado que o servidor resolve (`ml_training.resolve_export_path`), e o
+#      registo é sempre o `ML_MODEL_DIR` lido a nível de módulo.
+#   2. Um Só treino (e uma só activação) a cada vez — `ml_training._slot()`,
+#      que responde 409 a quem chega enquanto a outra corre.
+#   3. Três tetos no corpo, porque sem tecto `n_estimators=10**9` é um DoS de
+#      uma linha.
+#   4. `extra="forbid"`, porque o default do Pydantic v2 é IGNORAR uma chave
+#      desconhecida: sem isto, um `{"models_dir": "..."}" no corpo seria
+#      descartado em silêncio e o utilizador acreditaria ter escolhido o sítio.
+#
+# O que NÃO fecha: a chave continua a ser global e sem papéis. Quem a tem passa
+# a poder escrever em `models/` — e o SHA-256 dos `.pkl` deixa de ser uma
+# defesa e passa a ser um detector de corrupção. Isso é o risco residual que
+# D-08 manda escrever em docs/SECURITY.md.
+
+# Código de TRAINING_ERROR_CODES -> status HTTP. Escrita aqui como constante
+# fechada, e o `test_ml_models_api.py` tem uma cópia escrita à mão dela para
+# comparar — a mesma costura que `EVALUATION_KEYS` impõe ao registo.
+# `dataset_not_found` é 404 (o ficheiro não existe) e `dataset_unusable` é 422
+# (existe mas não dá linhas treináveis): são sintomas diferentes para quem lê.
+_ML_WRITE_STATUS = {
+    "dataset_not_found": 404,
+    "dataset_unusable": 422,
+    "training_in_progress": 409,
+    "training_failed": 503,
+}
+
+# Código de ERROR_CODES -> status HTTP. NÃO é "ModelRegistryError dá sempre
+# 503": uma versão que não existe é um 404 honesto (é o que `GET /api/ml/models`
+# já provoca no leitor, e o frontend traduz `active_not_found`), e o 503 fica
+# para o que é de facto indisponibilidade — registo ilegível, `ACTIVE` que não
+# decodifica, `.pkl` cujo hash não bate. As nove chaves estão escritas: um
+# código novo que não entre aqui cai em 503, que é o fail-closed certo (nunca
+# 500, nunca um `detail` que não seja código).
+_ML_REGISTRY_STATUS = {
+    "invalid_version_id": 404,
+    "active_not_found": 404,
+    "metadata_missing": 404,
+    "metadata_invalid": 503,
+    "artifact_missing": 404,
+    "hash_mismatch": 503,
+    "already_adopted": 409,
+    "no_legacy_model": 404,
+    "registry_unavailable": 503,
+}
+
+# As duas escolhas que o servidor faz em nome do cliente, e a tripla de
+# proveniência do lote. `dataset_origin` é o mesmo `DATASET_ORIGINS` do
+# `ml_evaluation` — os doisórãos são listas separadas e iguais por construção,
+# não por importação (o registo não importa o motor).
+MLTrainDataset = Literal["latest_export", "sample_fixture"]
+MLTrainOrigin = Literal["real", "synthetic", "unknown"]
+
+
+class MLTrainRequest(BaseModel):
+    """
+    O corpo de `POST /api/ml/train`. Cinco campos, e a lista é a barreira de
+    D-01.1 — por isso não há aqui nenhum caminho, nome de ficheiro, pasta ou
+    URL, e `extra="forbid"` garante que acrescentar um não passa em silêncio.
+
+    `dataset` e `dataset_origin` são OBRIGATÓRIOS, sem default, e essa é uma
+    decisão deliberada. O default natural de `dataset` seria `"sample_fixture"`
+    (o fixture sintético versionado), e um botão de treinar que em silêncio
+    treina sobre o fixture enquanto o utilizador acredita que treina sobre o
+    laboratório é exactamente o número inventado que PROJECT.md proíbe. Sem
+    default, o frontend tem de MOSTRAR a escolha. O mesmo vale para
+    `dataset_origin`: o CLI tem `"unknown"` por omissão, mas por HTTP o "não
+    declarado" é uma decisão de quem carrega no botão, não um esquecimento de
+    quem o escreveu.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    dataset: MLTrainDataset
+    dataset_origin: MLTrainOrigin
+    # Os três tetos são de D-01.3. Testados pelos dois lados no
+    # `test_ml_models_api.py`: fora -> 422, dentro -> 200 — um tecto que nunca
+    # deixa passar nada também não é um contrato.
+    contamination: float = Field(default=0.2, ge=0.01, le=0.5)
+    random_state: int = Field(default=42, ge=0, le=4294967295)
+    n_estimators: int = Field(default=200, ge=10, le=1000)
+
+
+def _ml_write_error(exc) -> HTTPException:
+    """
+    Tradutor ÚNICO das falhas das duas rotas de escrita em resposta HTTP.
+
+    O `detail` é sempre um código — de `ml_training.TRAINING_ERROR_CODES`, de
+    `model_registry.ERROR_CODES`, ou a `NO_MODEL_MESSAGE` (que já é uma frase
+    PT sem caminho, e o frontend já a conhece). Nunca texto de excepção, nunca
+    caminho, nunca traceback: a causa fica no log do servidor e o corpo da
+    resposta fica no código. É a mesma política de API-02 que `get_ml_models`
+    já aplica, e o `test_ml_models_api.py` mede a tabela linha a linha.
+    """
+    if isinstance(exc, ml_training.TrainingError):
+        codigo = exc.code
+        return HTTPException(status_code=_ML_WRITE_STATUS[codigo], detail=codigo)
+    if isinstance(exc, model_registry.ModelRegistryError):
+        return HTTPException(
+            status_code=_ML_REGISTRY_STATUS.get(exc.code, 503), detail=exc.code
+        )
+    if isinstance(exc, FileNotFoundError):
+        # `load_model` não encontrou modelo nenhum: a mensagem é a do registo,
+        # que é accionável e não contém caminho. Uma FileNotFoundError
+        # tracada de fora é traduzida para a mesma, que é a resposta honesta
+        # ("não há modelo") em vez de um caminho do host.
+        return HTTPException(status_code=503, detail=model_registry.NO_MODEL_MESSAGE)
+    if isinstance(exc, KeyboardInterrupt):
+        # `BaseException`, não `Exception`: fica AQUI de propósito, porque o
+        # `except Exception` abaixo não a apanharia e o treino ficava preso
+        # no 500 do uvicorn em vez de dar um 503 com código. O `_slot()` do
+        # motor liberta o lock no `finally` antes de isto chegar aqui.
+        logger.warning("Escrita no registo interrompida a meio (KeyboardInterrupt)")
+        return HTTPException(status_code=503, detail="training_failed")
+    logger.exception("Escrita no registo: erro inesperado")
+    return HTTPException(status_code=503, detail="registry_unavailable")
+
+
+@app.post("/api/ml/train", dependencies=_REQUIRE_API_KEY)
+async def train_ml_model(body: MLTrainRequest):
+    """
+    Treina uma versão nova a partir de um dataset escolhido pelo servidor,
+    regista-a, activa-a e recarrega a cache — em UM pedido, que é o que D-07
+    exige (sem 202, sem `job_id`, sem polling: um treino são ~3 s medidos).
+
+    Devolve 200 com `{version, active, loaded, dataset, parameters,
+    evaluation, catalog_sha256, report}`, onde `report` é o
+    `build_models_report` COMPLETO. Embedder o relatório é o que evita um
+    segundo `GET` só para repintar a tabela no browser sem introduzir uma
+    superfície nova: o payload é o mesmo que `GET /api/ml/models` já devolve.
+
+    `evaluation` é sempre `None` numa versão recém-treinada: um treino não
+    publica métricas sobre o próprio conjunto de treino como se fossem uma
+    avaliação (EVAL-03). Quem avalia é o `model_registry evaluate vN`.
+
+    `loaded` vem do `ml_anomalies` DEPOIS do `reset_cache`/`load_model` que o
+    motor faz dentro do lock, portanto aqui já é a versão nova — reiniciar o
+    backend não é preciso (ao contrário do que a aba Models tem de dizer
+    depois de um `adopt` feito pela CLI).
+    """
+    # A dependency de autenticação corre ANTES da validação do corpo: um
+    # pedido sem chave gets 401 sem que o Pydantic veja sequer o JSON. Por isso
+    # o `except` daqui nunca apanha um HTTPException alheio (422 do FastAPI) —
+    # e por isso o `except Exception` genérico do `_ml_write_error` só é
+    # alcançado por uma falha a sério, nunca por uma validação.
+    try:
+        evento = ml_training.resolve_export_path(body.dataset)
+        log_ataques = ml_training.resolve_attack_log_path(body.dataset)
+        resultado = await run_in_threadpool(
+            ml_training.train_next_version,
+            ML_MODEL_DIR, str(evento), str(log_ataques),
+            contamination=body.contamination,
+            random_state=body.random_state,
+            n_estimators=body.n_estimators,
+            dataset_origin=body.dataset_origin,
+        )
+    except (Exception, KeyboardInterrupt) as exc:
+        # O `KeyboardInterrupt` é nomeado à mão porque é `BaseException` e não
+        # `Exception`: um `Ctrl-C` a meio de um `joblib.dump` dentro do
+        # threadpool chegaria aqui e, sem esta linha, sairia como um 500 do
+        # uvicorn em vez de um 503 com código. O `_slot()` do motor já libertou
+        # o lock no `finally` antes disto.
+        raise _ml_write_error(exc) from None
+    # O relatório vai DEPOIS do treino, e é por esta ordem: o `loaded` que ele
+    # recebe é o de um cache já recarregado, não o da cache anterior.
+    return {
+        **resultado,
+        "report": await run_in_threadpool(
+            model_registry.build_models_report, ML_MODEL_DIR, ml_anomalies.loaded_version()
+        ),
+    }
+
+
+@app.post("/api/ml/models/{version_id}/activate", dependencies=_REQUIRE_API_KEY)
+async def activate_ml_model(version_id: str = Path(..., pattern=r"^v[0-9]{1,4}$")):
+    """
+    Torna a `vN` pedida a activa e recarrega a cache, sem treinar nada.
+
+    Duas camadas validam o id, e são diferentes de propósito: o `pattern` do
+    `Path` do FastAPI é a primeira (um id mal formado é 422 do FastAPI, sem
+    entrar na função) e o `validate_version_id` do registo é a segunda, que
+    protege a CLI e nunca é alcançada por HTTP — porque `VERSION_ID_RE` é a
+    mesma regex, e um `../x` nem casa o `{version_id}` (não casa slashes).
+
+    A verificação de integridade acontece ANTES de escrever o `ACTIVE`: um
+    `.pkl` cujo SHA-256 não bata dá 503 `hash_mismatch` com o `ACTIVE`
+    byte-idêntico e ZERO chamadas a `joblib.load`. A escrita é um
+    compare-and-set, e um `ACTIVE` que mudeu entre a leitura e a escrita dá
+    `training_failed` sem sobrescrever o que o outro escritor deixou.
+    """
+    try:
+        resultado = await run_in_threadpool(
+            ml_training.activate_version, ML_MODEL_DIR, version_id
+        )
+    except (Exception, KeyboardInterrupt) as exc:
+        raise _ml_write_error(exc) from None
+    return {
+        **resultado,
+        "report": await run_in_threadpool(
+            model_registry.build_models_report, ML_MODEL_DIR, ml_anomalies.loaded_version()
+        ),
+    }
 
 
 @app.get("/api/redblue/metrics", dependencies=_REQUIRE_API_KEY)

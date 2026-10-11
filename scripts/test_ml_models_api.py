@@ -16,6 +16,7 @@ Correr (a partir de scripts/):
     python test_ml_models_api.py
 """
 
+import contextlib
 import hashlib
 import io
 import json
@@ -24,6 +25,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -32,9 +34,12 @@ os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao
 import joblib
 from fastapi.testclient import TestClient
 
+import feature_extractor
 import main
 import ml_anomalies
+import ml_training
 import model_registry
+import train_anomaly_model
 from feature_extractor import extract_features, vectorize
 from train_anomaly_model import train_model
 
@@ -375,6 +380,12 @@ def run() -> None:
     adocao_ponta_a_ponta(client)
     avaliacao_ponta_a_ponta(client)
     versao_treinada_integridade(client)
+
+    limites_do_pedido(client)
+    treino_ponta_a_ponta(client)
+    activate_ponta_a_ponta(client)
+    model_version_no_relatorio(client)
+    dois_posts_concorrentes(client)
 
     tst01_inventario(client)
 
@@ -1212,6 +1223,926 @@ def avaliacao_ponta_a_ponta(client) -> None:
             check("(w) um valor do tipo errado cai a None", avaliacao_w["total_events"] is None)
         finally:
             ml_anomalies.joblib = original_joblib
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
+
+
+# --- R10: as duas rotas de escrita (plano 10-03) ---------------------------------
+
+# As DUAS tabelas de erro, escritas À MÃO de propósito. São a mesma costura que
+# `EVALUATION_KEYS` impõe ao registo: duas listas, uma igualdade presa por um
+# teste. Mudar uma sem a outra dá vermelho.
+ML_WRITE_STATUS_ESPERADO = {
+    "dataset_not_found": 404,
+    "dataset_unusable": 422,
+    "training_in_progress": 409,
+    "training_failed": 503,
+}
+ML_REGISTRY_STATUS_ESPERADO = {
+    "invalid_version_id": 404,
+    "active_not_found": 404,
+    "metadata_missing": 404,
+    "metadata_invalid": 503,
+    "artifact_missing": 404,
+    "hash_mismatch": 503,
+    "already_adopted": 409,
+    "no_legacy_model": 404,
+    "registry_unavailable": 503,
+}
+
+# O pin do `MLTrainRequest`: cinco campos, dois obrigatórios, três com teto. É
+# este pin que garante que ninguém acrescenta um campo de caminho ao pedido sem
+# o plano o dizer (D-01.1).
+MLTRAIN_CAMPOS = ("dataset", "dataset_origin", "contamination", "random_state", "n_estimators")
+MLTRAIN_OBRIGATORIOS = ("dataset", "dataset_origin")
+MLTRAIN_TETOS = {
+    "contamination": (0.01, 0.5),
+    "random_state": (0, 4294967295),
+    "n_estimators": (10, 1000),
+}
+CORPO_MINIMO = {"dataset": "latest_export", "dataset_origin": "real"}
+
+
+@contextlib.contextmanager
+def ambiente_treino(export_dir, attack_log_path=None):
+    """
+    Aponta o motor para pastas de teste e restaura o ambiente no `finally`.
+
+    O motor resolve o export do AMBIENTE a cada chamada (`ML_EXPORT_DIR`) e o
+    log de ataques do mesmo modo (`ATTACK_LOG_PATH`), por isso o contexto mexe
+    no `os.environ` em vez de nos módulos. `REQUESTED_EXPORT` sai de cena
+    porque o `.env` do utilizador pode tê-lo posto, e ele ganha a `latest_export`
+    sem o teste o saber.
+    """
+    chaves = ("ML_EXPORT_DIR", "ATTACK_LOG_PATH", "REQUESTED_EXPORT")
+    antes = {chave: os.environ.get(chave) for chave in chaves}
+    os.environ["ML_EXPORT_DIR"] = str(export_dir)
+    os.environ.pop("REQUESTED_EXPORT", None)
+    if attack_log_path is not None:
+        os.environ["ATTACK_LOG_PATH"] = str(attack_log_path)
+    try:
+        yield
+    finally:
+        for chave, valor in antes.items():
+            if valor is None:
+                os.environ.pop(chave, None)
+            else:
+                os.environ[chave] = valor
+
+
+def exportar_eventos(pasta, documentos, nome="2026-09-14_15-22.json") -> Path:
+    """Cria a pasta e escreve lá um export com o NOME que o `resolve_export_path`
+    reconhece. Devolve a PASTA, não o ficheiro: é `ML_EXPORT_DIR` que a quer, e
+    apontá-la para o `.json` dava `dataset_not_found` em silêncio."""
+    pasta.mkdir(parents=True, exist_ok=True)
+    (pasta / nome).write_text(json.dumps(documentos, ensure_ascii=False), encoding="utf-8")
+    return pasta
+
+
+def log_de_ataque(pasta, timestamp="2026-09-02T03:05:00Z", tipo="brute_force") -> Path:
+    """Um log JSONL com UM ataque, que cobre um evento de MOCK_ALERTS."""
+    pasta.mkdir(parents=True, exist_ok=True)
+    destino = pasta / "attack_log.jsonl"
+    destino.write_text(json.dumps({"timestamp": timestamp, "type": tipo}) + "\n", encoding="utf-8")
+    return destino
+
+
+def listagem(pasta) -> list[str]:
+    return sorted(p.name for p in Path(pasta).iterdir())
+
+
+def fingerprint(pasta) -> dict:
+    """Fotografia byte a byte do registo: quem escreve em models/ tem de mudar isto."""
+    raiz = Path(pasta)
+    return {p.name: (hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else "<pasta>")
+            for p in sorted(raiz.iterdir())}
+
+
+def treinar(client, **extra) -> "object":
+    """Um POST /api/ml/train com o corpo mínimo mais `extra`."""
+    return client.post("/api/ml/train", json={**CORPO_MINIMO, **extra}, headers=HEADERS)
+
+
+def limites_do_pedido(client) -> None:
+    """
+    A superfície, antes de o motor: quem entra, o que o corpo aceita e o que
+    ele recusa. Nenhum destes cenários treina — os que seriam 200 à partida
+    ficam para `treino_ponta_a_ponta`.
+    """
+    print("\n--- limites do pedido, autenticação e corpo sem caminhos (R10/D-01) ---")
+
+    original_dir = main.ML_MODEL_DIR
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        export_dir = exportar_eventos(raiz / "exports", MOCK_ALERTS)
+        log = log_de_ataque(raiz)
+        models_dir = raiz / "models"
+
+        def usar() -> None:
+            main.ML_MODEL_DIR = str(models_dir)
+            ml_anomalies.reset_cache()
+
+        usar()
+        try:
+            with ambiente_treino(export_dir, log):
+                # (A) As duas rotas novas exigem a chave no PRÓPRIO decorador.
+                #     A dependency corre antes da validação do corpo, por isso
+                #     um corpo lixo dá 401 e não 422 — e o corpo nem é lido.
+                sem_key = TestClient(main.app)
+                for rota, json_body in (("/api/ml/train", CORPO_MINIMO),
+                                        ("/api/ml/models/v1/activate", None)):
+                    resp = sem_key.post(rota, json=json_body)
+                    check(f"(A) {rota} sem X-API-Key -> 401", resp.status_code == 401)
+                    check(f"(A) {rota} sem chave -> detail estável",
+                          resp.json().get("detail") == "API key inválida ou em falta")
+                    errada = TestClient(main.app, headers={"X-API-Key": "chave-errada"})
+                    resp = errada.post(rota, json=json_body)
+                    check(f"(A) {rota} com chave errada -> 401", resp.status_code == 401)
+                    check(f"(A) {rota} sem chave NÃO escreve nada",
+                          not models_dir.exists() or listagem(models_dir) == [])
+
+                # (B) O pin do MLTrainRequest: cinco campos, dois obrigatórios,
+                #     três com teto, `extra="forbid"`. Campo a campo — este é o
+                #     teste que trava alguém de acrescentar `models_dir` ao
+                #     corpo sem o plano o dizer.
+                campos = main.MLTrainRequest.model_fields
+                check("(B) MLTrainRequest tem EXACTAMENTE os cinco campos",
+                      set(campos) == set(MLTRAIN_CAMPOS) and len(campos) == 5)
+                check("(B) dataset e dataset_origin são obrigatórios",
+                      all(campos[nome].is_required() for nome in MLTRAIN_OBRIGATORIOS))
+                check("(B) os outros três têm valor por omissão",
+                      not any(campos[nome].is_required()
+                              for nome in ("contamination", "random_state", "n_estimators")))
+                check("(B) extra='forbid'", main.MLTrainRequest.model_config.get("extra") == "forbid")
+                limites_ok = True
+                for nome, (minimo, maximo) in MLTRAIN_TETOS.items():
+                    # No Pydantic v2 o `metadata` são objetos anotados
+                    # (`annotated_types.Ge`), não tuplas: vai-se pelo atributo.
+                    declarados = {getattr(meta, limite)
+                                  for meta in campos[nome].metadata
+                                  for limite in ("ge", "le") if hasattr(meta, limite)}
+                    limites_ok = limites_ok and {minimo, maximo} <= declarados
+                check("(B) os três tetos são os do pin, campo a campo", limites_ok)
+                check("(B) os valores por omissão são 0.2 / 42 / 200",
+                      campos["contamination"].default == 0.2
+                      and campos["random_state"].default == 42
+                      and campos["n_estimators"].default == 200)
+
+                # (B) As tabelas de erro: duas listas escritas à mão contra as
+                #     de main.py, e a de TRAINING_ERROR_CODES completa.
+                check("(B) a tabela de TRAINING_ERROR_CODES é a do teste",
+                      main._ML_WRITE_STATUS == ML_WRITE_STATUS_ESPERADO
+                      and set(main._ML_WRITE_STATUS) == set(ml_training.TRAINING_ERROR_CODES)
+                      and len(ml_training.TRAINING_ERROR_CODES) == 4)
+                check("(B) a tabela de ERROR_CODES é a do teste, com as 9 chaves",
+                      main._ML_REGISTRY_STATUS == ML_REGISTRY_STATUS_ESPERADO
+                      and set(main._ML_REGISTRY_STATUS) == set(model_registry.ERROR_CODES)
+                      and len(model_registry.ERROR_CODES) == 9)
+                check("(B) ERROR_CODES não cresceu com os quatro de treino",
+                      not set(model_registry.ERROR_CODES) & set(ml_training.TRAINING_ERROR_CODES))
+
+                # (C) Os obrigatórios a faltar: 422 com os dois no `detail`.
+                resp = client.post("/api/ml/train", json={}, headers=HEADERS)
+                detalhe = json.dumps(resp.json().get("detail"))
+                check("(C) corpo vazio -> 422", resp.status_code == 422)
+                check("(C) o detail nomeia os dois obrigatórios",
+                      "dataset" in detalhe and "dataset_origin" in detalhe)
+                resp = client.post("/api/ml/train", json={"dataset": "latest_export"}, headers=HEADERS)
+                check("(C) falta o dataset_origin -> 422", resp.status_code == 422)
+
+                # (D) Os `Literal` fecham o caminho (D-01.4). "../../etc/passwd"
+                #     e "C:/Users/x/eventos.json" são 422 do Pydantic, não do
+                #     motor — e nada é escrito.
+                for mau in ("../../etc/passwd", "C:/Users/fnuno/eventos.json",
+                            "/etc/passwd", "", "LATEST_EXPORT"):
+                    resp = treinar(client, dataset=mau)
+                    check(f"(D) dataset={mau!r} -> 422", resp.status_code == 422)
+                for mau in ("inventado", "REAL", ""):
+                    resp = treinar(client, dataset_origin=mau)
+                    check(f"(D) dataset_origin={mau!r} -> 422", resp.status_code == 422)
+                check("(D) nenhum destes 422 escreveu em models/",
+                      not models_dir.exists() or listagem(models_dir) == [])
+
+                # (E) O corpo sem caminhos — o pin de D-01.1 por HTTP. Sem
+                #     `extra="forbid"` o Pydantic v2 IGNORARIA estas chaves em
+                #     silêncio e o utilizador acreditaria ter escolhido o sítio.
+                for chave in ("events", "models_dir", "attack_log", "sources",
+                              "path", "url", "MODEL_DIR", "models-dir"):
+                    antes = fingerprint(models_dir) if models_dir.exists() else {}
+                    resp = treinar(client, **{chave: "C:/Users/x"})
+                    depois = fingerprint(models_dir) if models_dir.exists() else {}
+                    check(f"(E) chave extra {chave!r} -> 422", resp.status_code == 422)
+                    check(f"(E) chave extra {chave!r} não escreveu nada", antes == depois)
+                    # O Pydantic v2 devolve o `input` rejeitado no detail — que
+                    # aqui é o valor que o próprio cliente enviou, e portanto
+                    # não é uma fuga. O que não pode aparecer é caminho do
+                    # SERVIDOR, e é isso que se mede.
+                    no_leaks_pasta(f"(E) chave extra {chave!r}", resp, models_dir)
+                    check(f"(E) chave extra {chave!r} não traz a pasta de exports",
+                          str(export_dir) not in resp.text)
+                resp = client.post("/api/ml/train", data="nao sou json",
+                                   headers={**HEADERS, "Content-Type": "application/json"})
+                check("(E) corpo que não é JSON -> 422", resp.status_code == 422)
+
+                # (F) Os tetos pelos dois lados (D-01.3). Fora: 422. Dentro:
+                #     200 — e o `.pkl` carregado tem MESMO o número pedido, que
+                #     é o que prova que o tecto não é decorativo nem um filtro
+                #     que nunca deixa passar nada.
+                fora = [
+                    ({"contamination": 0.0}, "contamination 0.0"),
+                    ({"contamination": 0.51}, "contamination 0.51"),
+                    ({"contamination": -1}, "contamination negativa"),
+                    ({"random_state": -1}, "random_state -1"),
+                    ({"random_state": 4294967296}, "random_state 4294967296"),
+                    ({"n_estimators": 9}, "n_estimators 9"),
+                    ({"n_estimators": 1001}, "n_estimators 1001"),
+                    ({"n_estimators": 10 ** 9}, "n_estimators 10**9 (o DoS de uma linha)"),
+                ]
+                for extra, etiqueta in fora:
+                    antes = fingerprint(models_dir) if models_dir.exists() else {}
+                    resp = treinar(client, **extra)
+                    depois = fingerprint(models_dir) if models_dir.exists() else {}
+                    check(f"(F) {etiqueta} -> 422", resp.status_code == 422)
+                    check(f"(F) {etiqueta} não escreveu nada", antes == depois)
+
+                dentro = [
+                    {"contamination": 0.01},
+                    {"contamination": 0.5},
+                    {"random_state": 0},
+                    {"random_state": 4294967295},
+                    {"n_estimators": 10},
+                    {"n_estimators": 1000},
+                ]
+                versao_do_tecto = None
+                for extra in dentro:
+                    usar()
+                    resp = treinar(client, **extra)
+                    pedido = next(iter(extra))
+                    check(f"(F) {pedido}={extra[pedido]} (dentro) -> 200", resp.status_code == 200)
+                    if resp.status_code == 200:
+                        versao = resp.json()["version"]
+                        gravado = json.loads(
+                            (Path(main.ML_MODEL_DIR) / versao / "metadata.json")
+                            .read_text(encoding="utf-8"))["parameters"]
+                        check(f"(F) {pedido}={extra[pedido]} vai para o metadata.json",
+                              gravado.get(pedido) == extra[pedido])
+                        if extra[pedido] == MLTRAIN_TETOS["n_estimators"][1]:
+                            versao_do_tecto = versao
+                usar()
+                # O tecto não é decorativo: o `.pkl` que saiu do POST com
+                # n_estimators=1000 tem MESMO 1000 árvores dentro. É o que
+                # distingue um `Field(le=1000)` de um `Field(le=10)` que
+                # apenas passa testes por nunca ninguém chegar lá.
+                pkl = joblib.load(Path(main.ML_MODEL_DIR) / versao_do_tecto / MODEL_FILE)
+                check("(F) o .pkl do POST com n_estimators=1000 tem 1000 árvores",
+                      int(getattr(pkl, "n_estimators", 0)) == 1000)
+
+                # (G) `../x` NEM CHEGA ao handler: o `{version_id}` não casa
+                #     slashes, por isso o router devolve o seu próprio 404. O
+                #     `invalid_version_id` do registo é provado no
+                #     `test_ml_training.py` (mesmo `validate_version_id`, mas
+                #     sem o path-param pelo meio) — e escrito aqui para que
+                #     ninguém escreva um caso impossível à espera do 404 do
+                #     registo e o teste falhe por uma razão errada.
+                resp = client.post("/api/ml/models/../x/activate", headers=HEADERS)
+                check("(G) '../x' -> 404 do router (não do registo)", resp.status_code == 404)
+                check("(G) e o detail é o do router, não um código do registo",
+                      resp.json().get("detail") == "Not Found")
+                resp = client.post("/api/ml/models/v99999/activate", headers=HEADERS)
+                check("(G) v99999 (5 dígitos) -> 422 do pattern do FastAPI",
+                      resp.status_code == 422)
+        finally:
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
+
+
+def treino_ponta_a_ponta(client) -> None:
+    """
+    O caminho feliz inteiro, com o `metadata.json` conferido contra os factos
+    que o próprio teste calcula a partir do fixture — e os quatro caminhos de
+    falha do motor traduzidos para HTTP.
+    """
+    print("\n--- treino ponta a ponta e erros do motor (R10/D-01) ---")
+
+    original_dir = main.ML_MODEL_DIR
+    original_train = train_anomaly_model.train_model
+    original_indexer = main.indexer_client.get_recent_alerts
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        export_dir = exportar_eventos(raiz / "exports", MOCK_ALERTS)
+        log = log_de_ataque(raiz)
+        models_dir = raiz / "models"
+
+        def usar() -> None:
+            main.ML_MODEL_DIR = str(models_dir)
+            ml_anomalies.reset_cache()
+
+        usar()
+        try:
+            with ambiente_treino(export_dir, log):
+                # (H) 200 com TUDO numa resposta: a v1 criada, activada e já
+                #     em memória, mais o relatório completo — sem segundo GET.
+                resp = treinar(client)
+                check("(H) POST /api/ml/train -> 200", resp.status_code == 200)
+                body = resp.json() if resp.status_code == 200 else {}
+                check("(H) version/active/loaded são a v1, sem reiniciar o backend",
+                      body.get("version") == "v1" and body.get("active") == "v1"
+                      and body.get("loaded") == "v1")
+                check("(H) evaluation é None numa versão recém-treinada (EVAL-03)",
+                      body.get("evaluation") is None)
+                check("(H) catalog_sha256 é o do registo",
+                      body.get("catalog_sha256") == model_registry.catalog_sha256())
+                report = body.get("report") or {}
+                check("(H) o report embutido é o build_models_report completo",
+                      report.get("total") == 1 and report.get("active") == "v1"
+                      and (report.get("versions") or [{}])[0].get("status") == "ok")
+                check("(H) a v1 do report vem com catalog_compatible True",
+                      (report.get("versions") or [{}])[0].get("catalog_compatible") is True)
+                check("(H) a resposta tem as sete chaves do payload mais 'report'",
+                      set(body) == {"version", "active", "loaded", "dataset", "parameters",
+                                    "evaluation", "catalog_sha256", "report"})
+
+                # (H) O metadata.json em disco, conferido contra o que o TESTE
+                #     calcula do fixture — não contra o que a rota devolveu.
+                meta = json.loads((models_dir / "v1" / "metadata.json").read_text(encoding="utf-8"))
+                check("(H) origin == 'trained'", meta.get("origin") == "trained")
+                check("(H) trained_at presente e estimated False",
+                      bool(meta.get("trained_at")) and meta.get("trained_at_estimated") is False)
+                check("(H) parameters é o que foi pedido",
+                      meta["parameters"]["contamination"] == 0.2
+                      and meta["parameters"]["random_state"] == 42
+                      and meta["parameters"]["n_estimators"] == 200)
+                check("(H) synthetic False com dataset_origin 'real'",
+                      meta["dataset"]["synthetic"] is False)
+                linhas = extract_features(MOCK_ALERTS)
+                check("(H) dataset.documents é o nº de documentos do export",
+                      meta["dataset"]["documents"] == len(MOCK_ALERTS))
+                check("(H) dataset.size e processable são as linhas treináveis",
+                      meta["dataset"]["size"] == len(linhas)
+                      and meta["dataset"]["processable"] == len(linhas))
+                check("(H) dataset.attacks é 1 (o log tem uma entrada)",
+                      meta["dataset"]["attacks"] == 1)
+                check("(H) dataset.truncated False", meta["dataset"]["truncated"] is False)
+                carimbos = sorted(a["@timestamp"] for a in MOCK_ALERTS)
+                check("(H) a janela é a do fixture",
+                      meta["dataset"]["window_first"] == carimbos[0]
+                      and meta["dataset"]["window_last"] == carimbos[-1])
+                check("(H) feature_stats tem as 7 features com mean e std",
+                      set(meta["feature_stats"]) == set(
+                          feature_extractor.FEATURE_NAMES)
+                      and all(set(v) == {"mean", "std"} for v in meta["feature_stats"].values()))
+                check("(H) os SHA-256 gravados batem com os .pkl em disco",
+                      all(hashlib.sha256((models_dir / "v1" / nome).read_bytes()).hexdigest()
+                          == meta["artifacts"][nome]["sha256"]
+                          for nome in model_registry.ARTIFACT_FILES))
+                check("(H) o registo ficou com ACTIVE e v1, e nada mais",
+                      listagem(models_dir) == ["ACTIVE", "v1"])
+                check("(H) ACTIVE em disco aponta para a v1",
+                      (models_dir / "ACTIVE").read_text(encoding="utf-8").strip() == "v1")
+                check("(H) nenhum temporário do registo ficou por limpar",
+                      not [n for n in listagem(models_dir) if ".tmp-" in n])
+                check("(H) loaded_version() é a v1 sem reiniciar o backend",
+                      ml_anomalies.loaded_version() == "v1")
+
+                # (H) ML_MODEL_DIR a apontar para uma pasta que não existe ainda:
+                #     o motor cria-a (primeiro treino numa máquina nova).
+                usar()
+                shutil_target = raiz / "novo-registo"
+                main.ML_MODEL_DIR = str(shutil_target)
+                resp = treinar(client)
+                check("(H) ML_MODEL_DIR inexistente -> 200 e a v1 criada lá",
+                      resp.status_code == 200 and listagem(shutil_target) == ["ACTIVE", "v1"])
+                usar()
+
+                # (H) E a apontar para um FICHEIRO: 503 registry_unavailable, e
+                #     nada escrito em lado nenhum.
+                ficheiro = raiz / "isto-e-um-ficheiro"
+                ficheiro.write_bytes(b"nao sou uma pasta")
+                antes_ficheiro = ficheiro.read_bytes()
+                main.ML_MODEL_DIR = str(ficheiro)
+                resp = treinar(client)
+                check("(H) ML_MODEL_DIR é um ficheiro -> 503",
+                      resp.status_code == 503)
+                check("(H) e detail == 'registry_unavailable'",
+                      resp.json().get("detail") == "registry_unavailable")
+                check("(H) e o ficheiro ficou byte-idêntico", ficheiro.read_bytes() == antes_ficheiro)
+                no_leaks_pasta("(H) ML_MODEL_DIR ficheiro", resp, ficheiro)
+                usar()
+
+                # (I) dataset_not_found: a pasta de exports está vazia -> 404.
+                vazia = raiz / "sem-exports"
+                vazia.mkdir()
+                antes = fingerprint(models_dir)
+                with ambiente_treino(vazia, log):
+                    resp = treinar(client)
+                check("(I) pasta de exports vazia -> 404", resp.status_code == 404)
+                check("(I) e detail == 'dataset_not_found'",
+                      resp.json().get("detail") == "dataset_not_found")
+                check("(I) nada foi escrito", fingerprint(models_dir) == antes)
+
+                # (I) dataset_unusable: existe mas não dá linhas treináveis.
+                invalido = raiz / "exports-invalidos"
+                invalido.mkdir()
+                (invalido / "2026-09-14_15-22.json").write_text("{isto não é json",
+                                                                 encoding="utf-8")
+                antes = fingerprint(models_dir)
+                with ambiente_treino(invalido, log):
+                    resp = treinar(client)
+                check("(I) export que não é JSON -> 422", resp.status_code == 422)
+                check("(I) e detail == 'dataset_unusable'",
+                      resp.json().get("detail") == "dataset_unusable")
+                check("(I) nada foi escrito", fingerprint(models_dir) == antes)
+
+                sem_linhas = raiz / "exports-sem-linhas"
+                exportar_eventos(sem_linhas, [{"foo": "bar"}, {"data": {}}])
+                with ambiente_treino(sem_linhas, log):
+                    resp = treinar(client)
+                check("(I) export sem @timestamp -> 422", resp.status_code == 422)
+                check("(I) e detail == 'dataset_unusable'",
+                      resp.json().get("detail") == "dataset_unusable")
+                check("(I) nada foi escrito", fingerprint(models_dir) == antes)
+                no_leaks_pasta("(I) dataset_unusable", resp, export_dir)
+
+                # (J) KeyboardInterrupt a meio: 503 training_failed e o lock
+                #     libertado. É o caminho que um `Ctrl-C` ou um
+                #     KeyboardInterrupt do atexit produz — e sem o `except`
+                #     nomeado sairia um 500 do uvicorn.
+                def interrompe(*args, **kwargs):
+                    raise KeyboardInterrupt("C:/Users/fnuno/segredo")
+
+                train_anomaly_model.train_model = interrompe
+                try:
+                    antes = fingerprint(models_dir)
+                    resp = treinar(client)
+                    check("(J) KeyboardInterrupt -> 503", resp.status_code == 503)
+                    check("(J) e detail == 'training_failed'",
+                          resp.json().get("detail") == "training_failed")
+                    check("(J) nada foi escrito", fingerprint(models_dir) == antes)
+                    check("(J) o lock ficou libertado (busy() False)",
+                          ml_training.busy() is False)
+                    check("(J) e o 503 não traz o segredo nem traceback",
+                          "segredo" not in resp.text and "Traceback" not in resp.text)
+
+                    # (K) Excepção inesperada: 503 registry_unavailable, sem
+                    #     texto, sem caminho, sem palavra "boom".
+                    def explode(*args, **kwargs):
+                        raise RuntimeError("C:/Users/fnuno/segredo boom")
+
+                    train_anomaly_model.train_model = explode
+                    resp = treinar(client)
+                    check("(K) RuntimeError -> 503", resp.status_code == 503)
+                    check("(K) e detail == 'registry_unavailable'",
+                          resp.json().get("detail") == "registry_unavailable")
+                    check("(K) sem 'boom', sem caminho e sem traceback",
+                          "boom" not in resp.text and "segredo" not in resp.text
+                          and "Traceback" not in resp.text)
+                    no_leaks_pasta("(K) RuntimeError", resp, export_dir)
+                    check("(K) o lock ficou libertado", ml_training.busy() is False)
+                finally:
+                    train_anomaly_model.train_model = original_train
+
+                # (L) Voltar a treinar depois de tudo o que falhou acima: o
+                #     motor não ficou fechado para sempre.
+                usar()
+                resp = treinar(client)
+                check("(L) treinar depois das falhas -> 200", resp.status_code == 200)
+                check("(L) e sai uma v2 (a v1 ficou intacta)",
+                      resp.status_code == 200 and resp.json()["version"] == "v2")
+        finally:
+            train_anomaly_model.train_model = original_train
+            main.indexer_client.get_recent_alerts = original_indexer
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
+
+
+def activate_ponta_a_ponta(client) -> None:
+    """
+    Activar sem treinar: o caminho bom, o `.pkl` adulterado (que nem chega ao
+    `joblib.load`), o id que não existe e o compare-and-set a perder.
+    """
+    print("\n--- activate ponta a ponta (R10/D-01) ---")
+
+    original_dir = main.ML_MODEL_DIR
+    original_joblib = ml_anomalies.joblib
+    original_write = model_registry._write_active_atomic
+    original_indexer = main.indexer_client.get_recent_alerts
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        export_dir = exportar_eventos(raiz / "exports", MOCK_ALERTS)
+        log = log_de_ataque(raiz)
+        models_dir = raiz / "models"
+
+        def usar() -> None:
+            main.ML_MODEL_DIR = str(models_dir)
+            ml_anomalies.reset_cache()
+
+        usar()
+        try:
+            with ambiente_treino(export_dir, log):
+                treinar(client)
+
+                # (M) O caminho bom: activar a v1 quando o ACTIVE aponta para a
+                #     v2 devolve as duas, e a cache é recarregada.
+                make_version(models_dir, "v2",
+                             model_bytes=(models_dir / "v1" / MODEL_FILE).read_bytes(),
+                             scaler_bytes=(models_dir / "v1" / SCALER_FILE).read_bytes())
+                write_active(models_dir, "v2")
+                usar()
+                resp = client.post("/api/ml/models/v1/activate", headers=HEADERS)
+                check("(M) activar a v1 com ACTIVE=v2 -> 200", resp.status_code == 200)
+                body = resp.json() if resp.status_code == 200 else {}
+                check("(M) version/previous/loaded coerentes",
+                      body.get("version") == "v1" and body.get("previous") == "v2"
+                      and body.get("loaded") == "v1")
+                check("(M) o ACTIVE em disco passou a v1",
+                      (models_dir / "ACTIVE").read_bytes() == b"v1\n")
+                check("(M) e o report embutido diz active v1 com total 2",
+                      (body.get("report") or {}).get("active") == "v1"
+                      and (body.get("report") or {}).get("total") == 2)
+
+                # (N) Versão que não existe: 404 active_not_found. E o ACTIVE
+                #     fica como estava.
+                antes = (models_dir / "ACTIVE").read_bytes()
+                resp = client.post("/api/ml/models/v9/activate", headers=HEADERS)
+                check("(N) activar a v9 (inexistente) -> 404", resp.status_code == 404)
+                check("(N) e detail == 'active_not_found'",
+                      resp.json().get("detail") == "active_not_found")
+                check("(N) o ACTIVE não se mexeu", (models_dir / "ACTIVE").read_bytes() == antes)
+
+                # (O) .pkl adulterado: 503 hash_mismatch, ZERO joblib.load e o
+                #     ACTIVE byte-idêntico. A verificação é ANTES da escrita.
+                pkl_v1 = (models_dir / "v1" / MODEL_FILE).read_bytes()
+                (models_dir / "v2" / MODEL_FILE).write_bytes(b"x" * 64)
+                contador = ContadorJoblib()
+                ml_anomalies.joblib = contador
+                try:
+                    antes = (models_dir / "ACTIVE").read_bytes()
+                    resp = client.post("/api/ml/models/v2/activate", headers=HEADERS)
+                    check("(O) activar v2 com .pkl adulterado -> 503", resp.status_code == 503)
+                    check("(O) e detail == 'hash_mismatch'",
+                          resp.json().get("detail") == "hash_mismatch")
+                    check("(O) ZERO chamadas a joblib.load", contador.chamadas == 0)
+                    check("(O) o ACTIVE ficou byte-idêntico",
+                          (models_dir / "ACTIVE").read_bytes() == antes)
+                    no_leaks_pasta("(O) hash_mismatch", resp, models_dir)
+                finally:
+                    ml_anomalies.joblib = original_joblib
+                (models_dir / "v2" / MODEL_FILE).write_bytes(pkl_v1)
+
+                # (P) O compare-and-set a perder: entre a leitura do ACTIVE (que
+                #     aqui é a v1) e a escrita, outro escritor lá mete a v2. A
+                #     rota perde com training_failed e NÃO sobrescreve o que o
+                #     outro deixou — e a cache não muda, porque o
+                #     reset_cache/load_model vêm depois da escrita.
+                def intruso(root, version_id, expected=None):
+                    write_active(root, "v2")
+                    return original_write(root, version_id, expected=expected)
+
+                model_registry._write_active_atomic = intruso
+                try:
+                    resp = client.post("/api/ml/models/v2/activate", headers=HEADERS)
+                    check("(P) ACTIVE trocado entre a leitura e a escrita -> 503",
+                          resp.status_code == 503)
+                    check("(P) e detail == 'training_failed'",
+                          resp.json().get("detail") == "training_failed")
+                    check("(P) o ACTIVE ficou com o valor do OUTRO escritor",
+                          (models_dir / "ACTIVE").read_text(encoding="utf-8").strip() == "v2")
+                    check("(P) e a cache NÃO recarregou (segue na v1)",
+                          ml_anomalies.loaded_version() == "v1")
+                    check("(P) e o lock ficou libertado", ml_training.busy() is False)
+                    no_leaks_pasta("(P) training_failed", resp, models_dir)
+                finally:
+                    model_registry._write_active_atomic = original_write
+
+                # (Q) E volta a funcionar: o motor não ficou fechado.
+                usar()
+                resp = client.post("/api/ml/models/v1/activate", headers=HEADERS)
+                check("(Q) activar outra vez depois do compare-and-set -> 200",
+                      resp.status_code == 200)
+                check("(Q) e o ACTIVE é a v1",
+                      resp.status_code == 200
+                      and (models_dir / "ACTIVE").read_text(encoding="utf-8").strip() == "v1")
+        finally:
+            model_registry._write_active_atomic = original_write
+            ml_anomalies.joblib = original_joblib
+            main.indexer_client.get_recent_alerts = original_indexer
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
+
+
+def model_version_no_relatorio(client) -> None:
+    """
+    D-06: o relatório de anomalias diz de que versão veio cada número — e
+    quando não há versão nenhuma, diz isso.
+    """
+    print("\n--- model_version no relatório (R10/D-06) ---")
+
+    # O conjunto de chaves que já existia ANTES desta fase, escrito à mão. A
+    # chave nova é aditiva: nenhuma das outras muda de nome nem de significado.
+    CHAVES_ANTES_DA_CHAVE_NOVA = {
+        "total", "ml_anomalies_count", "rule_flagged_count",
+        "agree_count", "diverge_count", "results",
+        "window_hours", "alerts_fetched", "alerts_truncated",
+    }
+
+    original_dir = main.ML_MODEL_DIR
+    original_indexer = main.indexer_client.get_recent_alerts
+    original_report = ml_anomalies.build_ml_anomalies_report
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        model_bytes, scaler_bytes = real_model_bytes()
+
+        def usar(pasta) -> None:
+            main.ML_MODEL_DIR = str(pasta)
+            ml_anomalies.reset_cache()
+
+        try:
+            # (R) v1 activa: model_version == 'v1', e o número e a versão saem
+            #     da mesma fonte (a cache que o load_model encheu).
+            verificada = raiz / "verificada"
+            make_version(verificada, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            write_active(verificada, "v1")
+            usar(verificada)
+            resp = client.get("/api/ml-anomalies")
+            check("(R) v1 activa -> 200", resp.status_code == 200)
+            body = resp.json() if resp.status_code == 200 else {}
+            check("(R) model_version == 'v1'", body.get("model_version") == "v1")
+            check("(R) e é a mesma que o ml_anomalies tem em memória",
+                  body.get("model_version") == ml_anomalies.loaded_version())
+            check("(R) as chaves anteriores continuam todas, mais a nova",
+                  set(body) == CHAVES_ANTES_DA_CHAVE_NOVA | {"model_version"})
+            check("(R) e os números não mudaram de significado", body.get("total") == len(MOCK_ALERTS))
+
+            # (S) O LEGADO: dois .pkl soltos, sem v1/ e sem ACTIVE. É o estado
+            #     real de scripts/models/ hoje, e é onde um model_version mal
+            #     feito diria "v1" ao utilizador.
+            legado = make_legacy(raiz / "legado", model_bytes=model_bytes,
+                                 scaler_bytes=scaler_bytes)
+            usar(legado)
+            resp = client.get("/api/ml-anomalies")
+            body = resp.json() if resp.status_code == 200 else {}
+            check("(S) legado -> model_version == 'legacy' (não None, não 'v1')",
+                  resp.status_code == 200 and body.get("model_version") == "legacy")
+
+            # (T) O caminho vazio: a chave continua lá. Um frontend que tenha de
+            #     tratar "a chave às vezes não está" é um frontend com dois
+            #     caminhos para o mesmo caso.
+            ml_anomalies.build_ml_anomalies_report = lambda alertas, m, s: {
+                "total": 0, "ml_anomalies_count": 0, "rule_flagged_count": 0,
+                "agree_count": 0, "diverge_count": 0, "results": [],
+            }
+            try:
+                resp = client.get("/api/ml-anomalies")
+                body = resp.json() if resp.status_code == 200 else {}
+                check("(T) relatório vazio -> 200 com total 0", resp.status_code == 200
+                      and body.get("total") == 0 and body.get("results") == [])
+                check("(T) e model_version continua presente",
+                      "model_version" in body
+                      and body.get("model_version") == ml_anomalies.loaded_version())
+            finally:
+                ml_anomalies.build_ml_anomalies_report = original_report
+
+            # (U) .pkl adulterado: é um erro, não um relatório. A chave nova não
+            #     aparece — não há nenhum número para atribuir a uma versão.
+            adulterado = raiz / "adulterado"
+            make_version(adulterado, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            flip_byte(adulterado / "v1" / MODEL_FILE)
+            write_active(adulterado, "v1")
+            usar(adulterado)
+            resp = client.get("/api/ml-anomalies")
+            check("(U) .pkl adulterado -> 503", resp.status_code == 503)
+            check("(U) e sem model_version na resposta", "model_version" not in resp.text)
+            no_leaks_pasta("(U) hash_mismatch", resp, adulterado)
+
+            # (U) E o Indexer continua a ser chamado UMA vez, com I/O novo zero:
+            #     a rota não ganhou um fetch nem um run_in_threadpool.
+            usar(verificada)
+            main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+            resp = client.get("/api/ml-anomalies")
+            check("(U) o Indexer é chamado uma vez por relatório",
+                  resp.status_code == 200
+                  and main.indexer_client.get_recent_alerts.await_count == 1)
+        finally:
+            main.indexer_client.get_recent_alerts = original_indexer
+            ml_anomalies.build_ml_anomalies_report = original_report
+            ml_anomalies.reset_cache()
+            main.ML_MODEL_DIR = original_dir
+
+
+class Gate:
+    """
+    Duas portas: `chegou` posta por quem entrou no treino, `livre` para quem o
+    deixa sair. Duplicado de propósito do `test_ml_training.py` — os dois
+    ficheiros são standalone e não se importam (é a convenção do projecto, e o
+    `run_all_tests.py` corre-os em processos paralelos). Se isto passar a um
+    utilitário partilhado em `ml_training.py`, os dois ficheiros de teste ficam
+    acoplados e o ganho é nenhum.
+    """
+
+    def __init__(self) -> None:
+        self.chegou = threading.Event()
+        self.livre = threading.Event()
+
+
+def _paralelo(funcoes):
+    """
+    Corre as funções em threads e devolve `(resultados, threads)`, por ordem.
+
+    NÃO faz `join`: quem chama é que tem de ABRIR o `Gate` antes de as threads
+    terminarem. Um `join` aqui seria um deadlock — a thread presa espera pelo
+    `Gate`, e o `Gate` só é posto depois do `join` voltar. (Na primeira versão
+    desta função havia o join, e o `wait(timeout=60)` do `Gate` é que abria a
+    porta por exaustão: o teste passava por sorte e gastava um minuto.)
+    """
+    resultados: list = [None] * len(funcoes)
+
+    def embrulhar(indice, funcao):
+        def corre():
+            try:
+                resultados[indice] = funcao()
+            except BaseException as exc:  # noqa: BLE001 — o teste QUER ver a falha
+                resultados[indice] = exc
+        return corre
+
+    threads = [threading.Thread(target=embrulhar(i, f), daemon=True)
+               for i, f in enumerate(funcoes)]
+    for t in threads:
+        t.start()
+    return resultados, threads
+
+
+def _juntar(threads, timeout=120) -> bool:
+    """Espera as threads. Devolve False se alguma sobreviveu ao `timeout`."""
+    for t in threads:
+        t.join(timeout=timeout)
+    return not any(t.is_alive() for t in threads)
+
+
+def dois_posts_concorrentes(client) -> None:
+    """
+    O contrato de single-flight POR HTTP (D-01.2): três pedidos em simultâneo
+    dão exactamente um 200 e dois 409, o registo fica com uma v1 consistente e
+    sem sobras, e um pedido normal a seguir prova que o lock libertou.
+
+    Sem `train_model` a travar num `Gate`, dois pedidos podem passar os dois
+    pelo `claim()` e isto passa por sorte umas vezes e falha outras — é o
+    mecanismo que torna o teste determinístico.
+    """
+    print("\n--- dois POSTs concorrentes: exactamente um 200 (R10/D-01.2) ---")
+
+    original_dir = main.ML_MODEL_DIR
+    original_train = train_anomaly_model.train_model
+    original_indexer = main.indexer_client.get_recent_alerts
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        raiz = Path(tmp)
+        export_dir = exportar_eventos(raiz / "exports", MOCK_ALERTS)
+        log = log_de_ataque(raiz)
+        models_dir = raiz / "models"
+
+        def usar() -> None:
+            main.ML_MODEL_DIR = str(models_dir)
+            ml_anomalies.reset_cache()
+
+        usar()
+        try:
+            with ambiente_treino(export_dir, log):
+                gate = Gate()
+                lentido = {}
+
+                def lento(*args, **kwargs):
+                    # Chamar o ORIGINAL é o que mantém o `.pkl` um
+                    # IsolationForest a sério, para que o `load_model` do fim
+                    # da sequência faça `joblib.load` sem explodir.
+                    modelo, scaler = original_train(*args, **kwargs)
+                    lentido["n_estimators"] = kwargs.get("n_estimators")
+                    gate.chegou.set()
+                    gate.livre.wait(timeout=60)
+                    return modelo, scaler
+
+                make_legacy(models_dir)  # o caso do utilizador real: dois .pkl soltos
+                antes = fingerprint(models_dir)
+
+                def postar():
+                    return treinar(client)
+
+                train_anomaly_model.train_model = lento
+                try:
+                    # A entra primeiro e fica presa dentro do treino; B e C
+                    # batem no `claim()` enquanto isso.
+                    resultados, threads = _paralelo([
+                        lambda: postar(),
+                        lambda: postar(),
+                        lambda: postar(),
+                    ])
+                    # Espera explícita: se a thread A não chegou a travar, os
+                    # outros dois podem ter entrado em paralelo e o teste
+                    # deixaria de medir o que diz medir.
+                    check("(V) o primeiro pedido chegou a treinar",
+                          gate.chegou.wait(timeout=30))
+                    gate.livre.set()
+                    check("(V) nenhuma thread ficou presa", _juntar(threads))
+
+                    codigos = sorted(r.status_code for r in resultados if hasattr(r, "status_code"))
+                    check("(V) exactamente um 200 e dois 409", codigos == [200, 409, 409])
+                    conflicts = [r for r in resultados
+                                 if getattr(r, "status_code", None) == 409]
+                    check("(V) os 409 dizem 'training_in_progress'",
+                          all(r.json().get("detail") == "training_in_progress" for r in conflicts))
+                    check("(V) os 409 não escreveram nada em models/",
+                          [n for n in fingerprint(models_dir) if n not in antes] == ["ACTIVE", "v1"])
+                    check("(V) nenhum 409 traz caminho nem traceback",
+                          all("Traceback" not in r.text for r in conflicts))
+
+                    ok = [r for r in resultados if getattr(r, "status_code", None) == 200]
+                    check("(V) o 200 criou e activou a v1, já em memória",
+                          len(ok) == 1 and ok[0].json()["version"] == "v1"
+                          and ok[0].json()["loaded"] == "v1")
+                    check("(V) o registo ficou consistente: ACTIVE + v1 e nada mais",
+                          listagem(models_dir) == ["ACTIVE", "isolation_forest.pkl",
+                                                   "scaler.pkl", "v1"])
+                    check("(V) nenhum v1.tmp-* nem ACTIVE.tmp-* ficou por limpar",
+                          not [n for n in listagem(models_dir) if ".tmp-" in n])
+                    relatorio = model_registry.build_models_report(
+                        str(models_dir), ml_anomalies.loaded_version())
+                    check("(V) o build_models_report dá total 1, active v1, status ok",
+                          relatorio["total"] == 1 and relatorio["active"] == "v1"
+                          and relatorio["versions"][0]["status"] == "ok")
+                    check("(V) e o loaded_version() é a v1 sem reiniciar o backend",
+                          ml_anomalies.loaded_version() == "v1")
+
+                    # Um pedido normal a seguir: se o `_slot()` tivesse ficado
+                    # tomado, ESTE é o check que o apanhava.
+                    gate.livre.set()
+                    resp = postar()
+                    check("(V) um pedido depois dos 409 -> 200 com v2",
+                          resp.status_code == 200 and resp.json()["version"] == "v2")
+                    check("(V) e a v1 ficou intacta", (models_dir / "v1" / "metadata.json").is_file())
+                    check("(V) busy() é False no fim", ml_training.busy() is False)
+
+                    # O espelho: activar durante um treino também dá 409, e o ACTIVE
+                    # não muda (D-01.2 cobre treinar -> registar -> activar
+                    # com o MESMO lock).
+                    #
+                    # O treino entra SOZINHO e só depois de o `Gate` confirmar
+                    # que ele já está dentro do `train_model` é que o activate
+                    # parte. Ao contrário do cenário de cima (onde as três
+                    # threads correm à vontade e o合同 é "um 200 e o resto
+                    # 409"), aqui o objecto é saber QUAL foi o 409 — e isso
+                    # não se mede atirando as duas coisas ao mesmo tempo: quem
+                    # ganha o lock depende do scheduler.
+                    gate2 = Gate()
+
+                    def lento2(*args, **kwargs):
+                        modelo, scaler = original_train(*args, **kwargs)
+                        gate2.chegou.set()
+                        gate2.livre.wait(timeout=60)
+                        return modelo, scaler
+
+                    train_anomaly_model.train_model = lento2
+                    try:
+                        antes_activate = fingerprint(models_dir)
+                        resultados2, threads2 = _paralelo([postar])
+                        check("(V) o treino ficou preso dentro do train_model",
+                              gate2.chegou.wait(timeout=30))
+                        # Agora sim, com o lock tomado: o activate tem de levar
+                        # 409 e não pode tocar no ACTIVE.
+                        resp_activate = client.post("/api/ml/models/v1/activate",
+                                                    headers=HEADERS)
+                        check("(V) activar durante um treino -> 409",
+                              resp_activate.status_code == 409)
+                        check("(V) e detail == 'training_in_progress'",
+                              resp_activate.json().get("detail") == "training_in_progress")
+                        check("(V) e o ACTIVE ficou byte-idêntico",
+                              fingerprint(models_dir) == antes_activate)
+                        check("(V) e o 409 não traz caminho nem traceback",
+                              "Traceback" not in resp_activate.text)
+                        gate2.livre.set()
+                        check("(V) o treino preso também não ficou pendurado",
+                              _juntar(threads2))
+                        treino = resultados2[0]
+                        check("(V) e o treino que estava dentro passou -> 200 com v3",
+                              getattr(treino, "status_code", None) == 200
+                              and treino.json()["version"] == "v3")
+                        check("(V) busy() é False no fim outra vez",
+                              ml_training.busy() is False)
+                    finally:
+                        gate2.livre.set()
+                        train_anomaly_model.train_model = original_train
+                finally:
+                    gate.livre.set()
+                    train_anomaly_model.train_model = original_train
+        finally:
+            train_anomaly_model.train_model = original_train
+            main.indexer_client.get_recent_alerts = original_indexer
             ml_anomalies.reset_cache()
             main.ML_MODEL_DIR = original_dir
 
