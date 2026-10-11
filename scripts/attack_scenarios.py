@@ -491,6 +491,10 @@ def _self_check() -> None:
     assert "duration_seconds" in entry_to["details"], entry_to["details"]
     print("[OK   ] timeout regista status='launched' com details.timed_out=True")
 
+    # --- cada entrada nova leva um id max+1 (Phase 12, VAC-03): num log novo, 1 e 2 ---
+    assert entry["id"] == 1 and entry_to["id"] == 2, (entry.get("id"), entry_to.get("id"))
+    print("[OK   ] run_scenario grava id max+1 em cada entrada nova")
+
     if tmp_log.exists():
         tmp_log.unlink()
 
@@ -539,7 +543,10 @@ def main() -> None:
         parser.error("indica --scenario NOME ou --all")
 
     for name in names:
-        entry = run_scenario(SCENARIOS[name], args, log_path)
+        try:
+            entry = run_scenario(SCENARIOS[name], args, log_path)
+        except AttackIdUnavailable as exc:
+            parser.error(str(exc))  # nada foi lançado nem escrito: o id é atribuído antes de tudo
         print(f"[{entry['status'].upper():8s}] {name} -> {entry['details']}")
 
 
