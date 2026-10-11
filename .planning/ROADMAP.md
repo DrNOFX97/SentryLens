@@ -62,14 +62,14 @@ Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
   3. Cada vaccine liga à origem — `attack_id`, cenário, técnica MITRE, incidentes e evidência por referência (nunca cópia de payload) — e tem um id determinístico: correr o motor duas vezes sobre os mesmos ataques dá os mesmos ids e nenhum duplicado.
   4. Sem amostra (nenhum ataque lançado) ou com uma fonte indisponível, o motor devolve "Sem dados" ou um código estável; nunca fabrica uma vaccine para encher a lista.
 
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 **Wave 1**
 - [x] 12-01-PLAN.md — Tracer: registo real -> build_vaccine_candidates com proposals[], origem e ids golden; sensores em falta via attack_library; saltos D-04, matriz de vereditos e determinismo (VAC-01, VAC-02, VAC-03)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 12-02-PLAN.md — validate_vaccine (contrato fechado, nenhum comando) e três estados honestos no_data/source_unavailable/tudo unknown; suite completa verde (VAC-02, VAC-04)
+- [x] 12-02-PLAN.md — validate_vaccine (contrato fechado, nenhum comando) e três estados honestos no_data/source_unavailable/tudo unknown; suite completa verde (VAC-02, VAC-04)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 12-03-PLAN.md — Escritor do attack log grava id (max+1, fail-closed, sem backfill); entrada do escritor real -> registo -> motor -> vaccine validada (VAC-03)
@@ -118,6 +118,6 @@ Phases execute in numeric order: 12 → 13 → 14
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 12. Motor de vaccines | v1.1 | 1/3 | In Progress|  |
+| 12. Motor de vaccines | v1.1 | 2/3 | In Progress|  |
 | 13. Store e API de leitura | v1.1 | 0/TBD | Not started | - |
 | 14. Aba Vaccines, testes e documentação | v1.1 | 0/TBD | Not started | - |

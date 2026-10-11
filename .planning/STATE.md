@@ -5,16 +5,16 @@ milestone_name: R11 Vaccine Engine
 current_phase: 12
 current_phase_name: Motor de vaccines
 status: executing
-stopped_at: Completed 12-01-PLAN.md
-last_updated: "2026-10-11T22:58:41.875Z"
+stopped_at: Completed 12-02-PLAN.md
+last_updated: "2026-10-11T23:03:41.471Z"
 last_activity: 2026-10-11
 last_activity_desc: Phase 12 execution started
-state_head: fd57313bc17ed11893fe87c3e83491d6dd38fcbb
+state_head: d432a2ee642c76ba1bac1862df787780e1424281
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-11)
 ## Current Position
 
 Phase: 12 (Motor de vaccines) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-10-11 — Phase 12 execution started
 
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 12 P01 | 4 min | 2 tasks | 2 files |
+| Phase 12 P02 | 5 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,7 @@ Recent decisions affecting current work:
 - [R11]: uma vaccine só propõe — nunca é aplicada no Wazuh, nunca tem comandos executáveis, estado fixo `proposed` (escrita por HTTP é R12).
 - [Phase 12]: D-03 fixado: vaccine id = vac- + 12 hex sha256('<attack_id>:<sensores em falta>'), literais golden no teste
 - [Phase 12]: D-07 refinado: uma vaccine por ataque com proposals[] por sensor em falta; so a proposta rule traz regra {event_ids,min_count=1,window_seconds=300}
+- [Phase 12]: 12-02: regex da origem com fullmatch; correlation sem available=True e source_unavailable (fail-closed); considered/skipped/alerts_truncated None quando nada foi medido
 
 ### Pending Todos
 
@@ -88,8 +90,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-11T22:58:41.842Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-10-11T23:03:41.431Z
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
