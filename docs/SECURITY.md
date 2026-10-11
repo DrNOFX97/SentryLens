@@ -88,33 +88,53 @@
   502/503). O painel Detections (`detections.js`, botão `data-tab="detections"`
   sem `is-planned`) só consome esta rota — nenhuma superfície de rede nova
   para o browser.
-- **Registo de modelo ML (R9)**: `/api/ml/models` é `GET`, exige `X-API-Key` e
-  é **só leitura** — ativar, adotar ou treinar é operação de CLI
-  (`model_registry.py`), nunca por HTTP, porque escrever por HTTP mudaria o
-  modelo em uso sem ninguém o pedir. O carregamento do `.pkl` só acontece
-  depois da verificação de integridade: `resolve_active_artifacts` /
-  `resolve_version_artifacts` devolvem os dois artefactos **juntos** ou nada,
-  e `read_verified_bytes` lê cada ficheiro uma única vez, calcula o SHA-256
-  sobre esses mesmos bytes e devolve-os — `joblib.load` recebe exatamente os
-  bytes verificados, logo não há janela TOCTOU entre verificar e carregar.
-  Um `.pkl` em falta ou adulterado dá `hash_mismatch`/`artifact_missing` e a
-  rota `/api/ml-anomalies` responde 503 em vez de carregar. Um `ACTIVE`
-  inválido é fail-closed: não cai para o legado. Todo o dado do disco é
-  tratado como não confiável — o id de versão tem de casar com `v[0-9]{1,4}`
-  **e** resolver para uma pasta filha direta de `models/`, os nomes dos
-  artefactos vêm da constante `ARTIFACT_FILES` (nunca do `metadata.json`,
-  logo nenhum caminho é construído a partir de dados do disco), `ACTIVE` tem
-  teto de 64 bytes e é lido em binário, e o `metadata.json` tem teto de 64 KB.
-  Os erros saem como códigos de uma lista fechada
-  (`model_registry.ERROR_CODES`) — nunca texto de exceção nem caminhos, que
-  só ficam no log. O `evaluation` é projectado por uma lista fechada de 14
+- **Registo de modelo ML (R9 + R10)**: `/api/ml/models` continua `GET` e exige
+  `X-API-Key`. A **escrita por HTTP existe desde o R10** e vive em duas rotas
+  novas — `POST /api/ml/train` e `POST /api/ml/models/{version_id}/activate`
+  —, não neste endpoint. As quatro protecções que fecham a superfície nova
+  (D-01, ver `.planning/phases/10-ml-learning-loop/10-CONTEXT.md`):
+
+  1. **Nenhum caminho vem do corpo**. O `dataset` é um `Literal` de um catálogo
+     fechado que o servidor resolve (`ml_training.resolve_export_path`), e o
+     registo é sempre o `ML_MODEL_DIR` lido a nível de módulo.
+  2. **Um só treino (e uma só activação) a cada vez** — `ml_training._slot()`,
+     que responde 409 a quem chega enquanto a outra corre.
+  3. **Três tetos no corpo** (`contamination 0.01–0.5`, `random_state
+     0–2³²−1`, `n_estimators 10–1000`), testados pelos dois lados.
+  4. **`extra="forbid"`** no modelo Pydantic — sem isto, o Pydantic v2 ignora
+     chaves extra e o utilizador acreditaria ter escolhido o sítio.
+
+  O que **não** fecha: a chave continua a ser global e sem papéis. Quem a tem
+  passa a poder escrever em `models/` — e o SHA-256 dos `.pkl` deixa de ser uma
+  defesa e passa a ser um detector de corrupção. Isso é o risco residual que
+  D-08 manda escrever aqui: **quem tem a API key passa a ter escrita em
+  `models/`**, treinar, activar e recarregar a cache. HMAC/assinatura ficaram
+  fora do âmbito do R10.
+
+  O carregamento do `.pkl` só acontece depois da verificação de integridade:
+  `resolve_active_artifacts` / `resolve_version_artifacts` devolvem os dois
+  artefactos **juntos** ou nada, e `read_verified_bytes` lê cada ficheiro uma
+  única vez, calcula o SHA-256 sobre esses mesmos bytes e devolve-os —
+  `joblib.load` recebe exactamente os bytes verificados, logo não há janela
+  TOCTOU entre verificar e carregar. Um `.pkl` em falta ou adulterado dá
+  `hash_mismatch`/`artifact_missing` e a rota `/api/ml-anomalies` responde 503
+  em vez de carregar. Um `ACTIVE` inválido é fail-closed: não cai para o
+  legado. Todo o dado do disco é tratado como não confiável — o id de versão
+  tem de casar com `v[0-9]{1,4}` **e** resolver para uma pasta filha direta de
+  `models/`, os nomes dos artefactos vêm da constante `ARTIFACT_FILES` (nunca
+  do `metadata.json`, logo nenhum caminho é construído a partir de dados do
+  disco), `ACTIVE` tem teto de 64 bytes e é lido em binário, e o
+  `metadata.json` tem teto de 64 KB. Os erros saem como códigos de uma lista
+  fechada (`model_registry.ERROR_CODES`) — nunca texto de exceção nem caminhos,
+  que só ficam no log. O `evaluation` é projectado por uma lista fechada de 14
   chaves com tipos validados e textos truncados, para que texto arbitrário de
   um ficheiro escrito à mão não chegue ao `detail` nem ao DOM.
+
   **Limite honesto desta verificação:** o SHA-256 deteta corrupção, troca
   acidental e ficheiros alheios sem metadados, mas **não autentica** quem
-  escreveu — quem tem escrita em `models/` reescreve também o
-  `metadata.json`, logo o hash é uma auto-atestação do próprio processo que
-  gravou a versão. HMAC/assinatura ficaram fora do âmbito do R9.
+  escreveu — quem tem escrita em `models/` reescreve também o `metadata.json`,
+  logo o hash é uma auto-atestação do próprio processo que gravou a versão.
+  HMAC/assinatura ficaram fora do âmbito do R10.
 
 ## Riscos conhecidos
 
