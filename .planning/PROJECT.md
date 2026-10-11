@@ -4,6 +4,16 @@
 
 SentryLens é um laboratório SOC de aprendizagem do CET (curso de cibersegurança): ingere alertas do Wazuh (Manager API 55000, Indexer API 9200), classifica-os, correlaciona ataques lançados (Red vs Blue) com deteções de regra, ML e rede, gere incidentes e expõe tudo num dashboard estático. Backend FastAPI em `scripts/`, frontend estático na raiz, mais um analisador de logs offline (`log_analyzer.py`, Fase 1) que partilha a classificação de Event IDs.
 
+## Current Milestone: v1.1 R11 Vaccine Engine
+
+**Goal:** Um ataque não detetado ou só parcialmente detetado passa a gerar uma *vaccine*: uma regra de deteção proposta, rastreável até ao ataque que a originou, guardada e visível mas nunca aplicada.
+
+**Target features:**
+- Motor puro que propõe a vaccine a partir dos gaps do Red vs Blue e dos incidentes (event_ids, janela, condição, origem rastreável)
+- Store persistente, escrito só pelo backend, com estado fixo `proposed`
+- `GET /api/vaccines[/{id}]` só leitura, API key por rota, códigos de erro estáveis
+- Aba de leitura `vaccines.js` ("Sem dados" sem amostra), testes sem Wazuh e documentação
+
 ## Core Value
 
 Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
@@ -26,12 +36,14 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 
 ### Active
 
+- [ ] R11 Vaccine Engine (ver Current Milestone; requisitos em REQUIREMENTS.md)
 - [ ] Primeiro ciclo de treino real: lançar ataques, exportar alertas na mesma janela, treinar `v1` e avaliar com dataset rotulável
 - [ ] Verificação humana pendente do R9/R10 no dashboard (badges, aviso de reinício após `adopt`, avaliação rotulada)
 
 ### Out of Scope
 
 - Calibrar o `confidence` das deteções (R7) — dívida conhecida, não é pré-requisito do R9
+- Criar/aprovar/rejeitar vaccines por HTTP, aplicá-las no Wazuh, replay e regressão — R12–R14
 - Recolher métricas ML novas além das já existentes (`/api/ml-anomalies`) — o R9 só liga a avaliação à versão e mostra-a
 
 ## Current State
@@ -84,4 +96,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-11 after v1.0 milestone*
+*Last updated: 2026-10-11 after starting v1.1 milestone*
