@@ -1,6 +1,10 @@
 ---
-gsd_state_version: '1.0'
-status: milestone-complete
+gsd_state_version: "1.0"
+status: Awaiting next milestone
+last_updated: "2026-10-11T21:26:35.207Z"
+last_activity: 2026-10-11
+last_activity_desc: Milestone v1.0 completed and archived
+state_head: 86c460c7f39dddf3e2a20cd61c4b234c2c8bff75
 progress:
   total_phases: 5
   completed_phases: 5
@@ -20,12 +24,11 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 5 of 5 complete (R10 frontend phase 11 executada)
-Plan: 17 of 17 complete
-Status: Marco R10 concluído — pronto para `/gsd-complete-milestone`
-Last activity: 2026-10-11 — `d7f0407` removeu botão Training do sidebar; `4687e41` reescreveu SECURITY.md para D-08; suite 39/39 verde
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-10-11 — Milestone v1.0 completed and archived
 
-Progress: [██████████] 100%
+## Operator Next Steps
 
-**Estado medido hoje:** `run_all_tests.py` → **39/39** (medido depois do último commit, não transportado).
-`scripts/models/` continua só com os dois `.pkl` legados — sem `vN/`, sem `ACTIVE`: o `POST /api/ml/train` existe e está testado, mas nunca foi corrido sobre os dados do utilizador.
+- Start the next milestone with /gsd-new-milestone

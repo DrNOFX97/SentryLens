@@ -21,15 +21,22 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 - ✓ R2 Live SOC, R3 Incidentes, R4 Attack Registry, R5 Attack Library, R6 Network SOC, R7 Detection Engine — Roadmap v2
 - ✓ R8 Métricas MTTD/MTTR/cobertura/taxa de deteção (`soc_metrics.py`, `GET /api/metrics`) — Roadmap v2
 
+- ✓ R9 ML Intelligence: registo versionado (`scripts/models/vN/` + `metadata.json` + `ACTIVE`), avaliação ligada à versão, SHA-256 antes de `joblib.load`, `GET /api/ml/models`, abas Models e Evaluation — v1.0
+- ✓ R10 ML Learning Loop: treino e ativação por HTTP (`POST /api/ml/train`, `/activate`) com as quatro protecções de D-01, compare-and-set no `ACTIVE`, comparação vN vs vN-1 e feature stats no dashboard — v1.0
+
 ### Active
 
-- [ ] R9 ML Intelligence: model registry versionado (`scripts/models/vN/` + `metadata.json` + ficheiro `ACTIVE`), avaliação ligada à versão do modelo, verificação SHA-256 antes de carregar o `.pkl`, `GET /api/ml/models`, painéis Models e Evaluation
+- [ ] Primeiro ciclo de treino real: lançar ataques, exportar alertas na mesma janela, treinar `v1` e avaliar com dataset rotulável
+- [ ] Verificação humana pendente do R9/R10 no dashboard (badges, aviso de reinício após `adopt`, avaliação rotulada)
 
 ### Out of Scope
 
-- Treinar modelos a partir do dashboard e comparar versões automaticamente — pertence ao R10 (ML Learning Loop)
 - Calibrar o `confidence` das deteções (R7) — dívida conhecida, não é pré-requisito do R9
 - Recolher métricas ML novas além das já existentes (`/api/ml-anomalies`) — o R9 só liga a avaliação à versão e mostra-a
+
+## Current State
+
+v1.0 (R9 + R10) entregue a 2026-10-11: 5 fases, 17 planos, suite `run_all_tests.py` 39/39. `scripts/models/` ainda só tem os dois `.pkl` legados (sem `vN/` nem `ACTIVE`); o treino por HTTP está testado mas nunca correu sobre dados reais. O dataset de 2026-09-14 não é rotulável com o `attack_log.jsonl` actual.
 
 ## Context
 
@@ -53,11 +60,11 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Registo de modelos com versões (`models/vN` + `ACTIVE`), não só metadados do modelo atual | O R10 vai criar modelos novos; o histórico evita refazer o registo | — Pending |
-| Verificar o SHA-256 do `.pkl` contra o `metadata.json` antes de `joblib.load` | `.pkl` executa código ao carregar; o hash fecha o risco de ficheiro adulterado com poucas linhas | — Pending |
-| Modelo atual copiado (não movido) para `v1` por um comando `adopt` | Não-destrutivo; o modelo legado continua a carregar até ser adotado | — Pending |
-| Avaliação guardada dentro da versão do modelo | O relatório avulso atual não é rastreável até um modelo | — Pending |
-| Sem mapeamento de codebase GSD na inicialização | O `CLAUDE.md` e o `README.md` já documentam a arquitetura em detalhe | — Pending |
+| Registo de modelos com versões (`models/vN` + `ACTIVE`), não só metadados do modelo atual | O R10 vai criar modelos novos; o histórico evita refazer o registo | ✓ Good (v1.0) |
+| Verificar o SHA-256 do `.pkl` contra o `metadata.json` antes de `joblib.load` | `.pkl` executa código ao carregar; o hash fecha o risco de ficheiro adulterado com poucas linhas | ✓ Good (v1.0) |
+| Modelo atual copiado (não movido) para `v1` por um comando `adopt` | Não-destrutivo; o modelo legado continua a carregar até ser adotado | ✓ Good (v1.0) |
+| Avaliação guardada dentro da versão do modelo | O relatório avulso atual não é rastreável até um modelo | ✓ Good (v1.0) |
+| Sem mapeamento de codebase GSD na inicialização | O `CLAUDE.md` e o `README.md` já documentam a arquitetura em detalhe | ✓ Good (v1.0) |
 
 ## Evolution
 
@@ -77,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-09 after initialization*
+*Last updated: 2026-10-11 after v1.0 milestone*
