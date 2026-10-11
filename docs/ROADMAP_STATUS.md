@@ -24,7 +24,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R6 | Network SOC | ✅ | `network_monitor.py`, `network_detections.py` + `network_soc.py` (R6): 3 painéis reais (`GET /api/network/live-traffic[/detections/evidence]`); deteções de rede persistidas em JSONL (`history_store.append_network_detection_history`, resolve a dívida de R0); "PCAP/Evidence" é evidência de metadados, não PCAP real (sem payload capturado — ver `SECURITY.md`/`DATA_MODEL.md`) |
 | R7 | Detection Engine (`DetectionEvent`) | ✅ | `detection_event.py` (puro, 3 construtores) + `GET /api/detections` (vista unificada) + painel Detections (`detections.js`); `incident_engine.py`/`redblue_correlator.py` constroem sobre ele por dentro, sem mudar o contrato externo; `confidence` calibrado continua em dívida |
 | R8 | MTTD / MTTR / métricas | ✅ | `soc_metrics.py` (puro) + `GET /api/metrics` + 3 painéis (`metrics.js`: MTTD / MTTR, Detection Coverage, Detection Rate); mediana/p90/média, cobertura por cenário e técnica MITRE, taxa de deteção por fonte, FN/FP; definições formais em `DATA_MODEL.md`; `IncidentStore.list_for_metrics` (leitura) |
-| R9 | ML Intelligence | ✅ | Isolation Forest + `feature_extractor` partilhado. Registo versionado `models/vN` + `ACTIVE`, avaliação por versão, SHA-256 antes de carregar o `.pkl`, `GET /api/ml/models`, abas Models e Evaluation, `export_raw_events.py`, 38 ficheiros de teste |
+| R9 | ML Intelligence | ✅ | Isolation Forest + `feature_extractor` partilhado. Registo versionado `models/vN` + `ACTIVE`, avaliação por versão, SHA-256 antes de carregar o `.pkl`, `GET /api/ml/models`, abas Models e Evaluation, `export_raw_events.py`, 38 ficheiros de teste. Isto é o que o código faz, não o que está registado: `scripts/models/` só tem hoje os dois `.pkl` legados — sem `vN/`, sem `ACTIVE`, sem `metadata.json`; `model_registry.py adopt`/`train` ainda não foram corridos sobre os dados do utilizador |
 | R10 | ML Learning Loop | ⬜ | |
 | R11 | Vaccine Engine | ⬜ | |
 | R12 | Vaccine Lab | ⬜ | |
@@ -84,7 +84,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 ## R9 — verificado por máquina / por verificar em humano
 
 **Verificado por máquina (execução automatizada, esta sessão):**
-- Suite completa `run_all_tests.py`: 39/39 testes verdes sem o laboratório Wazuh
+- Suite completa `run_all_tests.py`: 38/38 testes verdes sem o laboratório Wazuh
 - SHA-256 recusado antes de qualquer `joblib.load` com contador a 0
 - IDs inválidos e `ACTIVE` partido recusados/fail-closed
 - `evaluate` grava na versão pedida e não na ativa

@@ -66,15 +66,25 @@ Schema do `metadata.json` (13 chaves: 12 públicas + `evaluation`):
 - `version`: nome da pasta (ex.: "v1")
 - `origin`: "trained" | "adopted"
 - `adopted`: booleano, True se for adoptado
-- `trained_at_estimated`: booleano, False se a data for conhecida
-- `trained_at`: ISO-8601 data do treino (apenas quando origin="trained")
+- `created_at`: ISO-8601, momento em que a versão foi criada no registo
+- `trained_at`: ISO-8601 data do treino. Escrita **nos dois** casos: no
+  `origin="trained"` a data é a do treino real; no `origin="adopted"` é
+  *estimada* a partir do mtime do `.pkl` legado (o `adopt` não desserializa o
+  pickle para a descobrir) — daí `trained_at_estimated: True`
+- `trained_at_estimated`: booleano, True só quando `trained_at` foi estimada
 - `model_type`: "IsolationForest"
-- `parameters`: {contamination, random_state, n_estimators}
+- `parameters`: {contamination, random_state, n_estimators} — `None` no `adopt`
 - `dataset`: {name (só `Path(...).name`), size, attacks, synthetic (bool)}
-- `library_versions`: {python, scikit-learn, joblib, numpy}
-- `artifacts`: {`isolation_forest.pkl`: {"sha256": "..."}, `scaler.pkl`: {"sha256": "..."}}
+- `library_versions`: {python, scikit-learn, joblib, numpy} — `None` no `adopt`
+- `artifacts`: {`isolation_forest.pkl`: {"sha256": "...", "size_bytes": N},
+  `scaler.pkl`: {"sha256": "...", "size_bytes": N}} — ambos obrigatórios
 - `evaluation`: `null` ou objeto (preenchido após `model_registry.py evaluate vN`)
-- `METADATA_PUBLIC_KEYS`: 14 chaves projectadas para a API (`EVALUATION_PUBLIC_KEYS`)
+- `METADATA_PUBLIC_KEYS`: **12** chaves projectadas para a API — exatamente as
+  12 acima até `artifacts`. `evaluation` **não** entra: é um campo de nível
+  superior do `metadata.json`, projectado à parte
+- `EVALUATION_PUBLIC_KEYS`: **14** chaves — a sub-projeção de `evaluation`,
+  a mesma lista que `ml_evaluation.EVALUATION_KEYS` (igualdade verificada por
+  `scripts/test_ml_models_api.py`)
 
 **Regras de validade:** teto de 64 KB, `schema_version == 1`, `version` igual ao nome da pasta, `artifacts` com uma entrada por nome de `ARTIFACT_FILES` com `sha256` a casar `[0-9a-fA-F]{64}` e `size_bytes` int ≥ 0, `evaluation` `null` ou objeto.
 
@@ -83,7 +93,15 @@ Schema do `metadata.json` (13 chaves: 12 públicas + `evaluation`):
 **Resposta de `GET /api/ml/models`:**
 - Versão ativa: devolve a versão apontada por `models/ACTIVE` com todos os metadados e estado de avaliação.
 - Histórico: lista todas as versões `vN` em `models/`, cada uma com o seu `metadata.json`.
-- Legado: quando apenas os `.pkl` soltos existem (sem `vN/` nem `ACTIVE`), devolve `active: "legacy"` com `origin: "adopted"` se adoptado, ou sem `origin` se ainda não há registo.
+- Legado: enquanto só existirem os `.pkl` soltos (sem `v1/` e sem `ACTIVE`),
+  a lista acrescenta uma entrada `kind: "legacy"` com `id: null`,
+  `metadata: null`, `evaluation: null`, `status: "no_metadata"` e `files`
+  (tamanho e mtime de cada `.pkl`, nunca os bytes) — **sem** `origin`, porque
+  ainda não foi registada. O `active` de topo é `"legacy"` (é daqui que o
+  modelo carrega, sem verificação de hash) ou `null` se nem isso existir.
+  Depois de `model_registry.py adopt`, o `origin: "adopted"` passa a viver no
+  `metadata.json` da `v1` — e a entrada de legado deixa de aparecer, porque a
+  `v1` já existe.
 - O `evaluation` só existe depois de `model_registry.py evaluate vN` — a versão treinada **nasce sem avaliação**.
 
 Desde que existe o registo, o `Model` do Roadmap já não está "por definir".

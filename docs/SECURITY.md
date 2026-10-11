@@ -85,8 +85,36 @@
   configurado) nunca derruba as outras: `available: false` isolado por
   fonte, nunca 500 — superfície de erro mais previsível que
   `/api/ml-anomalies`/`/api/redblue/metrics` (fonte única, podem dar
-  502/503). Sem painel frontend nesta fase (ver `docs/ROADMAP_STATUS.md`):
-  menos superfície nova no cliente para esta rota, por agora.
+  502/503). O painel Detections (`detections.js`, botão `data-tab="detections"`
+  sem `is-planned`) só consome esta rota — nenhuma superfície de rede nova
+  para o browser.
+- **Registo de modelo ML (R9)**: `/api/ml/models` é `GET`, exige `X-API-Key` e
+  é **só leitura** — ativar, adotar ou treinar é operação de CLI
+  (`model_registry.py`), nunca por HTTP, porque escrever por HTTP mudaria o
+  modelo em uso sem ninguém o pedir. O carregamento do `.pkl` só acontece
+  depois da verificação de integridade: `resolve_active_artifacts` /
+  `resolve_version_artifacts` devolvem os dois artefactos **juntos** ou nada,
+  e `read_verified_bytes` lê cada ficheiro uma única vez, calcula o SHA-256
+  sobre esses mesmos bytes e devolve-os — `joblib.load` recebe exatamente os
+  bytes verificados, logo não há janela TOCTOU entre verificar e carregar.
+  Um `.pkl` em falta ou adulterado dá `hash_mismatch`/`artifact_missing` e a
+  rota `/api/ml-anomalies` responde 503 em vez de carregar. Um `ACTIVE`
+  inválido é fail-closed: não cai para o legado. Todo o dado do disco é
+  tratado como não confiável — o id de versão tem de casar com `v[0-9]{1,4}`
+  **e** resolver para uma pasta filha direta de `models/`, os nomes dos
+  artefactos vêm da constante `ARTIFACT_FILES` (nunca do `metadata.json`,
+  logo nenhum caminho é construído a partir de dados do disco), `ACTIVE` tem
+  teto de 64 bytes e é lido em binário, e o `metadata.json` tem teto de 64 KB.
+  Os erros saem como códigos de uma lista fechada
+  (`model_registry.ERROR_CODES`) — nunca texto de exceção nem caminhos, que
+  só ficam no log. O `evaluation` é projectado por uma lista fechada de 14
+  chaves com tipos validados e textos truncados, para que texto arbitrário de
+  um ficheiro escrito à mão não chegue ao `detail` nem ao DOM.
+  **Limite honesto desta verificação:** o SHA-256 deteta corrupção, troca
+  acidental e ficheiros alheios sem metadados, mas **não autentica** quem
+  escreveu — quem tem escrita em `models/` reescreve também o
+  `metadata.json`, logo o hash é uma auto-atestação do próprio processo que
+  gravou a versão. HMAC/assinatura ficaram fora do âmbito do R9.
 
 ## Riscos conhecidos
 
@@ -98,8 +126,12 @@
   (a política same-origin bloqueia a leitura cross-origin sem depender de
   cabeçalhos), o que obriga a tornar assíncrono o arranque de `app.js`/`redblue.js`.
 - Uma só chave global: sem papéis nem rate limiting.
-- `joblib.load` (pickle) só é seguro com artefactos locais; reavaliar quando
-  existir model registry/treino automático (R9–R10).
+- `joblib.load` (pickle) só é seguro com artefactos locais, e o registo (R9)
+  já verificou o SHA-256 antes de cada carga — mas isso não torna um `.pkl`
+  alheio seguro, só torna a troca/corrupção visível (ver a entrada do R9 em
+  "Em vigor"). O que fica por resolver é a automating do treino (R10) e,
+  com ela, a origem do `.pkl`: nenhum `.pkl` de fora deve entrar em
+  `models/` por descuido.
 - Um segredo esteve no histórico git (removido): confirmar que a chave foi
   **rodada**; reescrever histórico não revoga uma chave já publicada.
 - `WAZUH_VERIFY_SSL=false` por omissão (certificado autoassinado do lab).
