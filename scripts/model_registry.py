@@ -1215,7 +1215,7 @@ def _write_evaluation(root: Path, version_id: str, evaluation: dict) -> None:
         raise ModelRegistryError("metadata_invalid")
 
 
-def evaluate(models_dir, version_id, events_path, attack_log_path, *,
+def evaluate(models_dir, version_id, events_path, attack_log_path=None, *,)
              label_window_seconds=120, dataset_origin="unknown",
              min_events=None, min_attacks=None) -> dict:
     """
