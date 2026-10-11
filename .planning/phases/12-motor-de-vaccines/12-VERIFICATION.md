@@ -4,11 +4,17 @@ verified: 2026-10-12T00:30:00Z
 status: passed
 score: 4/4 must-haves verified
 covered_files:
+  - .planning/phases/12-motor-de-vaccines/12-01-PLAN.md
+  - .planning/phases/12-motor-de-vaccines/12-01-SUMMARY.md
+  - .planning/phases/12-motor-de-vaccines/12-02-PLAN.md
+  - .planning/phases/12-motor-de-vaccines/12-02-SUMMARY.md
+  - .planning/phases/12-motor-de-vaccines/12-03-PLAN.md
+  - .planning/phases/12-motor-de-vaccines/12-03-SUMMARY.md
   - scripts/attack_scenarios.py
   - scripts/test_attack_log_ids.py
   - scripts/test_vaccine_engine.py
   - scripts/vaccine_engine.py
-covered_digest: "v2:sha256:9a0c0f0332fee310440af870101143b58681ade0792b34fe1e8d827ce35cd1b7"
+covered_digest: "v2:sha256:27c4782d4871ab572cdaf93f033b33d9fd0ee6949cc1c5264519851dc14e181d"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification: false
