@@ -1,7 +1,8 @@
 """
 Motor de treino do SentryLens: treina um IsolationForest a partir de um
 export do Indexer, regista-o no registo de versões com a proveniência do
-lote, activa-o e recarrega a cache do modelo.
+lote, activa-o e recarrega a cache do modelo — tudo dentro do mesmo
+`TRAIN_LOCK`.
 
 Existe porque `main.py` dizia (até 2026-10-11) que treinar, adoptar e activar
 são operações de CLI e nunca por HTTP. A decisão D-01 inverteu isso, com
@@ -39,12 +40,14 @@ módulo num contexto sem scikit-learn não rebenta — e o teste da prova negati
 (`prova_negativa_de_imports`) mede exactamente isso.
 """
 
+import contextlib
 import importlib
 import json
 import os
 import re
 import statistics
 import tempfile
+import threading
 from pathlib import Path
 
 # Prefixo do temporário de joblib.dump. Distinto do `sentrylens-train-` do CLI
@@ -366,6 +369,61 @@ def dump_artifacts(model, scaler, out_dir) -> dict[str, str]:
     return sources
 
 
+# --- Single-flight (D-01.2) -----------------------------------------------------
+
+TRAIN_LOCK = threading.Lock()
+_BUSY = False
+
+
+def busy() -> bool:
+    """
+    Há uma operação de escrita no registo em curso?
+
+    O 409 da rota HTTP sai daqui e não de uma fila: não há estado de job, nem
+    histórico de pedidos, para consultar.
+    """
+    return _BUSY
+
+
+def _claim() -> None:
+    global _BUSY
+    with TRAIN_LOCK:
+        if _BUSY:
+            raise TrainingError("training_in_progress")
+        _BUSY = True
+
+
+def _release() -> None:
+    global _BUSY
+    with TRAIN_LOCK:
+        _BUSY = False
+
+
+@contextlib.contextmanager
+def _slot():
+    """
+    Single-flight: `claim` / `yield` / `release` no `finally`.
+
+    O `finally` é o que garante que `_BUSY` volta a `False` em TODOS os
+    caminhos — `ModelRegistryError`, `KeyboardInterrupt` a meio do
+    `joblib.dump`, uma excepção do scikit-learn a meio do `fit`. Sem ele, um
+    treino interrompido deixava o motor fechado para sempre e o 409 nunca mais
+    acabava.
+
+    Porque um `threading.Lock` e não o limiter do anyio: o limiter tem 40
+    tokens (e `run_in_threadpool` passa por ele), e um
+    `IsolationForest(n_estimators=200)` sem `n_jobs` usa TODOS os cores. 40
+    treinos simultâneos são thrash garantido, mais 40 pares de `.pkl` a
+    escrever em `%TEMP%` ao mesmo tempo. Um treino de cada vez é o que torna o
+    `models/` previsível (D-01.2).
+    """
+    _claim()
+    try:
+        yield
+    finally:
+        _release()
+
+
 # --- O treino --------------------------------------------------------------------
 
 
@@ -427,10 +485,10 @@ def train_next_version(
     `models_dir=None` resolve por `ML_MODEL_DIR` e depois
     `model_registry.DEFAULT_MODELS_DIR`, **nunca** pelo cwd.
 
-    Ordem dentro do motor — e a ordem É o contrato:
+    Ordem dentro do `TRAIN_LOCK` — e a ordem É o contrato:
 
-        treinar -> register_trained_version (escreve ACTIVE)
-                -> reset_cache -> load_model
+        claim -> treinar -> register_trained_version (escreve ACTIVE)
+              -> reset_cache -> load_model -> release
 
     Se o `load_model` viesse antes do registo, ou o `reset_cache` depois do
     `load_model`, o backend anunciaria `active: vN` a servir `v(N-1)`. O
@@ -454,70 +512,112 @@ def train_next_version(
                    else resolve_attack_log_path("latest_export"))
     documentos = read_events_file(eventos)
 
-    root = registo._root(models_dir or os.environ.get("ML_MODEL_DIR"))
-    # O registo pode não existir ainda (primeiro treino numa máquina nova).
-    # `register_trained_version` faz `os.replace` de pasta e recusa se o
-    # destino não existir, portanto quem cria é aqui: a falha vem ANTES de
-    # gastar segundos de CPU, e é `registry_unavailable` — nada mais.
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise registo.ModelRegistryError("registry_unavailable") from exc
+    with _slot():
+        root = registo._root(models_dir or os.environ.get("ML_MODEL_DIR"))
+        # O registo pode não existir ainda (primeiro treino numa máquina nova).
+        # `register_trained_version` faz `os.replace` de pasta e recusa se o
+        # destino não existir, portanto quem cria é aqui: a falha vem ANTES de
+        # gastar segundos de CPU, e é `registry_unavailable` — nada mais.
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise registo.ModelRegistryError("registry_unavailable") from exc
 
-    rows, vectors = build_training_rows(documentos, log_ataques)
-    if not vectors:
-        raise TrainingError("dataset_unusable")
+        rows, vectors = build_training_rows(documentos, log_ataques)
+        if not vectors:
+            raise TrainingError("dataset_unusable")
 
-    model, scaler = importlib.import_module("train_anomaly_model").train_model(
-        vectors,
-        contamination=contamination,
-        random_state=random_state,
-        n_estimators=n_estimators,
-    )
-
-    factos = dataset_facts(documentos, rows)
-    with tempfile.TemporaryDirectory(prefix=TEMP_PREFIX) as temporario:
-        sources = dump_artifacts(model, scaler, temporario)
-        registado = registo.register_trained_version(
-            root,
-            sources,
+        model, scaler = importlib.import_module("train_anomaly_model").train_model(
+            vectors,
             contamination=contamination,
             random_state=random_state,
             n_estimators=n_estimators,
-            dataset_name=Path(eventos).name,
-            dataset_size=factos["size"],
-            dataset_attacks=factos["attacks"],
-            # Tri-estado, nunca booleano: `dataset.synthetic` distingue
-            # "sintético" de "real" de "não declarado". Com `== "synthetic"`
-            # o default `unknown` cairia em `False`, e um treino sobre o
-            # fixture sintético ficaria atestado como dados reais (T-10-16).
-            synthetic={"synthetic": True, "real": False}.get(dataset_origin),
-            library_versions=registo.library_versions_pt(),
-            dataset_documents=factos["documents"],
-            dataset_processable=factos["processable"],
-            dataset_truncated=factos["truncated"],
-            dataset_window_first=factos["window_first"],
-            dataset_window_last=factos["window_last"],
-            feature_stats=feature_stats(vectors),
-            catalog_sha256=registo.catalog_sha256(),
         )
 
-    ml_anomalies = importlib.import_module("ml_anomalies")
-    # `reset_cache` ANTES de `load_model`, e os dois depois do registo: é esta
-    # ordem que impede o backend de anunciar `active: vN` a servir `v(N-1)`.
-    ml_anomalies.reset_cache()
-    ml_anomalies.load_model(str(root))
+        factos = dataset_facts(documentos, rows)
+        with tempfile.TemporaryDirectory(prefix=TEMP_PREFIX) as temporario:
+            sources = dump_artifacts(model, scaler, temporario)
+            registado = registo.register_trained_version(
+                root,
+                sources,
+                contamination=contamination,
+                random_state=random_state,
+                n_estimators=n_estimators,
+                dataset_name=Path(eventos).name,
+                dataset_size=factos["size"],
+                dataset_attacks=factos["attacks"],
+                # Tri-estado, nunca booleano: `dataset.synthetic` distingue
+                # "sintético" de "real" de "não declarado". Com `== "synthetic"`
+                # o default `unknown` cairia em `False`, e um treino sobre o
+                # fixture sintético ficaria atestado como dados reais (T-10-16).
+                synthetic={"synthetic": True, "real": False}.get(dataset_origin),
+                library_versions=registo.library_versions_pt(),
+                dataset_documents=factos["documents"],
+                dataset_processable=factos["processable"],
+                dataset_truncated=factos["truncated"],
+                dataset_window_first=factos["window_first"],
+                dataset_window_last=factos["window_last"],
+                feature_stats=feature_stats(vectors),
+                catalog_sha256=registo.catalog_sha256(),
+            )
 
-    meta = registado["metadata"]
-    return {
-        "version": registado["version"],
-        "active": registo.read_active(root),
-        "loaded": ml_anomalies.loaded_version(),
-        "dataset": meta["dataset"],
-        "parameters": meta["parameters"],
-        # A versão NASCE sem avaliação (EVAL-03): um treino não publica
-        # métricas sobre o próprio conjunto de treino como se fossem uma
-        # avaliação. Quem avalia é o `model_registry evaluate vN`.
-        "evaluation": None,
-        "catalog_sha256": meta["catalog_sha256"],
-    }
+        vid = registado["version"]
+        ml_anomalies = importlib.import_module("ml_anomalies")
+        ml_anomalies.reset_cache()
+        ml_anomalies.load_model(str(root))
+
+        meta = registado["metadata"]
+        return {
+            "version": vid,
+            "active": registo.read_active(root),
+            "loaded": ml_anomalies.loaded_version(),
+            "dataset": meta["dataset"],
+            "parameters": meta["parameters"],
+            # A versão NASCE sem avaliação (EVAL-03): um treino não publica
+            # métricas sobre o próprio conjunto de treino como se fossem uma
+            # avaliação. Quem avalia é o `model_registry evaluate vN`.
+            "evaluation": None,
+            "catalog_sha256": meta["catalog_sha256"],
+        }
+
+
+def activate_version(models_dir=None, version_id=None) -> dict:
+    """
+    Torna a `vN` pedida a activa e recarrega a cache — a operação que o
+    dashboard faz sem treinar nada. Mesmas protecções e mesmo lock de
+    `train_next_version`: nunca as duas ao mesmo tempo, porque as duas
+    escrevem o `ACTIVE`.
+
+    Ordem: validar o id ANTES de tocar em disco; confirmar os artefactos
+    (SHA-256) ANTES de escrever o `ACTIVE`; escrever com compare-and-set; e só
+    então `reset_cache` + `load_model`. O compare-and-set fecha a janela entre
+    a leitura do `ACTIVE` e a escrita; a verificação de integridade fecha a de
+    um `.pkl` adulterado, que nenhuma das duas cobre sozinha.
+
+    O `False` do compare-and-set vira `training_failed`: o `ACTIVE` mudou
+    entre a leitura e a escrita, e quem chamou repete. Não se adivinha um
+    vencedor.
+    """
+    registo = importlib.import_module("model_registry")
+    if version_id is None:
+        raise registo.ModelRegistryError("invalid_version_id")
+
+    with _slot():
+        root = registo._root(models_dir or os.environ.get("ML_MODEL_DIR"))
+        vid = registo.validate_version_id(version_id)
+        # Confirmar os dois `.pkl` ANTES do `ACTIVE`: é daqui que saem
+        # `artifact_missing`/`hash_mismatch`, e nenhum byte não verificado
+        # chega ao `joblib.load` do `ml_anomalies`.
+        registo.resolve_version_artifacts(root, vid)
+        anterior = registo.read_active(root)
+        if not registo._write_active_atomic(root, vid, expected=anterior):
+            raise TrainingError("training_failed")
+
+        ml_anomalies = importlib.import_module("ml_anomalies")
+        ml_anomalies.reset_cache()
+        ml_anomalies.load_model(str(root))
+        return {
+            "version": vid,
+            "previous": anterior,
+            "loaded": ml_anomalies.loaded_version(),
+        }

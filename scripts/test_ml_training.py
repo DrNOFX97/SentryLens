@@ -75,8 +75,8 @@ ASSINATURA_ESPERADA = (
     "contamination", "random_state", "n_estimators", "dataset_origin",
 )
 
-TOPO_ESPERADO = {"importlib", "json", "os", "pathlib", "re",
-                 "statistics", "tempfile"}
+TOPO_ESPERADO = {"contextlib", "importlib", "json", "os", "pathlib", "re",
+                 "statistics", "tempfile", "threading"}
 
 failures: list[str] = []
 
@@ -1177,6 +1177,9 @@ SECOES = (
     secao_models_dir_sem_cwd,
     secao_pin_de_assinatura,
     secao_erros_do_treino,
+    secao_single_flight,
+    secao_ordem_da_cache,
+    secao_activate_version,
     secao_limpeza_do_temporario,
     secao_disco_do_utilizador,
 )
