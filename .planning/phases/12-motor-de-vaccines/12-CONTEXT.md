@@ -90,3 +90,7 @@ No specific requirements — open to standard approaches.
 
 *Phase: 12-Motor de vaccines*
 *Context gathered: 2026-10-11*
+
+## Decisão posterior (plan-phase, 2026-10-11)
+
+- **D-07 refinado (confirmado pelo utilizador):** a vaccine é uma por ataque (D-02) e traz uma lista `proposals[]`, uma entrada por sensor em falta, cada uma com `sensor`, `rule` e `recommendation`. Não há `sensor` singular no topo da vaccine.
