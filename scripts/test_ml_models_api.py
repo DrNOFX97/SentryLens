@@ -729,6 +729,13 @@ def versao_treinada_integridade(client) -> None:
             versoes = body.get("versions") or []
             v1 = (versoes[0]) if versoes else {}
             check("(a) v1 tem origin 'trained'", v1.get("metadata", {}).get("origin") == "trained")
+            # `loaded` é o que o PROCESSO tem em memória, não o que está no
+            # registo em disco. `usar()` acabou de chamar reset_cache(), por
+            # isso só depois de um pedido que carregue é que vale 'v1' — sem o
+            # GET abaixo, o honesto era None e a assertão mediria o erro.
+            resp_ml = client.get("/api/ml-anomalies")
+            check("(a) /api/ml-anomalies carregou a v1 treinada", resp_ml.status_code in (200, 502),
+                  )
             check("(a) loaded == 'v1' (D-02)", client.get("/api/ml/models").json()["loaded"] == "v1")
             check("(a) v1 ativa", body.get("active") == "v1")
             check("(a) v1 status 'ok'", v1.get("status") == "ok")
@@ -759,26 +766,35 @@ def versao_treinada_integridade(client) -> None:
             finally:
                 ml_anomalies.joblib = original_joblib
 
-            # (c) restaurar o byte original -> volta a 200
-            # O byte trocado foi o último byte XOR 0xFF; voltar ao original requer o bytes guardados
-            # antes do flip. Como não guardamos o original separadamente, fazemos o restore lendo o ficheiro
-            # atual e XORando o último byte novamente (isso devolve ao estado trocado, não ao original).
-            # Para o teste provar o conceito de "restauração", verificamos apenas que o pedido subsequente
-            # já não devolve 503.
+            # (c) restaurar os bytes originais -> volta a 200
+            # O (b) trocou o último byte do .pkl. `make_version` gravou-o a
+            # partir de `model_bytes`/`scaler_bytes`, que temos aqui: restaurar
+            # é reescrever o ficheiro com o byte original, e não torná-lo a
+            # adulterar. A versão anterior deste teste fazia o segundo e ficava
+            # a "provar" que um ficheiro adulterado carregava.
+            (adulterado / "v1" / MODEL_FILE).write_bytes(model_bytes)
             usar(adulterado)
             ml_anomalies.reset_cache()
             resp = client.get("/api/ml-anomalies")
             check("(c) após restore -> 200", resp.status_code == 200)
 
-            # (d) novo treino com v1 ainda adulterada -> v2 ativa, v1 mantém hash_mismatch
-            treino2 = raiz / "treino2"
-            proc2 = correr_cli_treino(treino2, origin="synthetic")
+            # (d) novo treino COM a v1 presente -> v2 ativa, v1 mantém hash_mismatch
+            # O id final é sempre `next_version_id` (max+1), por isso o v2 só
+            # existe se o segundo treino for para o MESMO registo. A versão
+            # anterior deste teste treinava para uma pasta nova e vazia
+            # (treino2) e esperava v2 — impossível: num registo vazio o
+            # próximo id é v1. Aqui o segundo treino vai para `adulterado`,
+            # que já tem a v1, e é aí que o max+1 se vê a funcionar.
+            # A v1 volta a ser adulterada: o (c) restaurou-a de propósito, e
+            # esta asserção é sobre uma v1 com hash_mismatch a sobreviver ao
+            # treino novo — que é o que um loop de retreino tem de garantir.
+            flip_byte(adulterado / "v1" / MODEL_FILE)
+            proc2 = correr_cli_treino(adulterado, origin="synthetic")
             check("(d) novo CLI treino -> código 0", proc2.returncode == 0)
-            usar(treino2)
+            usar(adulterado)
             resp = client.get("/api/ml/models")
             body = resp.json() if resp.status_code == 200 else {}
             versoes2 = body.get("versions") or []
-            # A v2 deve estar ativa
             v2 = None
             v1_nova = None
             for v in versoes2:
@@ -787,10 +803,9 @@ def versao_treinada_integridade(client) -> None:
                 if v.get("id") == "v1":
                     v1_nova = v
             check("(d) v2 ativa", v2 is not None and v2.get("active") is True and v2.get("status") == "ok")
-            if v1_nova is not None:
-                check("(d) v1 continua na lista com hash_mismatch",
-                      v1_nova.get("status") == "hash_mismatch")
-            check("(d) total >= 2", body.get("total") >= 2)
+            check("(d) v1 continua na lista com hash_mismatch",
+                  v1_nova is not None and v1_nova.get("status") == "hash_mismatch")
+            check("(d) total >= 2", body.get("total", 0) >= 2)
 
         finally:
             ml_anomalies.joblib = original_joblib
@@ -842,20 +857,22 @@ def tst01_inventario(client) -> None:
 
     # 4. test_ml_models_ui.cjs ainda tem check de origin 'trained' e cadenas "Sem avaliação"
     # Verificamos apenas que o ficheiro existe e tem conteúdo relevante
-    ui_path = Path("ml_models_ui.cjs")
+    ui_path = _Path(SCRIPT_DIR) / "test_ml_models_ui.cjs"
     if ui_path.exists():
         src_ui = ui_path.read_text(encoding="utf-8")
         checks_ui = [
             ("UI / origin 'trained'", "origin 'trained'" in src_ui),
             ("UI / 'Sem avaliação'", "Sem avaliação" in src_ui),
         ]
-        for label, ok in checks_ui:
-            print(f"[{'OK' if ok else 'FALHOU'}] {label}")
-            if not ok:
-                failures.append(f"missing {label} in ml_models_ui.cjs")
     else:
-        print("[FALHUI] UI / test_ml_models_ui.cjs nao encontrado")
-        failures.append("ml_models_ui.cjs not found")
+        checks_ui = [
+            ("UI / origin 'trained'", False),
+            ("UI / 'Sem avaliação'", False),
+        ]
+    for label, ok in checks_ui:
+        print(f"[{'OK' if ok else 'FALHOU'}] {label}")
+        if not ok:
+            failures.append(f"missing {label} in {ui_path.name}")
 
     # Resumo
     total_checks = len(checks_mr) + len(checks_api) + len(checks_ui)

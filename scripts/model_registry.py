@@ -801,8 +801,6 @@ def next_version_id(models_dir) -> str:
 
     Aplica `_root(models_dir)` antes de listar, nunca usa o `cwd`.
     """
-    from model_registry import validate_version_id as _valid
-
     root = _root(models_dir)
     try:
         nomes = [
@@ -819,8 +817,7 @@ def next_version_id(models_dir) -> str:
     except OSError as exc:
         raise ModelRegistryError("registry_unavailable") from exc
 
-    validated = _valid(result)
-    return validated
+    return validate_version_id(result)
 
 
 def build_trained_metadata(
@@ -965,7 +962,7 @@ def register_trained_version(
     )
 
     # 4. valida sources — tem de ter exacto as chaves de ARTIFACT_FILES
-    expected_keys = set(model_registry.ARTIFACT_FILES)
+    expected_keys = set(ARTIFACT_FILES)
     actual_keys = set(sources.keys())
     if actual_keys != expected_keys:
         raise ModelRegistryError("artifact_missing")
@@ -1215,7 +1212,7 @@ def _write_evaluation(root: Path, version_id: str, evaluation: dict) -> None:
         raise ModelRegistryError("metadata_invalid")
 
 
-def evaluate(models_dir, version_id, events_path, attack_log_path=None, *,)
+def evaluate(models_dir, version_id, events_path, attack_log_path=None, *,
              label_window_seconds=120, dataset_origin="unknown",
              min_events=None, min_attacks=None) -> dict:
     """
@@ -1430,6 +1427,146 @@ def _cmd_evaluate(args) -> int:
     return 0
 
 
+def library_versions_pt() -> dict:
+    """
+    As versões das 4 bibliotecas que determinam como o `.pkl` foi produzido.
+
+    Derivadas AQUI, no comando, e passadas ao registo — nunca dentro de
+    `model_registry`: derivá-las no registo obrigaria a importar sklearn no topo
+    do ficheiro e a quebrar a pureza stdlib (D-01). As chaves são exactamente
+    estas quatro porque `test_model_registry.py` as fixa (regressão): acrescentar
+    ou renomear uma muda o `metadata.json` gravado.
+
+    Um pacote em falta devolve `None` em vez de rebentar: um `.pkl` treino sem
+    `numpy` é um facto a registar, não um motivo para o comando morrer depois de
+    já ter treinado.
+    """
+    import platform as _platform
+
+    versions = {"python": _platform.python_version()}
+    for nome, modulo in (("scikit-learn", "sklearn"), ("joblib", "joblib"), ("numpy", "numpy")):
+        try:
+            versions[nome] = getattr(importlib.import_module(modulo), "__version__", "desconhecida")
+        except ImportError:
+            versions[nome] = None
+    return versions
+
+
+def _cmd_train(args) -> int:
+    """`python model_registry.py train vN` — REG-04: treina e regista a versão seguinte.
+
+    O `version_id` é um RÓTULO pedido, não o id final: quem decide é
+    `register_trained_version`, via `next_version_id` (sempre `max+1`). Passar um
+    id que não é o seguinte não é erro — o comando reporta qual é que ficou
+    activa. É o que evita dois treinos concorrentes escolherem o mesmo número.
+
+    Ordem (D-03, a mesma do `register_trained_version`, mas o treino acontece
+    ANTES): os `.pkl` são escritos num temporário **fora** do registo, e só
+    depois é que o registo os copia, verifica e activa. Um `Ctrl-C` a meio do
+    `joblib.dump` deixa lixo num temporário do sistema, nunca uma `vN`
+    truncada em `models/`.
+    """
+    modelos = args.models_dir or os.environ.get("ML_MODEL_DIR") or DEFAULT_MODELS_DIR
+
+    # Imports tardios (D-01): o registo não pode ter scikit-learn no topo. Só
+    # este comando paga esse custo — `adopt` e `evaluate` continuam sem.
+    try:
+        train_anomaly_model = importlib.import_module("train_anomaly_model")
+    except ImportError as exc:  # pragma: no cover - scipy/sklearn em falta
+        print(f"Erro (registry_unavailable): {exc}", file=sys.stderr)
+        return 1
+
+    root = _root(modelos)
+
+    # O registo pode não existir ainda — é o caso normal do primeiro treino
+    # numa máquina nova. `register_trained_version` escreve com
+    # `os.replace` de pasta e recusa (`registry_unavailable`) se o destino não
+    # existir, por isso quem cria é este comando, antes do treino: assim a
+    # falha vem antes de gastar 3 s a treinar, e o `models/` nasce com as
+    # mesmas permissões que teria se o utilizador o tivesse criado à mão.
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"Erro (registry_unavailable): {exc}", file=sys.stderr)
+        return 1
+
+    # Sem --events, o dataset é o fixture sintético — o mesmo default de
+    # `train_anomaly_model.py`. Deliberadamente NÃO se esconde: um treino sem
+    # dataset declarado nasce sobre amostra pequena e o `metadata.json` diz
+    # `synthetic: true`, que é o que o painel Evaluation mostra.
+    eventos = Path(args.events) if args.events else train_anomaly_model.DEFAULT_EVENTS_PATH
+    log_ataques = Path(args.attack_log) if args.attack_log else (
+        Path(os.environ.get("ATTACK_LOG_PATH"))
+        if os.environ.get("ATTACK_LOG_PATH")
+        else train_anomaly_model.DEFAULT_ATTACK_LOG_PATH
+    )
+
+    try:
+        feature_rows = train_anomaly_model.load_dataset(eventos, log_ataques)
+    except (OSError, ValueError) as exc:
+        print(f"Erro (registry_unavailable): {exc}", file=sys.stderr)
+        return 1
+
+    vectors = importlib.import_module("feature_extractor").vectorize(feature_rows)
+    if not vectors:
+        print("Erro (registry_unavailable): o dataset não produziu nenhuma "
+              "linha treinável.", file=sys.stderr)
+        return 1
+
+    model, scaler = train_anomaly_model.train_model(
+        vectors, contamination=args.contamination)
+
+    # Dataset: o que o avaliador vai ver. `is_attack` é o rótulo verdadeiro,
+    # declarado pelo log de ataques — nunca inferido.
+    attacks = sum(1 for row in feature_rows if row.get("is_attack"))
+
+    temp_dir = tempfile.mkdtemp(prefix="sentrylens-train-")
+    try:
+        sources = {
+            MODEL_FILE: str(Path(temp_dir) / MODEL_FILE),
+            SCALER_FILE: str(Path(temp_dir) / SCALER_FILE),
+        }
+        joblib = importlib.import_module("joblib")  # tardio (D-01)
+        joblib.dump(model, sources[MODEL_FILE])
+        joblib.dump(scaler, sources[SCALER_FILE])
+
+        resultado = register_trained_version(
+            root, sources,
+            contamination=args.contamination,
+            random_state=args.random_state,
+            n_estimators=args.n_estimators,
+            dataset_name=eventos.name,
+            dataset_size=len(feature_rows),
+            dataset_attacks=attacks,
+            synthetic=(args.dataset_origin == "synthetic"),
+            library_versions=library_versions_pt(),
+        )
+    except ModelRegistryError as exc:
+        print(f"Erro ({exc.code}): {MESSAGES_PT[exc.code]}", file=sys.stderr)
+        return 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    vid = resultado["version"]
+    registado = resultado["metadata"]
+    dataset_meta = registado["dataset"]
+    print(f"Treino registado como {vid} (pedido: {args.version_id}) — "
+          "a versão activa é esta a partir de agora.")
+    print(f"  dataset:    {eventos}  ({dataset_meta['size']} eventos, "
+          f"{dataset_meta['attacks']} rotulados como ataque)")
+    print(f"  ataques:    {log_ataques}")
+    print(f"  origem:     {args.dataset_origin}")
+    print(f"  parâmetros: contamination={args.contamination}, "
+          f"random_state={args.random_state}, n_estimators={args.n_estimators}")
+    print(f"  verificação: SHA-256 conferido na cópia registada")
+    if vid != args.version_id:
+        print(f"Atenção: pediu {args.version_id} mas o registo tinha "
+              f"{args.version_id} ocupada — ficou {vid}.")
+    print("Reinicie o backend (scripts/start-backend.ps1) para carregar a "
+          "versão nova; até lá, /api/ml-anomalies serve a anterior.")
+    return 0
+
+
 def main(argv=None) -> int:
     """Ponto de entrada do CLI. 0 = feito, 1 = recusado com um código estável."""
     # Windows manda stdout/stderr para o codepage da consola, o que corrompe
@@ -1514,6 +1651,62 @@ def main(argv=None) -> int:
              "ml_evaluation.MIN_ATTACKS)",
     )
     p_evaluate.set_defaults(func=_cmd_evaluate)
+
+    # REG-04: o `version_id` é um rótulo pedido, não o id final — quem decide é
+    # `next_version_id` dentro de `register_trained_version`.
+    p_train = subcomandos.add_parser(
+        "train",
+        help="Treina um modelo novo, regista-o como a versão seguinte e activa-o",
+    )
+    p_train.add_argument(
+        "version_id",
+        help="RótULO da versão pretendida (v1, v2, ...). O id final é o "
+             "seguinte livre no registo — pedir um já ocupado não é erro",
+    )
+    p_train.add_argument(
+        "--events",
+        default=None,
+        help="Ficheiro JSON com os alertas de treino (por omissão: "
+             "train_anomaly_model.DEFAULT_EVENTS_PATH, o fixture sintético). "
+             "Sem este valor o treino nasce sobre amostra pequena — o "
+             "aviso sai no metadata.json, não aqui.",
+    )
+    p_train.add_argument(
+        "--attack-log",
+        default=None,
+        help="Log JSONL de ataques (por omissão: $ATTACK_LOG_PATH ou "
+             "scripts/attack_log.jsonl)",
+    )
+    p_train.add_argument(
+        "--models-dir",
+        default=None,
+        help="Pasta do registo (por omissão: $ML_MODEL_DIR ou scripts/models)",
+    )
+    p_train.add_argument(
+        "--dataset-origin",
+        choices=["real", "synthetic", "unknown"],
+        default="unknown",
+        help="Origem do dataset, dita pelo utilizador — nunca adivinhada pelo caminho",
+    )
+    p_train.add_argument(
+        "--contamination",
+        type=float,
+        default=0.2,
+        help="Fração esperada de anomalias (mesmo default do treino anterior)",
+    )
+    p_train.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        help="Semente do IsolationForest — é registada no metadata.json",
+    )
+    p_train.add_argument(
+        "--n-estimators",
+        type=int,
+        default=200,
+        help="Número de árvores (é registado no metadata.json)",
+    )
+    p_train.set_defaults(func=_cmd_train)
 
     args = parser.parse_args(argv)
     return args.func(args)
