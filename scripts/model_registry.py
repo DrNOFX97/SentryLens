@@ -1965,34 +1965,54 @@ def _cmd_train(args) -> int:
         else train_anomaly_model.DEFAULT_ATTACK_LOG_PATH
     )
 
+    # O motor lê e valida o dataset uma vez só, e é ele que transforma os
+    # documentos em linhas treináveis (`build_training_rows`). Ler o ficheiro
+    # duas vezes — uma para os factos de proveniência e outra para o treino —
+    # seria fazer `documents` vir de uma leitura e os vectores de outra.
+    ml_training = importlib.import_module("ml_training")
     try:
-        feature_rows = train_anomaly_model.load_dataset(eventos, log_ataques)
+        documentos = ml_training.read_events_file(eventos)
+    except ml_training.TrainingError as exc:
+        print(f"Erro ({exc.code}): {MENSAGES_PT.get(exc.code, exc.code)} "
+              f"— o ficheiro {eventos.name} não é um export utilizável.",
+              file=sys.stderr)
+        return 1
+
+    try:
+        feature_rows, vectors = ml_training.build_training_rows(documentos, log_ataques)
     except (OSError, ValueError) as exc:
         print(f"Erro (registry_unavailable): {exc}", file=sys.stderr)
         return 1
 
-    vectors = importlib.import_module("feature_extractor").vectorize(feature_rows)
     if not vectors:
         print("Erro (registry_unavailable): o dataset não produziu nenhuma "
               "linha treinável.", file=sys.stderr)
         return 1
 
+    # Os parâmetros que vão para o `metadata.json` e os que entram no
+    # `IsolationForest` são o MESMO valor, e é por isso que os dois são
+    # repassados: até 2026-10-11 este comando registava `args.n_estimators` e
+    # `args.random_state` e treinava com os 200/42 fixos de `train_model`
+    # (T-10-08) — o `metadata.json` descrevia um modelo que não era o que estava
+    # gravado ao lado dele, e falhava em silêncio. O `.pkl` e os `parameters`
+    # têm de sair do mesmo número.
     model, scaler = train_anomaly_model.train_model(
-        vectors, contamination=args.contamination)
-
-    # Dataset: o que o avaliador vai ver. `is_attack` é o rótulo verdadeiro,
-    # declarado pelo log de ataques — nunca inferido.
-    attacks = sum(1 for row in feature_rows if row.get("is_attack"))
+        vectors, contamination=args.contamination,
+        random_state=args.random_state, n_estimators=args.n_estimators)
 
     temp_dir = tempfile.mkdtemp(prefix="sentrylens-train-")
     try:
-        sources = {
-            MODEL_FILE: str(Path(temp_dir) / MODEL_FILE),
-            SCALER_FILE: str(Path(temp_dir) / SCALER_FILE),
-        }
-        joblib = importlib.import_module("joblib")  # tardio (D-01)
-        joblib.dump(model, sources[MODEL_FILE])
-        joblib.dump(scaler, sources[SCALER_FILE])
+        # O `joblib.dump` é o de `ml_training.dump_artifacts` (T-10-09): este
+        # ficheiro é stdlib puro no topo e é o motor que sabe que o destino
+        # tem de estar fora do registo.
+        sources = ml_training.dump_artifacts(model, scaler, temp_dir)
+
+        # Proveniência do CLI (D-02): os mesmos factos que a API calcula, pela
+        # MESMA função (`ml_training.dataset_facts`), sobre os mesmos
+        # documentos. Se algum dia os dois divergirem, é
+        # `test_ml_training.py` que denuncia — porque compara cada facto com o
+        # cálculo independente que o próprio teste faz a partir do ficheiro.
+        factos = ml_training.dataset_facts(documentos, feature_rows)
 
         resultado = register_trained_version(
             root, sources,
@@ -2000,8 +2020,8 @@ def _cmd_train(args) -> int:
             random_state=args.random_state,
             n_estimators=args.n_estimators,
             dataset_name=eventos.name,
-            dataset_size=len(feature_rows),
-            dataset_attacks=attacks,
+            dataset_size=factos["size"],
+            dataset_attacks=factos["attacks"],
             # Tri-estado, não booleano: `dataset.synthetic` distingue
             # "sintético" de "real" de "não declarado" (é o mesmo contrato que
             # `adopt` escreve como `None` e que `ml_evaluation` consome). Com
@@ -2010,6 +2030,13 @@ def _cmd_train(args) -> int:
             # — o metadata.json a afirmar que os dados eram reais.
             synthetic={"synthetic": True, "real": False}.get(args.dataset_origin),
             library_versions=library_versions_pt(),
+            dataset_documents=factos["documents"],
+            dataset_processable=factos["processable"],
+            dataset_truncated=factos["truncated"],
+            dataset_window_first=factos["window_first"],
+            dataset_window_last=factos["window_last"],
+            feature_stats=ml_training.feature_stats(vectors),
+            catalog_sha256=catalog_sha256(),
         )
     except ModelRegistryError as exc:
         print(f"Erro ({exc.code}): {MESSAGES_PT[exc.code]}", file=sys.stderr)
@@ -2029,6 +2056,14 @@ def _cmd_train(args) -> int:
     print(f"  parâmetros: contamination={args.contamination}, "
           f"random_state={args.random_state}, n_estimators={args.n_estimators}")
     print(f"  verificação: SHA-256 conferido na cópia registada")
+    # O mesmo hash que `GET /api/ml/models` compara (D-04): o CLI e o dashboard
+    # passam a dizer a mesma coisa sobre a compatibilidade. Se um dia o
+    # catálogo de features mudar, esta versão aparece lá como
+    # `catalog_compatible: false` — o `.pkl` continua a carregar (os `.pkl` estão
+    # íntegros), mas os índices de `event_id_encoded` já não significam o mesmo.
+    print(f"  catálogo:   {registado.get('catalog_sha256')} (hash das features; "
+          f"se um dia mudar, esta versão sai como catalog_compatible=false em "
+          f"/api/ml/models — e continua a carregar)")
     if vid != args.version_id:
         print(f"Atenção: pediu {args.version_id} mas o registo tinha "
               f"{args.version_id} ocupada — ficou {vid}.")
