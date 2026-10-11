@@ -242,17 +242,19 @@ Wazuh:
   `train_anomaly_model.py` ou em testes.
 - `train_anomaly_model.py` — script standalone de treino de modelos ML. Lê
   eventos e attack log, extrai features via `feature_extractor.py`, treina
-  `IsolationForest` e chama `model_registry.register_trained_version()` que
-  cria `models/vN/` com `metadata.json` + SHA-256 e activa a versão. Grava
-  `.pkl` soltos (`isolation_forest.pkl`, `scaler.pkl`) apenas como legado.
-  CLI: `--events`, `--attack-log`, `--models-dir`, `--dataset-origin
-  {real,synthetic,unknown}`, `--report <ficheiro>` (opt-in). `--report`
-  deixa de ser o caminho normal — o relatório fica gravado na
-  `metadata.json` da versão treinada. É o único sítio que cria versões no
-  registo. Pensado para ser executado off-line (não é um endpoint HTTP).
+  `IsolationForest` e grava os dois `.pkl` na pasta indicada em
+  `--models-dir` (`save_model()`). **Não toca no registo**: importa
+  `model_registry` mas nunca chama `register_trained_version()` — quem cria
+  e activa `models/vN/` com `metadata.json` + SHA-256 é o subcomando
+  `model_registry.py train` (REG-04), que reutiliza `load_dataset()`/
+  `train_model()` daqui. CLI: `--events`, `--attack-log`, `--models-dir`
+  (**obrigatório**, tem de ser uma pasta já existente), `--contamination`,
+  `--dataset-origin {synthetic,real,unknown}`, `--report <ficheiro>`
+  (opt-in; sem ele o relatório só é impresso). Nada disto vai para o
+  `metadata.json`. Executado off-line, nunca por HTTP.
 
-- `model_registry.py` — registo versionado em disco: `next_version_id()`, `build_trained_metadata()`, `register_trained_version()`, `evaluate`, `adopt`, `ACTIVE`, SHA-256 antes do `joblib.load`, stdlib puro por contrato (gate por AST). É o único ponto que escreve em `models/vN/` e gerencia o ciclo de vida das versões.
-- `ml_evaluation.py` — motor de avaliação: 14 chaves fechadas em `EVALUATION_PUBLIC_KEYS`/`EVALUATION_KEYS`, `evaluate_alert_compliance()`, `--dataset-origin`, `origin: "trained"`/`"adoptado"`. O único módulo que importa scikit-learn além de `train_anomaly_model.py`. Avaliação por versão, nunca omite veredito.
+- `model_registry.py` — registo versionado em disco: `next_version_id()`, `build_trained_metadata()`, `register_trained_version()`, `adopt`, `evaluate`, `ACTIVE`, SHA-256 antes do `joblib.load`, stdlib puro por contrato (gate por AST — scikit-learn e `train_anomaly_model` só entram por `importlib` dentro de `evaluate`/`train`). CLI com **três** subcomandos: `adopt`, `evaluate vN` e `train vN` (REG-04; o `version_id` do `train` é um rótulo pedido, não o id final — quem decide é `next_version_id`, e `--contamination`/`--random-state`/`--n-estimators` ficam registados no `metadata.json`). É o único ponto que escreve em `models/vN/` e gerencia o ciclo de vida das versões. O `metadata.json` tem **13** chaves: as 12 de `METADATA_PUBLIC_KEYS` (projeção que a API expõe, `evaluation` de fora) mais a `evaluation`; as **14** são as de `EVALUATION_PUBLIC_KEYS`, a mesma lista escrita à mão em `ml_evaluation.EVALUATION_KEYS` (igualdade verificada por `test_ml_models_api.py`). `origin` é um campo do `metadata.json`: `"trained"` no treino, `"adopted"` no `adopt` — que também escreve `trained_at`, estimado a partir do mtime dos `.pkl` com `trained_at_estimated: True`.
+- `ml_evaluation.py` — motor de avaliação de UMA versão: `build_evaluation_report()` e `validate_evaluation()`, contrato de 14 chaves fechadas em `EVALUATION_KEYS`, limiares nomeados `MIN_EVENTS`/`MIN_ATTACKS` com aviso de amostra pequena, e `--dataset-origin {real,synthetic,unknown}` declarado pelo utilizador. Mede a versão pedida, não a ativa (D-02). `evaluate_alert_compliance()` **não** é aqui — vive em `compliance_evaluator.py` (conformidade RGPD/NIS2/AI Act) — e `origin` também não: é campo do `metadata.json` escrito pelo registo. É o único módulo que importa scikit-learn além de `train_anomaly_model.py`.
 
 Todos os painéis Wazuh (alerts/stats/brute-force/lifecycle/privileges/
 admin-activity) seguem o mesmo padrão: `indexer_client.get_recent_alerts(...)`
@@ -321,7 +323,7 @@ com mocks sem o laboratório ligado.
 
 ## GSD (a partir do R9)
 
-- `.planning/` (PROJECT, REQUIREMENTS, ROADMAP, STATE, config) acompanha o marco **R9**; o Roadmap v2 completo continua em `docs/ROADMAP_STATUS.md`. Retomar o R9 com `/gsd-plan-phase 1` (branch `roadmap-v2-r9-ml-registry`).
+- `.planning/` (PROJECT, REQUIREMENTS, ROADMAP, STATE, config) acompanha o marco **R9**; o Roadmap v2 completo continua em `docs/ROADMAP_STATUS.md`. As Fases 1 e 2 estão fechadas; a Fase 3 (treino gera versões, testes e documentação) **já está planeada** — 3 planos em `.planning/phases/03-treino-gera-versoes-testes-e-documentacao/` — e o `STATE.md` marca-a como *Ready to execute*. O passo seguinte é `/gsd-execute-phase 3` (branch `roadmap-v2-r9-ml-registry`).
 - **Nunca** correr `gsd-tools query generate-claude-md --output CLAUDE.md` (o workflow `new-project` sugere-o): sobrescreveria este ficheiro. O `config.json` do GSD aponta para `./.claude/CLAUDE.md`, mas o real está na raiz.
 - Depois de um reboot: `.\scripts\start-backend.ps1` e `.\scripts\start-frontend.ps1`; confirmar as 3 VMs e o Wazuh (502 costuma ser disco cheio dentro da VM, não RAM).
 
