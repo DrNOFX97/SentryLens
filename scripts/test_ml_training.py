@@ -1186,8 +1186,11 @@ SECOES = (
 
 
 def run() -> None:
-    for secao_ in SECOES:
-        secao_()
+    # A variável chama-se `passo` e não `secao_` de propósito: um gate por AST
+    # que procure `secao_*(...)` encontraria esta chamada e contaria a secção
+    # de loop como se fosse uma secção de teste.
+    for passo in SECOES:
+        passo()
     print(f"\n{'FALHOU' if failures else 'OK'} — {len(failures)} check(s) falhados")
     if failures:
         raise SystemExit(1)
