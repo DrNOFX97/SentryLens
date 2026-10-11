@@ -65,8 +65,13 @@ Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
 **Plans:** 3 plans
 
 Plans:
+**Wave 1**
 - [ ] 12-01-PLAN.md — Tracer: registo real -> build_vaccine_candidates com proposals[], origem e ids golden; sensores em falta via attack_library; saltos D-04, matriz de vereditos e determinismo (VAC-01, VAC-02, VAC-03)
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 12-02-PLAN.md — validate_vaccine (contrato fechado, nenhum comando) e três estados honestos no_data/source_unavailable/tudo unknown; suite completa verde (VAC-02, VAC-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 12-03-PLAN.md — Escritor do attack log grava id (max+1, fail-closed, sem backfill); entrada do escritor real -> registo -> motor -> vaccine validada (VAC-03)
 
 **UI hint**: no — módulo puro sem I/O; a superfície visível chega na Phase 14.
