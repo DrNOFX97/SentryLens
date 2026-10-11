@@ -1,12 +1,12 @@
 ---
 gsd_state_version: '1.0'
-status: milestone-complete
+status: in-progress
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 11
-  completed_plans: 11
-  percent: 100
+  total_phases: 5
+  completed_phases: 4
+  total_plans: 17
+  completed_plans: 14
+  percent: 82
 ---
 
 # Project State
@@ -16,21 +16,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** R9 fechado. O passo seguinte é o R10 (ML Learning Loop), ainda por planear.
+**Current focus:** R9 fechado. R10 a meio: o backend (phase 10) está completo e medido; falta o frontend (phase 11).
 
 ## Current Position
 
-Phase: 3 of 3 complete (Treino gera versões, testes e documentação)
-Plan: 3 of 3 in current phase
-Status: Milestone R9 concluído — pronto para `/gsd-complete-milestone` e para planear o R10
-Last activity: 2026-10-11 — `f23405b` partiu o repositório; corrigido em `a0464f7` (comando `train` do REG-04 ligado) e em três commits `docs:` que corrigem afirmações falsas sobre o registo de modelos
+Phase: 11 of 17 plans done (4 of 5 phases complete)
+Plan: 11-01 of phase 11 (frontend do R10)
+Status: Backend do R10 fechado e medido — `/api/ml/train` e `/api/ml/models/{id}/activate` existem, 39/39 testes verdes
+Last activity: 2026-10-11 — `0ce96ff` fechou o 10-03 (superfície HTTP); `e28d490` recuperou os três planos de frontend que `a514a27` tinha sobrescrito
 
-Progress: [██████████] 100%
+Progress: [████████░░] 82%
 
-**Estado medido hoje:** `run_all_tests.py` → **38/38** (medido, não transportado).
-`scripts/models/` só tem os dois `.pkl` legados — sem `vN/`, sem `ACTIVE`, sem
-`metadata.json`: o comando `train` existe e foi verificado contra um registo temporário,
-mas nunca foi corrido sobre os dados do utilizador.
+**Estado medido hoje:** `run_all_tests.py` → **39/39** (medido depois de `0ce96ff`, não transportado).
+`scripts/models/` continua só com os dois `.pkl` legados — sem `vN/`, sem `ACTIVE`:
+o `POST /api/ml/train` existe e está testado, mas nunca foi corrido sobre os dados
+do utilizador, porque isso escreve no disco dele.
 
 ## Performance Metrics
 
@@ -80,8 +80,10 @@ Decisões recentes que afetam o trabalho atual:
 - **Verificação humana pendente nas Fases 1 e 2:** abrir o dashboard real e confirmar os badges, o detalhe por teclado, a Evaluation e o aviso de reinício do backend. Os testes cobrem a camada pura em `node:vm`, não o browser.
 - **A exportação real do Wazuh continua por executar** (Indexer desligado). Comandos exactos em `02-VERIFICATION.md`.
 - **O dataset histórico foi encontrado** (`scripts/snapshots/real_events_2026-09-14.json`, 1,7 MB, não versionado) mas **não é rotulável**: o `attack_log.jsonl` só cobre 2026-10-06 e a janela do dataset é 2026-09-14 15:22–15:34. Rotulado contra ele dá 0 ataques. Para uma avaliação a sério é preciso lançar os ataques e exportar na mesma janela — trabalho de laboratório, não de código.
-- Fase 3 executada (3 planos, 3 waves) e verificada: **38/38 medidos** em 2026-10-11.
-- **Verificar o registo real:** `scripts/models/` só tem os dois `.pkl` legados. Para haver versões é preciso correr `model_registry.py adopt` (ou `train`) — decisão do utilizador, não foi feito por mim porque escreve no disco dele.
+- Fase 3 executada (3 planos, 3 waves) e verificada.
+- **R10 — backend (phase 10) executado em 2026-10-11**, 3 planos: registo com proveniência, `ml_training.py` e a superfície HTTP. **39/39 medidos.**
+- Fase 11 (frontend do R10) planeada, por executar. Os seus três planos foram escritos antes do backend existir e o `11-03` existe para conferir as hipóteses deles contra a resposta real.
+- **Verificar o registo real:** `scripts/models/` só tem os dois `.pkl` legados. Para haver versões é preciso correr `model_registry.py adopt` (ou `train`), ou carregar no botão Treinar depois da phase 11 — decisão do utilizador, não foi feito por mim porque escreve no disco dele.
 - **Risco conhecido para a execução da Fase 3:** resolvido — `dataset_origin` tem valor por omissão (`"unknown"`) em `train_anomaly_model.evaluate`.
 
 ### Blockers/Concerns
@@ -93,6 +95,10 @@ Decisões recentes que afetam o trabalho atual:
 - O marco R9 não tem token de versão `vX.Y` (é "R9" do Roadmap v2); ferramentas que procuram milestones por `vX.Y` podem não o reconhecer.
 - **D-04 (aceita, não resolvida):** o SHA-256 deteta corrupção/troca acidental mas **não autentica** — quem escreve em `models/` reescreve o `metadata.json`. O legado carrega sem verificação até ao `adopt`. Registado em `docs/SECURITY.md`.
 - **Para o R10 (decidir no desenho):** `train_anomaly_model.save_model` faz `joblib.dump` num caminho escolhido pelo chamador — exposto por HTTP é escrita arbitrária no host; e `next_version_id` é TOCTOU puro, sem qualquer primitivo de concorrência em `model_registry.py`.
+- **Fechado em 2026-10-11:** `ml_training.py` é a barreira (nenhum caminho do cliente, `threading.Lock` a cobrir treinar→registar→activar), e as rotas HTTP não aceitam caminho nenhum (`extra="forbid"` + dois `Literal` obrigatórios + três tetos). O que resta é o risco de fundo: **quem tem a API key passa a poder escrever em `models/`** — o SHA-256 deixa de ser defesa e passa a ser detector de corrupção. `docs/SECURITY.md` tem de ser reescrito sobre isto (D-08), não anotado.
+- **Os planos de frontend do R10 foram sobrescritos em `a514a27`** (os de backend ocuparam os mesmos três ficheiros) e só voltaram em `e28d490`. Um plano novo escrito por cima de outro, no mesmo caminho, **não dá conflito nenhum** — o git vê uma substituição normal. Antes de escrever `NN-0X-PLAN.md`, confirmar que não existe já um plano com esse nome.
+- **Três "passava por sorte" apanhados no 10-03**, todos do mesmo tipo — um teste que mede a cena errada quando a máquina dá o que a sorte quer: (1) `_paralelo` fazia `join` antes de devolver, por isso a thread presa só saía quando o `wait(timeout=60)` expirava; (2) `exportar_eventos` devolvia o ficheiro em vez da pasta e `ML_EXPORT_DIR` a apontar para um `.json` dá `dataset_not_found` em silêncio; (3) um check lia a pasta da v1 quando o `n_estimators=1000` tinha criado a v6.
+- **O plano 10-03 previa 40/40 ficheiros de teste e são 39** — o plano não cria ficheiro novo, estende o `test_ml_models_api.py`. Quando um plano e um `<verify>` discordam do que o código faz, o número do plano não é o que manda.
 - O `run_all_tests.py` tem timeout de 300 s por ficheiro; numa máquina fria o `test_attack_library.py` pode ir a ~190 s.
 - **Costura da Fase 2:** as 14 chaves de `evaluation` estão escritas à mão em dois ficheiros (motor e registo), presas por comparação em `test_ml_models_api.py`. Mudar a lista obriga a migrar os `metadata.json` gravados e `schema_version` continua 1.
 
@@ -107,9 +113,12 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-11
-Stopped at: R9 fechado — 11 planos, 38/38 medidos, `train` ligado ao REG-04, documentação corrigida
+Stopped at: R10 backend fechado (phase 10, 3 planos) — `POST /api/ml/train` e `POST /api/ml/models/{id}/activate`, `model_version` no relatório, 39/39 medidos
 Resume file: None
 
-Próximo passo: `/gsd-complete-milestone` para fechar o R9, depois planear o R10
-(ML Learning Loop — treinar a partir do dashboard e comparar versões).
-Ficam pendentes a verificação humana no browser e a exportação real do Wazuh.
+Próximo passo: executar a **phase 11** (frontend do R10) a partir de
+`/gsd-execute-phase`, começando pelo `11-01-PLAN.md` (botão Treinar em
+`ml_models.js`). Depois: reescrever `docs/SECURITY.md` sobre a escrita por HTTP
+(D-08), que hoje diz que treinar é operação de CLI.
+Ficam pendentes a verificação humana no browser, a exportação real do Wazuh, e
+decidir se o registo real (`model_registry.py adopt`) é corrido.

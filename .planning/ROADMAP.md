@@ -2,11 +2,24 @@
 
 ## Overview
 
-Este roadmap cobre apenas o marco atual do SentryLens, o **R9 — ML Intelligence** (Roadmap v2). O projeto já existe e funciona: o Isolation Forest deteta anomalias, mas há um só modelo (dois `.pkl` soltos, sem metadados) e um relatório de avaliação avulso que não está ligado a nenhum modelo. O R9 dá rastreabilidade a isto.
+Este roadmap começou por cobrir o marco **R9 — ML Intelligence** (Roadmap v2) e foi
+alargado ao **R10 — ML Learning Loop** quando o R9 fechou. O projeto já existe e
+funciona: o Isolation Forest deteta anomalias, mas há um só modelo (dois `.pkl`
+soltos, sem metadados) e um relatório de avaliação avulso que não está ligado a
+nenhum modelo. O R9 dá rastreabilidade a isto; o R10 fecha o ciclo — treinar e
+activar a partir do dashboard, e comparar versões lado a lado.
 
-A jornada tem três fatias verticais. Primeiro, o registo de modelos fica visível de ponta a ponta (registo versionado, carregamento com hash verificado, `GET /api/ml/models` e aba Models), incluindo o modelo legado e o comando `adopt`. Depois, a avaliação passa a viver dentro de cada versão e aparece na aba Evaluation, com ML contra regras e sempre com os avisos de dataset. Por fim, o treino passa a gerar versões novas sozinho e o marco fecha com testes e documentação.
+A jornada do R9 teve três fatias verticais. Primeiro, o registo de modelos ficou
+visível de ponta a ponta (registo versionado, carregamento com hash verificado,
+`GET /api/ml/models` e aba Models), incluindo o modelo legado e o comando
+`adopt`. Depois, a avaliação passou a viver dentro de cada versão e aparece na
+aba Evaluation, com ML contra regras e sempre com os avisos de dataset. Por fim,
+o treino passou a gerar versões novas sozinho e o marco fechou com testes e
+documentação.
 
-O backend do R9 é só de leitura: treinar a partir do dashboard e comparar versões automaticamente pertencem ao R10.
+O R10 parte da leitura: o backend deixou de ser só de leitura. Treinar e activar
+passam a existir por HTTP, com as quatro protecções de D-01, e o relatório de
+anomalias diz de que versão veio cada número.
 
 ## Phases
 
@@ -18,7 +31,15 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Registo de modelos ponta a ponta** - Versões em `models/vN`, legado, `adopt`, carregamento com SHA-256, `GET /api/ml/models` e aba Models
 - [x] **Phase 2: Avaliação ligada à versão** - Avaliação guardada no `metadata.json`, comando `evaluate` e aba Evaluation (ML vs regras)
-- [ ] **Phase 3: Treino gera versões, testes e documentação** - Cada treino cria e ativa uma versão nova; suite de testes completa e documentação atualizada
+- [x] **Phase 3: Treino gera versões, testes e documentação** - Cada treino cria e ativa uma versão nova; suite de testes completa e documentação atualizada
+- [x] **Phase 10: Registo com proveniência, motor de treino e superfície HTTP** (R10, backend) - `catalog_sha256` e `feature_stats` no `metadata.json`, compare-and-set no `ACTIVE`, `ml_training.py`, e `POST /api/ml/train` + `POST /api/ml/models/{id}/activate` com as quatro protecções de D-01
+- [ ] **Phase 11: O learning loop no dashboard** (R10, frontend) - Botão Treinar com a UX honesta do `loaded != active`, comparação vN vs vN-1 derivada do que a API já traz, e fecho contra a resposta real
+
+> **Nota de planeamento:** os planos de frontend do R10 foram escritos primeiro
+> (commit `50d6926`, `10-01/02/03-PLAN.md`) e **sobrepostos** pelos planos de
+> backend do mesmo nome (`a514a27`). Recuperados de `50d6926` para a phase 11 em
+> `e28d490`. A ordem de execução é 10 → 11: o botão Treinar depende do `POST
+> /api/ml/train` existir.
 
 ## Phase Details
 
@@ -79,19 +100,57 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Tracer: `next_version_id` + `build_trained_metadata` + `register_trained_version` → treino → `GET /api/ml/models` → `/api/ml-anomalies` com a vN → aba Models (wave 1)
-- [ ] 03-02-PLAN.md — TST-01: garantias negativas do caminho novo, gate dos sete itens e suite completa (wave 2)
-- [ ] 03-03-PLAN.md — DOC-01: `README.md`, `CLAUDE.md`, `docs/DATA_MODEL.md`, `docs/ROADMAP_STATUS.md`, `docs/ML.md` (wave 3)
+- [x] 03-01-PLAN.md — Tracer: `next_version_id` + `build_trained_metadata` + `register_trained_version` → treino → `GET /api/ml/models` → `/api/ml-anomalies` com a vN → aba Models (wave 1)
+- [x] 03-02-PLAN.md — TST-01: garantias negativas do caminho novo, gate dos sete itens e suite completa (wave 2)
+- [x] 03-03-PLAN.md — DOC-01: `README.md`, `CLAUDE.md`, `docs/DATA_MODEL.md`, `docs/ROADMAP_STATUS.md`, `docs/ML.md` (wave 3)
 **Decisões:** `03-CONTEXT.md` (D-01..D-11, decididas pelo utilizador em 2026-10-10)
 **UI hint**: no — D-10 confirmado por inspecção do código: `ml_models.js` já desenha `parameters`, `dataset`, `library_versions` e `origin: "trained"`. Falta é a prova (fixture da versão treinada completa), não a capacidade.
+
+### Phase 10: Registo com proveniência, motor de treino e superfície HTTP (R10, backend)
+**Goal:** O backend passa a ter escrita no registo por HTTP, com a proveniência do lote gravada no `metadata.json` e as quatro protecções que fecham a superfície nova.
+**Mode:** mvp
+**Depends on:** Phase 3
+**Requirements:** REG-05, API-01, API-02, TST-01
+**Success Criteria** (what must be TRUE):
+  1. `POST /api/ml/train` (com API key) treina, regista, activa e recarrega a cache numa só resposta, e nenhum caminho vem do corpo: `extra="forbid"`, `dataset`/`dataset_origin` obrigatórios, três tetos testados pelos dois lados.
+  2. Um treino e uma activação nunca correm ao mesmo tempo: o segundo pedido dá 409 `training_in_progress` e não escreve nada.
+  3. `/api/ml-anomalies` traz `model_version` (`"vN"`, `"legacy"` ou `None`) sem que nenhuma chave anterior mude.
+  4. Nenhum `detail` traz texto de excepção, caminho ou traceback, em nenhum dos sete caminhos de erro.
+**Plans:** 3 plans
+
+Plans:
+- [x] 10-01-PLAN.md — Registo com proveniência: `catalog_sha256`, `dataset` de D-02, `feature_stats` de D-03, compare-and-set no `ACTIVE`, e o `run()` de `test_model_registry.py` corrigido (wave 1)
+- [x] 10-02-PLAN.md — `ml_training.py`: `train_next_version` sem nenhum caminho do cliente, single-flight com `threading.Lock`, e o CLI a registar o modelo que treina de facto (wave 2)
+- [x] 10-03-PLAN.md — Camada HTTP: as duas rotas POST, `_ml_write_error`, `model_version` e o contrato de single-flight por HTTP (wave 3)
+**Decisões:** `10-CONTEXT.md` (D-01..D-08, decididas pelo utilizador em 2026-10-11)
+
+### Phase 11: O learning loop no dashboard (R10, frontend)
+**Goal:** O analista treina a partir da aba 📦 Models e vê o que aconteceu — incluindo que o backend ainda não a usa — e compara vN com vN-1 na aba Evaluation sem um endpoint novo.
+**Mode:** mvp
+**Depends on:** Phase 10 (o `POST /api/ml/train` tem de existir)
+**Requirements:** UI-01, UI-02, UI-05, API-02
+**Success Criteria** (what must be TRUE):
+  1. O botão Treinar no painel diz exactamente o que aconteceu à versão nova, e diz que é preciso reiniciar o backend quando `loaded != active`.
+  2. Um 409/422/503 desenha-se como erro com a frase do código, nunca como "Sem dados" nem como linha vazia.
+  3. A aba Evaluation mostra a comparação vN vs vN-1 derivada do que `/api/ml/models` já traz, com delta em pontos percentuais e o aviso de lote (D-03).
+  4. Nenhum ficheiro JS novo na raiz: `serve_frontend.py` não é tocado.
+**Plans:** 3 plans
+
+Plans:
+- [ ] 11-01-PLAN.md — `ml_models.js` ganha `mlmPost`, o botão Treinar e o aviso `loaded != active` (wave 1)
+- [ ] 11-02-PLAN.md — `ml_evaluation.js` ganha a comparação vN vs vN-1 derivada, mais `model_version` no bloco ao vivo e o hash do catálogo no detalhe (wave 2)
+- [ ] 11-03-PLAN.md — Fecho: `feature_stats` lido contra o `metadata.json` real, suite completa e a pergunta em aberto da sidebar (wave 3)
+**Nota:** estes três planos foram escritos **antes** do backend do R10 existir — o 11-03 existe precisamente para conferir as hipóteses deles contra a resposta real (`feature_stats`, `model_version`).
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3
+Phases execute in order: 1 → 2 → 3 → 10 → 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Registo de modelos ponta a ponta | 4/4 | Complete | 2026-10-10 |
 | 2. Avaliação ligada à versão | 4/4 | Complete | 2026-10-10 |
-| 3. Treino gera versões, testes e documentação | 0/3 | Planned | - |
+| 3. Treino gera versões, testes e documentação | 3/3 | Complete | 2026-10-11 |
+| 10. Registo, motor e superfície HTTP (backend do R10) | 3/3 | Complete | 2026-10-11 |
+| 11. O learning loop no dashboard (frontend do R10) | 0/3 | Planned | - |
