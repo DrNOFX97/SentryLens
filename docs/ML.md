@@ -32,10 +32,15 @@ Lê `sample_events_real.json` + `sample_attack_log.jsonl` por default
 snapshot exportado do laboratório real), treina `IsolationForest` +
 `StandardScaler`, e escreve:
 
-- `scripts/models/isolation_forest.pkl` + `scaler.pkl` — não
-  versionados (`.gitignore`); o endpoint `/api/ml-anomalies` devolve
-  `503` até estes existirem.
-- `scripts/ml_training_report.json` — este é committed.
+- `models/vN/` + `metadata.json` + `ACTIVE` com SHA-256 verificado;
+  os `.pkl` soltos (`isolation_forest.pkl`, `scaler.pkl`) são o
+  modelo legado. `--models-dir` indica a pasta (p.e. `models/`),
+  `--dataset-origin {real,synthetic,unknown}` é obrigatório (default:
+  `unknown`). `--report <ficheiro>` é opt-in; se não for usado, o
+  relatório fica gravado na `metadata.json` da versão treinada. Até
+  existirem, `GET /api/ml-anomalies` devolve `503`. Metodologia,
+  features e o ciclo de validação completo estão em
+  [`feature_extractor.py`](../scripts/feature_extractor.py).
 
 ## Resultados no fixture sintético (36 eventos, 5 ataques rotulados)
 
@@ -76,9 +81,15 @@ sessão futura, se o export também precisar de alimentar retreinos.
 
 De 500 alertas, **35 eventos eram processáveis** (timestamp + Event ID
 válidos), **20 rotulados `is_attack`** por correspondência de janela
-temporal. Resultado (`scripts/ml_training_report.json`, `caveat`
-dinâmico consoante o ficheiro de eventos usado — ver
-`train_anomaly_model.py`):
+temporal. **Nota de reprodutibilidade (2026-10-10).** Os números abaixo
+foram medidos em 2026-09-14 com o `attack_log.jsonl` **dessa** sessão.
+O log de ataques que existe hoje no repositório é de 2026-10-06 e não
+rotula a janela do dataset (`real_events_2026-09-14.json`, 2026-09-14
+15:22–15:34): avaliá-lo contra estes eventos dá 0 ataques e recall 0 por
+definição. O ficheiro de eventos ainda existe; o que não existe hoje é
+o log de ataques da mesma janela. Para repetir a medição com rótulo é
+Resultado (origin `--dataset-origin` declarado; `metadata.json` da versão
+treinada):
 
 | | Precisão | Recall | F1 |
 |---|---|---|---|

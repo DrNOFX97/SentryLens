@@ -24,7 +24,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R6 | Network SOC | ✅ | `network_monitor.py`, `network_detections.py` + `network_soc.py` (R6): 3 painéis reais (`GET /api/network/live-traffic[/detections/evidence]`); deteções de rede persistidas em JSONL (`history_store.append_network_detection_history`, resolve a dívida de R0); "PCAP/Evidence" é evidência de metadados, não PCAP real (sem payload capturado — ver `SECURITY.md`/`DATA_MODEL.md`) |
 | R7 | Detection Engine (`DetectionEvent`) | ✅ | `detection_event.py` (puro, 3 construtores) + `GET /api/detections` (vista unificada) + painel Detections (`detections.js`); `incident_engine.py`/`redblue_correlator.py` constroem sobre ele por dentro, sem mudar o contrato externo; `confidence` calibrado continua em dívida |
 | R8 | MTTD / MTTR / métricas | ✅ | `soc_metrics.py` (puro) + `GET /api/metrics` + 3 painéis (`metrics.js`: MTTD / MTTR, Detection Coverage, Detection Rate); mediana/p90/média, cobertura por cenário e técnica MITRE, taxa de deteção por fonte, FN/FP; definições formais em `DATA_MODEL.md`; `IncidentStore.list_for_metrics` (leitura) |
-| R9 | ML Intelligence | 🟡 | Isolation Forest + `feature_extractor` partilhado. **Em curso (branch `roadmap-v2-r9-ml-registry`):** desenho aprovado (registo versionado `models/vN` + `ACTIVE`, avaliação por versão, SHA-256 antes de carregar o `.pkl`, `GET /api/ml/models`, abas Models e Evaluation); GSD inicializado em `.planning/` (3 fases, 16 requisitos); **nenhum código do R9 escrito ainda**, próximo passo `/gsd-plan-phase 1` |
+| R9 | ML Intelligence | ✅ | Isolation Forest + `feature_extractor` partilhado. Registo versionado `models/vN` + `ACTIVE`, avaliação por versão, SHA-256 antes de carregar o `.pkl`, `GET /api/ml/models`, abas Models e Evaluation, `export_raw_events.py`, 38 ficheiros de teste |
 | R10 | ML Learning Loop | ⬜ | |
 | R11 | Vaccine Engine | ⬜ | |
 | R12 | Vaccine Lab | ⬜ | |
@@ -39,7 +39,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R21 | Resposta automática | ⬜ | Por defeito simulação/aprovação, com audit log |
 | R22 | Auditoria / segurança | ⬜ | Ver `SECURITY.md` |
 | R23 | Observabilidade | ⬜ | |
-| R24 | Testes | 🟡 | 17 ficheiros standalone existentes; sem pytest |
+| R24 | Testes | 🟡 | 38 ficheiros standalone; sem pytest |
 | R25 | Documentação | 🟡 | Atualizar a cada fase |
 
 ## R0 — correções aplicadas
@@ -76,6 +76,25 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 - Numeração: os planos antigos usam "Fase N"; este roadmap usa "R<n>".
 - Attack Registry (R4): só lê o log (sem rota de escrita; operador/esperado só à nascença via `attack_scenarios.py --operator/--source/--expect`); ataques sem `id` não ligam a incidentes; o esperado por omissão vem agora da Attack Library (R5) em vez de um default fixo no código (mesmo valor hoje, `["rule","ml"]`, por cenário); janela de alertas até 720 h e teto de 1000 alertas (`alerts_truncated`: ataques sem correspondência ficam `unknown`).
 - Attack Library (R5): só leitura, catálogo estático (`attack_library.yaml`); nenhuma automação liga `cleanup_steps` a uma execução real (ficam como checklist para o operador); sem versionamento de schema do YAML; risco (`low/medium/high`) decidido à mão por entrada, não calculado (a validação só rejeita incoerências flagrantes risco/replayable/cleanup); allowlist de alvos de `attack_scenarios.py` é fail-closed mas só cobre IPs/hostnames — não impede um alvo de documentação configurado incorretamente como "real" por engano; `attack_log_round3.jsonl` (achado lateral, formato antigo sem campo `scenario`) não é coberto pela biblioteca — ver ROUND3 em `.superpowers/sdd/r5-report.md`.
+- ML (R9): o SHA-256 do registo **não autentica** quem escreve em `models/` — quem escreve reescreve o `metadata.json`. O dataset de referência do primeiro ciclo real (2026-09-14) **não é rotulável** com o `attack_log.jsonl` actual (12 entradas, todas de 2026-10-06): avaliá-lo dá 0 ataques e recall 0 por definição. Qualquer avaliação a sério exige ataques lançados e alertas exportados na mesma janela.
 - Network SOC (R6): "PCAP/Evidence" é evidência de metadados das deteções (JSONL), nunca uma exportação PCAP/payload real — `network_monitor.py` só captura cabeçalhos tshark, não há payload para exportar (ruling explícito na spec, não uma lacuna por fazer); o JSONL de deteções cresce sem rotação/purga automática (mesma política — ou ausência dela — de `historico/` hoje); evidência só pagina "últimas N de um dia" (sem offset/paginação por página), suficiente para o laboratório mas não para consultar meses de histórico de uma vez; sem índice SQLite dedicado (ficou em JSONL simples, como os alertas antes de `history_index.py` — candidato a usar o mesmo padrão se o volume justificar).
 - Detection Engine (R7): painel Detections entregue (`detections.js`); `confidence` existe no tipo `DetectionEvent` mas nenhum dos 3 construtores o preenche ainda (`ml_score` do Isolation Forest não é uma probabilidade calibrada — inventar uma normalização seria enganador); `technique` por deteção individual também fica `None` (só existe ao nível da tentativa de ataque, em `redblue_correlator`); `GET /api/detections` não tem paginação por cursor (só `hours`/`limit`, mesmo nível de ambição que `/api/network/evidence` em R6); `incident_engine.py`/`redblue_correlator.py` continuam com os seus próprios shapes externos (evidência de incidente / "attempt" de correlação) em vez de `DetectionEvent` — decisão deliberada para não mudar contratos já consumidos pelo frontend/attack_registry.py nesta fase.
 - Métricas (R8): o fetch de alertas está limitado a 1000 (newest-first) — quando o teto é atingido (`alerts_truncated`), ataques antigos aparecem como não detetados e a taxa/MTTD/cobertura são limites inferiores (o painel avisa; o `/api/redblue/metrics` tem o mesmo limite). Corrigir de vez exige consultar o Indexer por intervalo de cada ataque. A taxa de FP só conta incidentes `NEW → CLOSED` com nota (a única verdade de base do laboratório) e só aparece com `METRICS_MIN_SAMPLE` (default 5) incidentes fechados; MTTD usa a deteção sinalizada mais cedo de qualquer fonte (um alerta correspondente mas não sinalizado por regra/ML não conta); sem tendência no tempo nem exportação para o relatório HTML (R19).
+
+## R9 — verificado por máquina / por verificar em humano
+
+**Verificado por máquina (execução automatizada, esta sessão):**
+- Suite completa `run_all_tests.py`: 39/39 testes verdes sem o laboratório Wazuh
+- SHA-256 recusado antes de qualquer `joblib.load` com contador a 0
+- IDs inválidos e `ACTIVE` partido recusados/fail-closed
+- `evaluate` grava na versão pedida e não na ativa
+- Versão treinada `vN` aparece na API e na aba Models
+- `next_version_id` é `max+1`, nunca `count()` (evita `PermissionError [WinError 5]`)
+
+**Por verificar em humano (pendente de execução real no dashboard):**
+- Abrir o dashboard e confirmar os badges e o detalhe por teclado
+- Reiniciar o backend depois de um `adopt` e confirmar o aviso
+- Exportar os eventos do Indexer com `export_raw_events.py` e fazer uma avaliação rotulada
+- Lançar os ataques e rotular a janela de 2026-09-14
+
+Enquanto esta lista não estiver vazia, o ✅ da tabela significa "o código está verificado por máquina", não "o analista viu".

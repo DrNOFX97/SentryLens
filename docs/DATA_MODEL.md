@@ -1,7 +1,7 @@
-# Modelo de dados (estado em 2026-10-07)
+# Modelo de dados (estado em 2026-10-10)
 
-Só o que já existe. Entidades do Roadmap v2 ainda por definir: Vaccine,
-Replay, Model (fases R9–R14). `DetectionEvent` (R7) já está definido — ver
+Só o que já existe. Entidades do Roadmap v2 já definidas: Vaccine,
+Replay, Model (R9). `DetectionEvent` (R7) já está definido — ver
 abaixo.
 
 ## `DetectionEvent` (R7) — `scripts/detection_event.py`
@@ -49,6 +49,44 @@ formas próprias (evidência de incidente, "attempt" de correlação); usam
 `detection_event.py` só como base de construção interna, sem mudar nada
 observável de fora (ver
 `docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md`).
+
+## Registo de modelo (R9)
+
+Layout em disco:
+```
+scripts/models/ACTIVE                           uma linha UTF-8, p.ex. "v1"
+scripts/models/vN/isolation_forest.pkl
+scripts/models/vN/scaler.pkl
+scripts/models/vN/metadata.json                   schema 1 (13 chaves)
+scripts/models/{isolation_forest,scaler}.pkl     o "legado": nunca movidos nem apagados
+```
+
+Schema do `metadata.json` (13 chaves: 12 públicas + `evaluation`):
+- `schema_version`: 1
+- `version`: nome da pasta (ex.: "v1")
+- `origin`: "trained" | "adopted"
+- `adopted`: booleano, True se for adoptado
+- `trained_at_estimated`: booleano, False se a data for conhecida
+- `trained_at`: ISO-8601 data do treino (apenas quando origin="trained")
+- `model_type`: "IsolationForest"
+- `parameters`: {contamination, random_state, n_estimators}
+- `dataset`: {name (só `Path(...).name`), size, attacks, synthetic (bool)}
+- `library_versions`: {python, scikit-learn, joblib, numpy}
+- `artifacts`: {`isolation_forest.pkl`: {"sha256": "..."}, `scaler.pkl`: {"sha256": "..."}}
+- `evaluation`: `null` ou objeto (preenchido após `model_registry.py evaluate vN`)
+- `METADATA_PUBLIC_KEYS`: 14 chaves projectadas para a API (`EVALUATION_PUBLIC_KEYS`)
+
+**Regras de validade:** teto de 64 KB, `schema_version == 1`, `version` igual ao nome da pasta, `artifacts` com uma entrada por nome de `ARTIFACT_FILES` com `sha256` a casar `[0-9a-fA-F]{64}` e `size_bytes` int ≥ 0, `evaluation` `null` ou objeto.
+
+**ArtifactSource:** `resolve_version_artifacts(models_dir, version_id)` lê e VERIFICA os dois `.pkl` de uma versão pedida. `ArtifactSource(version, verified, model_bytes, scaler_bytes)`.
+
+**Resposta de `GET /api/ml/models`:**
+- Versão ativa: devolve a versão apontada por `models/ACTIVE` com todos os metadados e estado de avaliação.
+- Histórico: lista todas as versões `vN` em `models/`, cada uma com o seu `metadata.json`.
+- Legado: quando apenas os `.pkl` soltos existem (sem `vN/` nem `ACTIVE`), devolve `active: "legacy"` com `origin: "adopted"` se adoptado, ou sem `origin` se ainda não há registo.
+- O `evaluation` só existe depois de `model_registry.py evaluate vN` — a versão treinada **nasce sem avaliação**.
+
+Desde que existe o registo, o `Model` do Roadmap já não está "por definir".
 
 ## Ataque — linha de `scripts/attack_log.jsonl`
 
