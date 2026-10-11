@@ -1376,6 +1376,15 @@ def run() -> None:
         test_resolve_version_artifacts(raiz)
         test_write_evaluation(raiz)
         test_cli_evaluate(raiz)
+        # Estas quatro Sections foram escritas DEPOIS do `run()` e nunca foram
+        # ligadas a ele: o ficheiro passou 38/38 sem nunca as executar. É a
+        # mesma lição de `model_registry.register_trained_version` (escrito e
+        # "testado", sem caller) um nível acima — uma secção de teste que o
+        # runner não chama também não está testada.
+        test_next_version_id(raiz)
+        test_build_trained_metadata(raiz)
+        test_register_trained_version(raiz)
+        _library_versions_pin()
 
     print()
     if failures:
@@ -1393,13 +1402,17 @@ def test_next_version_id(tmp: Path) -> None:
     "Testa next_version_id nas oito situações esperadas (D-02)."
     import model_registry as mr
 
-    root = tmp / "reg01"
+    # Pasta PRÓPRIA. Esta secção nunca correu até agora (o `run()` ficou acima
+    # dela, sem a chamar) e ao ser ligada passava a partilhar `tmp/"reg01"` com
+    # `test_reg01`, que lá deixa versões: o caso 5 lia um directório sujo e
+    # falhava por uma razão que não tem a ver com o que está a testar.
+    root = tmp / "next_version_id"
+    root.mkdir(parents=True, exist_ok=True)
 
     # 1. pasta inexistente -> v1
-    check(f"next_version_id inexistente -> v1", mr.next_version_id(str(root)) == "v1")
+    check(f"next_version_id inexistente -> v1", mr.next_version_id(str(tmp / "nao-existe")) == "v1")
 
     # 2. pasta vazia -> v1
-    root.mkdir(parents=True, exist_ok=True)
     check(f"next_version_id vazia -> v1", mr.next_version_id(str(root)) == "v1")
 
     # 3. apenas v1 -> v2
@@ -1411,17 +1424,26 @@ def test_next_version_id(tmp: Path) -> None:
     check(f"next_version_id v1+v2 -> v3", mr.next_version_id(str(root)) == "v3")
 
     # 5. v1 e v3, v2 APAGADA -> v4 (count faria v3; max+1 -> v4)
+    #    A v3 TEM de existir em disco: o caso 4 só perguntou qual seria a
+    #    resposta, não a materializou. Sem esta pasta, `max` era 2 e a
+    #    resposta vinha `v3` — a asserção media o setup errado, não a função.
     import shutil
+    (root / "v3").mkdir(parents=True, exist_ok=True)
     shutil.rmtree(root / "v2", ignore_errors=True)
     check(f"next_version_id v1+v3 sem v2 -> v4", mr.next_version_id(str(root)) == "v4")
 
     # 6. v9999 -> ModelRegistryError invalid_version_id
+    #    O `v9999` fica NO DISCO de propósito (é o que provoca o overflow) e
+    #    é removido logo a seguir: com ele presente, os casos 7 e 8 dariam
+    #    `v10000`, que viola o regex — e a falha apareceria como "o ficheiro
+    #    v7 nao e ignorado" quando o que esta a falhar e o residuo do caso 6.
     (root / "v9999").mkdir(parents=True, exist_ok=True)
     try:
         mr.next_version_id(str(root))
         check("next_version_id v9999 -> invalida falha", False)
     except model_registry.ModelRegistryError as exc:
         check(f"next_version_id v9999 -> invalid_version_id ({exc})", True)
+    shutil.rmtree(root / "v9999", ignore_errors=True)
 
     # 7. ignorar ficheiro chamado v7 (não casa is_dir)
     (root / "v7").touch()
@@ -1514,13 +1536,37 @@ def test_register_trained_version(tmp: Path) -> None:
     import json
     from pathlib import Path
 
-    root = tmp / "reg01"
+    # Pasta PRÓPRIA (a versão anterior partilhava `tmp/"reg01"` com
+    # `test_reg01`, que lá deixa v1/v2 — por isso esta secção, quando finalmente
+    # passa a correr, esperava `v2` e recebia outra coisa).
+    root = tmp / "register_trained_version"
     root.mkdir(parents=True, exist_ok=True)
 
-    # Criar v1 legacy primeiro
-    (root / "isolation_forest.pkl").write_bytes(b"legacy-model")
-    (root / "scaler.pkl").write_bytes(b"legacy-scaler")
+    # v1 ADOTADA primeiro: o caminho feliz deste teste é "treinar por cima de
+    # um registo que já tem uma v1 activa", e é isso que faz o
+    # `next_version_id` devolver v2. A versão anterior escrevia `ACTIVE=v1`
+    # sem existir a pasta v1 — um estado que o registo nunca produz e que
+    # fazia o `next_version_id` devolver v1.
+    v1 = root / "v1"
+    v1.mkdir(parents=True, exist_ok=True)
+    (v1 / "isolation_forest.pkl").write_bytes(b"legacy-model")
+    (v1 / "scaler.pkl").write_bytes(b"legacy-scaler")
     (root / "ACTIVE").write_bytes(b"v1\n")
+    (v1 / "metadata.json").write_text(json.dumps({
+        "schema_version": 1,
+        "version": "v1",
+        "origin": "adopted",
+        "adopted": True,
+        "created_at": "2026-10-11T00:00:00+00:00",
+        "trained_at": "2026-10-11T00:00:00+00:00",
+        "trained_at_estimated": True,
+        "model_type": "IsolationForest",
+        "parameters": None,
+        "dataset": {"name": None, "size": None, "attacks": None, "synthetic": None},
+        "library_versions": None,
+        "artifacts": {},
+        "evaluation": None,
+    }), encoding="utf-8")
 
     # Pastas fora do registo com .pkl arbitrários (sources)
     tmp_sources = tmp / "sources"
@@ -1608,6 +1654,9 @@ def test_register_trained_version(tmp: Path) -> None:
 def _library_versions_pin() -> None:
     "Fecha a costura: library_versions tem de ser exatamente estes 4 nomes (teste de regressão)."
     import model_registry as mr
+
+    # Esta função não recebe `tmp` (não toca no disco) e por isso é a única
+    # que o `run()` chama sem argumento.
 
     expected = {"python", "scikit-learn", "joblib", "numpy"}
     meta = mr.build_trained_metadata(
