@@ -44,7 +44,7 @@ Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
 - Integer phases (12, 13, 14): Planned milestone work (a numeração continua a do v1.0, que acabou na Phase 11)
 - Decimal phases (12.1, 12.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 12: Motor de vaccines** - Motor puro: que ataques geram vaccine, regra proposta, origem rastreável, id determinístico e "Sem dados" honesto
+- [x] **Phase 12: Motor de vaccines** - Motor puro: que ataques geram vaccine, regra proposta, origem rastreável, id determinístico e "Sem dados" honesto (completed 2026-10-12)
 - [ ] **Phase 13: Store e API de leitura** - Vaccines persistidas com estado fixo `proposed`, `GET /api/vaccines[/{id}]` com API key e códigos de erro estáveis
 - [ ] **Phase 14: Aba Vaccines, testes e documentação** - `vaccines.js` com filtros e detalhe, suite completa verde e docs a refletir o R11
 
@@ -62,7 +62,7 @@ Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
   3. Cada vaccine liga à origem — `attack_id`, cenário, técnica MITRE, incidentes e evidência por referência (nunca cópia de payload) — e tem um id determinístico: correr o motor duas vezes sobre os mesmos ataques dá os mesmos ids e nenhum duplicado.
   4. Sem amostra (nenhum ataque lançado) ou com uma fonte indisponível, o motor devolve "Sem dados" ou um código estável; nunca fabrica uma vaccine para encher a lista.
 
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -118,6 +118,6 @@ Phases execute in numeric order: 12 → 13 → 14
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 12. Motor de vaccines | v1.1 | 3/3 | In Progress|  |
+| 12. Motor de vaccines | v1.1 | 3/3 | Complete    | 2026-10-12 |
 | 13. Store e API de leitura | v1.1 | 0/TBD | Not started | - |
 | 14. Aba Vaccines, testes e documentação | v1.1 | 0/TBD | Not started | - |
