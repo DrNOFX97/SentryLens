@@ -1538,7 +1538,13 @@ def _cmd_train(args) -> int:
             dataset_name=eventos.name,
             dataset_size=len(feature_rows),
             dataset_attacks=attacks,
-            synthetic=(args.dataset_origin == "synthetic"),
+            # Tri-estado, não booleano: `dataset.synthetic` distingue
+            # "sintético" de "real" de "não declarado" (é o mesmo contrato que
+            # `adopt` escreve como `None` e que `ml_evaluation` consome). Com
+            # `== "synthetic"` o default `unknown` caía em `False`, e um treino
+            # sobre o fixture sintético ficava atestado em `synthetic: false`
+            # — o metadata.json a afirmar que os dados eram reais.
+            synthetic={"synthetic": True, "real": False}.get(args.dataset_origin),
             library_versions=library_versions_pt(),
         )
     except ModelRegistryError as exc:

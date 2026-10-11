@@ -143,8 +143,14 @@ def main() -> None:
     save_model(model, scaler, models_dir)
 
     report = evaluate(feature_rows, model, scaler, dataset_origin=args.dataset_origin)
-    with open(args.report, "w", encoding="utf-8") if args.report else None as handle:
-        if args.report:
+    # `--report` é opt-in. A versão anterior escrevia isto como
+    # `with open(...) if args.report else None as handle:` — que é `with None`
+    # quando a flag falta, e rebentava com TypeError DEPOIS de treinar e gravar
+    # os dois `.pkl`. O comando devolvia 1 com o trabalho feito e nenhum erro
+    # que explicasse o caminho. Nenhum teste o apanhava porque toda a gente
+    # passava `--report`.
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as handle:
             json.dump(report, handle, ensure_ascii=False, indent=2)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
