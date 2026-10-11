@@ -189,8 +189,168 @@ def run_tracer() -> None:
     check("VAC-02: a substituição foi restaurada no fim do with", attack_registry.get_expected_sensors is original)
 
 
+def make_attack(attack_id, verdict, expected, achieved, scenario="smb_enum", event_ids=(5140, 5145),
+                duplicate_id=False, expected_source="scenario_default", correlation_reason=None) -> dict:
+    """Dict com a mesma forma de um ataque de build_attack_registry."""
+    return {
+        "id": attack_id,
+        "duplicate_id": duplicate_id,
+        "timestamp": ts(100),
+        "scenario": scenario,
+        "mitre_tactic": "Discovery",
+        "mitre_technique": "T1135",
+        "expected": {"detection": list(expected), "source": expected_source, "event_ids": list(event_ids)},
+        "actual": {"verdict": verdict, "correlation_reason": correlation_reason, "achieved": list(achieved)},
+        "evidence": {"matched_event_ids": [], "matched_alert_count": 0, "network_detection_types": [],
+                     "incident_count": 0},
+        "incidents": [],
+    }
+
+
+def invariant_holds(out: dict) -> bool:
+    """Cada ataque partial/not_detected acaba numa vaccine ou num motivo de skipped."""
+    c = out["considered"]
+    return c["partial"] + c["not_detected"] == out["total"] + sum(out["skipped"].values())
+
+
+def run_selection() -> None:
+    build = vaccine_engine.build_vaccine_candidates
+
+    # Truncagem de alertas: o unknown por truncagem nunca gera.
+    reg_tr = attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS, alerts_truncated=True)
+    out_tr = build(reg_tr)
+    check("selecao: truncado -> só o ataque 3 (partial) gera",
+          [v["origin"]["attack_id"] for v in out_tr["vaccines"]] == [3])
+    check("selecao: truncado -> 2 unknown, alerts_truncated True, reason None",
+          out_tr["considered"]["unknown"] == 2 and out_tr["alerts_truncated"] is True and out_tr["reason"] is None)
+    check("selecao: truncado -> invariante", invariant_holds(out_tr))
+    out_tr_arg = build(attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS),
+                       correlation={"alerts_truncated": True})
+    check("selecao: correlation.alerts_truncated True também marca o resultado", out_tr_arg["alerts_truncated"] is True)
+
+    # Correlação indisponível: tudo unknown, nada gera.
+    reg_off = attack_registry.build_attack_registry(ATTACKS, SCENARIOS, None, correlation_available=False)
+    out_off = build(reg_off)
+    check("selecao: correlação indisponível -> 0 vaccines, 4 unknown, reason None",
+          out_off["vaccines"] == [] and out_off["considered"]["unknown"] == 4 and out_off["reason"] is None)
+
+    # Matriz de vereditos à mão.
+    check("selecao: detected -> 0 vaccines", build({"attacks": [make_attack(1, "detected", ["rule"], ["rule"])]})["total"] == 0)
+    check("selecao: unknown -> 0 vaccines", build({"attacks": [make_attack(1, "unknown", ["rule"], [])]})["total"] == 0)
+    check("selecao: partial -> 1 vaccine", build({"attacks": [make_attack(1, "partial", ["rule", "ml"], ["rule"])]})["total"] == 1)
+    check("selecao: not_detected -> 1 vaccine", build({"attacks": [make_attack(1, "not_detected", ["rule"], [])]})["total"] == 1)
+    for bad in ("Not_Detected", "weird", 3):
+        out_bad = build({"attacks": [make_attack(1, bad, ["rule"], [])]})
+        check(f"selecao: veredito {bad!r} -> considered.invalid, sem vaccine",
+              out_bad["considered"]["invalid"] == 1 and out_bad["total"] == 0)
+
+    # D-04 pelo registo real: entradas hostis.
+    hostile = [
+        {"id": True, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(50), "status": "launched"},
+        {"id": 8, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(40), "status": "launched"},
+        {"id": 8, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(30), "status": "launched"},
+    ]
+    out_h = build(attack_registry.build_attack_registry(hostile, SCENARIOS, []))
+    check("D-04: id booleano -> skipped.no_attack_id", out_h["skipped"]["no_attack_id"] == 1)
+    check("D-04: todas as entradas com id repetido -> skipped.duplicate_id == 2", out_h["skipped"]["duplicate_id"] == 2)
+    check("D-04: hostis não geram nenhuma vaccine", out_h["total"] == 0 and invariant_holds(out_h))
+
+    old = [{"timestamp": ts(100), "scenario": "smb_enum", "target": ASSET, "tool": "netexec", "status": "launched"}]
+    out_old = build(attack_registry.build_attack_registry(old, SCENARIOS, []))
+    check("D-04: formato antigo sem id -> skipped.no_attack_id == 1, total 0",
+          out_old["skipped"]["no_attack_id"] == 1 and out_old["total"] == 0)
+
+    # Duplicado detetado pelo próprio motor (flag a False).
+    dup = build({"attacks": [make_attack(9, "not_detected", ["rule"], [], duplicate_id=False),
+                             make_attack(9, "not_detected", ["rule"], [], duplicate_id=False)]})
+    check("D-04: duplicado detetado pelo motor mesmo com duplicate_id False",
+          dup["skipped"]["duplicate_id"] == 2 and dup["total"] == 0 and invariant_holds(dup))
+    dup_flag = build({"attacks": [make_attack(9, "not_detected", ["rule"], [], duplicate_id=True)]})
+    check("D-04: flag duplicate_id True conta como duplicate_id", dup_flag["skipped"]["duplicate_id"] == 1)
+
+    # Ids inválidos.
+    bad_ids = [0, -1, "2", 2.0, 10 ** 12, None, True]
+    out_ids = build({"attacks": [make_attack(i, "not_detected", ["rule"], []) for i in bad_ids]})
+    check("D-04: ids 0, -1, '2', 2.0, 10**12, None, True -> skipped.no_attack_id",
+          out_ids["skipped"]["no_attack_id"] == len(bad_ids) and out_ids["total"] == 0 and invariant_holds(out_ids))
+
+    # D-01 / Pitfall 3.
+    p3 = build({"attacks": [make_attack(5, "partial", ["network"], ["rule"])]})
+    v = p3["vaccines"][0]
+    check("pitfall 3: esperado [network], atingido [rule] -> missing [network], nunca rule nem ml",
+          v["missing_sensors"] == ["network"] and [p["sensor"] for p in v["proposals"]] == ["network"]
+          and v["achieved"] == ["rule"])
+    full = build({"attacks": [make_attack(5, "partial", ["rule"], ["rule", "ml"])]})
+    check("selecao: partial com atingido a cobrir o esperado -> skipped.no_missing_sensors",
+          full["skipped"]["no_missing_sensors"] == 1 and full["total"] == 0 and invariant_holds(full))
+
+    # Sem event_ids válidos.
+    for bad_events in ([], [True, "x"]):
+        out_ne = build({"attacks": [make_attack(5, "not_detected", ["rule"], [], event_ids=bad_events)]})
+        check(f"selecao: not_detected rule com event_ids {bad_events!r} -> skipped.no_event_ids",
+              out_ne["skipped"]["no_event_ids"] == 1 and out_ne["total"] == 0 and invariant_holds(out_ne))
+    out_ml = build({"attacks": [make_attack(5, "not_detected", ["ml"], [], event_ids=[])]})
+    check("selecao: esperado [ml] com event_ids [] gera na mesma (a proposta rule não é precisa)",
+          out_ml["total"] == 1 and out_ml["skipped"]["no_event_ids"] == 0)
+
+    # Origem inválida.
+    for bad_scenario in ("../etc", "", None):
+        out_sc = build({"attacks": [make_attack(5, "not_detected", ["rule"], [], scenario=bad_scenario)]})
+        check(f"selecao: scenario {bad_scenario!r} -> skipped.invalid_origin",
+              out_sc["skipped"]["invalid_origin"] == 1 and out_sc["total"] == 0 and invariant_holds(out_sc))
+
+    # event_ids sujos.
+    out_ev = build({"attacks": [make_attack(5, "not_detected", ["rule"], [], event_ids=[5140, True, "5145", 5140, -1])]})
+    check("selecao: event_ids [5140, True, '5145', 5140, -1] -> [5140]",
+          out_ev["vaccines"][0]["proposals"][0]["rule"]["event_ids"] == [5140])
+
+    # Evolução do id (D-03).
+    evo_partial = build({"attacks": [make_attack(2, "partial", ["rule", "ml"], ["rule"])]})["vaccines"][0]
+    evo_none = build({"attacks": [make_attack(2, "not_detected", ["rule", "ml"], [])]})["vaccines"][0]
+    check("D-03: partial (missing ml) -> vac-ed793c0b3437", evo_partial["id"] == "vac-ed793c0b3437")
+    check("D-03: not_detected (missing rule+ml) -> vac-5fe3861aa2a3", evo_none["id"] == "vac-5fe3861aa2a3")
+    check("D-03: partial para not_detected muda o id", evo_partial["id"] != evo_none["id"])
+
+    # Determinismo.
+    reg = attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS)
+    first, second = build(reg), build(reg)
+    check("determinismo: duas corridas dão resultado igual", first == second)
+    reg_rev = {"attacks": list(reversed(reg["attacks"])), "skipped": reg["skipped"]}
+    check("determinismo: lista de ataques invertida dá o mesmo resultado", build(reg_rev) == first)
+    ids = [x["id"] for x in first["vaccines"]]
+    check("determinismo: ids únicos", len(set(ids)) == len(ids))
+
+    # Cópia defensiva.
+    snapshot = copy.deepcopy(reg)
+    victim = build(reg)
+    for vac in victim["vaccines"]:
+        vac["expected"].append("x")
+        vac["achieved"].append("x")
+        vac["missing_sensors"].append("x")
+        vac["origin"]["incident_ids"].append("x")
+        vac["origin"]["evidence"]["matched_event_ids"].append(1)
+        for prop in vac["proposals"]:
+            if prop["rule"]:
+                prop["rule"]["event_ids"].append(1)
+    check("copia defensiva: mutar a vaccine não altera o registo", reg == snapshot)
+    check("copia defensiva: nova corrida não herda a mutação", build(reg) == first)
+
+    # Malformado.
+    junk = build({"attacks": ["lixo", None, 5, [1], {"actual": None}, {"actual": {"verdict": 3}}, {}]})
+    check("malformado: 7 entradas inválidas, sem exceção, total 0",
+          junk["considered"]["invalid"] == 7 and junk["considered"]["attacks"] == 7 and junk["total"] == 0)
+    for odd in (None, {}, {"attacks": None}, {"attacks": "x"}, "x", 5):
+        out_odd = build(odd)
+        check(f"malformado: registo {odd!r} -> resultado vazio sem exceção",
+              out_odd["total"] == 0 and out_odd["considered"]["attacks"] == 0 and set(out_odd) == vaccine_engine.RESULT_KEYS)
+
+    # Invariante nos resultados reais.
+    check("invariante: registo das fixtures", invariant_holds(first))
+
+
 if __name__ == "__main__":
     run_tracer()
+    run_selection()
     print()
     if failures:
         print(f"{len(failures)} falha(s):")

@@ -153,6 +153,15 @@ def build_vaccine_candidates(registry, correlation=None) -> dict:
     truncated = isinstance(correlation, dict) and correlation.get("alerts_truncated") is True
     vaccines: list[dict] = []
 
+    # Pré-passagem: ids repetidos (qualquer veredito, como o registo faz). Uma
+    # entrada é duplicada pela flag do registo ou por o seu id aparecer mais
+    # de uma vez, por isso "nenhum duplicado gera" vale por construção.
+    id_counts: dict[int, int] = {}
+    for attack in attacks:
+        entry_id = normalize_attack_id(attack.get("id")) if isinstance(attack, dict) else None
+        if entry_id is not None:
+            id_counts[entry_id] = id_counts.get(entry_id, 0) + 1
+
     for attack in attacks:
         actual = _as_dict(attack).get("actual") if isinstance(attack, dict) else None
         verdict = actual.get("verdict") if isinstance(actual, dict) else None
@@ -165,14 +174,29 @@ def build_vaccine_candidates(registry, correlation=None) -> dict:
         if verdict not in GENERATING_VERDICTS:
             continue
 
+        # D-04: cada ataque gerador acaba numa vaccine ou num motivo contado.
         attack_id = normalize_attack_id(attack.get("id"))
         if attack_id is None:
+            skipped["no_attack_id"] += 1
+            continue
+        if attack.get("duplicate_id") is True or id_counts.get(attack_id, 0) > 1:
+            skipped["duplicate_id"] += 1
+            continue
+        scenario = attack.get("scenario")
+        if not isinstance(scenario, str) or not SCENARIO_RE.match(scenario):
+            skipped["invalid_origin"] += 1
             continue
         expected_block = _as_dict(attack.get("expected"))
         expected = _sensors(expected_block.get("detection"))
         achieved = _sensors(actual.get("achieved"))
         missing = [s for s in EXPECTED_SOURCES if s in expected and s not in achieved]  # D-01
+        if not missing:
+            skipped["no_missing_sensors"] += 1
+            continue
         event_ids = _positive_ints(expected_block.get("event_ids"))
+        if "rule" in missing and not event_ids:
+            skipped["no_event_ids"] += 1
+            continue
         source = expected_block.get("source")
         vaccines.append({
             "id": vaccine_id(attack_id, missing),
