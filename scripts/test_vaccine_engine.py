@@ -226,7 +226,7 @@ def run_selection() -> None:
           out_tr["considered"]["unknown"] == 2 and out_tr["alerts_truncated"] is True and out_tr["reason"] is None)
     check("selecao: truncado -> invariante", invariant_holds(out_tr))
     out_tr_arg = build(attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS),
-                       correlation={"alerts_truncated": True})
+                       correlation={"available": True, "alerts_truncated": True})
     check("selecao: correlation.alerts_truncated True também marca o resultado", out_tr_arg["alerts_truncated"] is True)
 
     # Correlação indisponível: tudo unknown, nada gera.
@@ -342,8 +342,9 @@ def run_selection() -> None:
           junk["considered"]["invalid"] == 7 and junk["considered"]["attacks"] == 7 and junk["total"] == 0)
     for odd in (None, {}, {"attacks": None}, {"attacks": "x"}, "x", 5):
         out_odd = build(odd)
-        check(f"malformado: registo {odd!r} -> resultado vazio sem exceção",
-              out_odd["total"] == 0 and out_odd["considered"]["attacks"] == 0 and set(out_odd) == vaccine_engine.RESULT_KEYS)
+        check(f"malformado: registo {odd!r} -> source_unavailable sem exceção (nada medido, considered None)",
+              out_odd["total"] == 0 and out_odd["considered"] is None and out_odd["reason"] == "source_unavailable"
+              and set(out_odd) == vaccine_engine.RESULT_KEYS)
 
     # Invariante nos resultados reais.
     check("invariante: registo das fixtures", invariant_holds(first))
@@ -507,10 +508,99 @@ def run_contract() -> None:
     check(f"AST: sem open/print/input/eval/exec/compile/__import__ {bad_calls}", not bad_calls)
 
 
+def run_honesty() -> None:
+    build = vaccine_engine.build_vaccine_candidates
+    reasons = {None, "no_data", "source_unavailable"}
+    results: list[tuple[str, dict]] = []
+
+    def result(label: str, out: dict) -> dict:
+        results.append((label, out))
+        return out
+
+    def is_unavailable(out: dict) -> bool:
+        return (set(out) == vaccine_engine.RESULT_KEYS and out["available"] is False
+                and out["reason"] == "source_unavailable" and out["vaccines"] == [] and out["total"] == 0
+                and out["considered"] is None and out["skipped"] is None and out["alerts_truncated"] is None)
+
+    reg_ok = attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS)
+    tracer_out = build(reg_ok)
+    check("honestidade: REASONS == ('no_data', 'source_unavailable')",
+          vaccine_engine.REASONS == ("no_data", "source_unavailable"))
+
+    # Fonte do registo inexistente ou malformada.
+    for odd in (None, "lixo", 5, [], {}, {"attacks": None}, {"attacks": "x"}):
+        out = result(f"registo {odd!r}", build(odd))
+        check(f"honestidade: registo {odd!r} -> source_unavailable com contagens None", is_unavailable(out))
+
+    # Correlação indisponível: nunca "ataque não detetado".
+    reg_off = attack_registry.build_attack_registry(ATTACKS, SCENARIOS, None, correlation_available=False)
+    corr_down = {"available": False, "alerts_truncated": False, "error_code": "indexer_unavailable"}
+    out_down = result("reg_off+correlation", build(reg_off, corr_down))
+    check("honestidade: correlação em baixo -> source_unavailable", is_unavailable(out_down))
+    check("honestidade: error_code da correlação não é copiado", "indexer_unavailable" not in json.dumps(out_down))
+    out_down_ok = result("registo normal+correlation off", build(reg_ok, {"available": False}))
+    check("honestidade: registo com not_detected + correlation available False -> source_unavailable, 0 vaccines",
+          is_unavailable(out_down_ok))
+    check("honestidade: o registo normal tem mesmo ataques not_detected",
+          any(a["actual"]["verdict"] == "not_detected" for a in reg_ok["attacks"]))
+    for odd in ("lixo", 5, {}, [], {"alerts_truncated": True}):
+        out = result(f"correlation {odd!r}", build(reg_ok, odd))
+        check(f"honestidade: correlation {odd!r} sem available=True -> source_unavailable", is_unavailable(out))
+    out_trunc = result("correlation truncada", build(reg_ok, {"available": True, "alerts_truncated": True}))
+    check("honestidade: correlation available True + truncada -> reason None, available True, alerts_truncated True",
+          out_trunc["reason"] is None and out_trunc["available"] is True and out_trunc["alerts_truncated"] is True)
+    check("honestidade: correlation available True -> as mesmas 3 vaccines do tracer",
+          out_trunc["vaccines"] == tracer_out["vaccines"] and out_trunc["total"] == 3)
+    out_none = result("correlation None", build(reg_ok, None))
+    check("honestidade: correlation None -> igual ao tracer (compatibilidade com o 12-01)", out_none == tracer_out)
+
+    # Sem amostra: no_data com zeros verdadeiros.
+    zero_considered = {"attacks": 0, "detected": 0, "partial": 0, "not_detected": 0, "unknown": 0, "invalid": 0}
+    zero_skipped = {reason: 0 for reason in vaccine_engine.SKIP_REASONS}
+    empty_sources = {
+        "attacks vazio + skipped": {"attacks": [], "skipped": {"unparseable": 0}},
+        "build_attack_registry([], ...)": attack_registry.build_attack_registry([], SCENARIOS, []),
+        "build_attack_registry(None, ...)": attack_registry.build_attack_registry(None, SCENARIOS, None),
+    }
+    for label, registry in empty_sources.items():
+        out = result(label, build(registry))
+        check(f"honestidade: {label} -> no_data, available False, 0 vaccines",
+              set(out) == vaccine_engine.RESULT_KEYS and out["available"] is False and out["reason"] == "no_data"
+              and out["vaccines"] == [] and out["total"] == 0)
+        check(f"honestidade: {label} -> considered e skipped com zeros verdadeiros (não None)",
+              out["considered"] == zero_considered and out["skipped"] == zero_skipped)
+        check(f"honestidade: {label} -> alerts_truncated False", out["alerts_truncated"] is False)
+    out_empty_trunc = build({"attacks": []}, {"available": True, "alerts_truncated": True})
+    check("honestidade: no_data com correlation truncada propaga alerts_truncated True",
+          out_empty_trunc["reason"] == "no_data" and out_empty_trunc["alerts_truncated"] is True)
+    out_empty_down = result("attacks vazio + fonte em baixo", build({"attacks": []}, {"available": False}))
+    check("honestidade: lista vazia com fonte em baixo -> source_unavailable, nunca no_data",
+          is_unavailable(out_empty_down))
+
+    # Tudo unknown: terceiro resultado.
+    out_unknown = result("tudo unknown", build(reg_off))
+    check("honestidade: tudo unknown -> reason None, available True, total 0",
+          out_unknown["reason"] is None and out_unknown["available"] is True and out_unknown["total"] == 0
+          and out_unknown["vaccines"] == [])
+    check("honestidade: tudo unknown -> considered.unknown == 4",
+          out_unknown["considered"] is not None and out_unknown["considered"]["unknown"] == 4)
+    check("honestidade: tudo unknown é distinto de no_data e de source_unavailable",
+          out_unknown["reason"] not in ("no_data", "source_unavailable"))
+
+    # Todos os resultados do ficheiro.
+    check("honestidade: reason sempre em {None, no_data, source_unavailable}",
+          all(out["reason"] in reasons for _, out in results))
+    check("honestidade: invariante do 12-01 sempre que considered não é None",
+          all(invariant_holds(out) for _, out in results if out["considered"] is not None))
+    check("honestidade: nenhum resultado sem amostra traz vaccines",
+          all(out["vaccines"] == [] for _, out in results if out["reason"] in ("no_data", "source_unavailable")))
+
+
 if __name__ == "__main__":
     run_tracer()
     run_selection()
     run_contract()
+    run_honesty()
     print()
     if failures:
         print(f"{len(failures)} falha(s):")

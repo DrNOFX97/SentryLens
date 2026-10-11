@@ -38,6 +38,7 @@ from attack_registry import EXPECTED_SOURCES, VERDICTS, normalize_attack_id
 from event_catalog import classify_alert
 from redblue_correlator import DEFAULT_WINDOW_SECONDS
 
+REASONS = ("no_data", "source_unavailable")  # VAC-04: códigos de `reason` (None = há ataques)
 GENERATING_VERDICTS = ("not_detected", "partial")  # D-02: só estes geram vaccine
 MIN_COUNT = 1  # D-06: uma ocorrência dentro da janela basta para a regra proposta
 
@@ -147,15 +148,50 @@ def _build_origin(attack_id: int, attack: dict) -> dict:
     }
 
 
+def _envelope(reason: str, truncated: bool = False) -> dict:
+    """Resultado sem vaccines. `source_unavailable`: nada foi medido, por isso
+    considered/skipped/alerts_truncated ficam a None (nunca zeros inventados).
+    `no_data`: a fonte respondeu e não há ataques, por isso os zeros são
+    verdadeiros. Nunca leva texto de exceção nem o error_code da correlação."""
+    measured = reason == "no_data"
+    envelope = {
+        "available": False,
+        "reason": reason,
+        "vaccines": [],
+        "total": 0,
+        "considered": {"attacks": 0, "detected": 0, "partial": 0, "not_detected": 0, "unknown": 0, "invalid": 0}
+        if measured else None,
+        "skipped": {r: 0 for r in SKIP_REASONS} if measured else None,
+        "alerts_truncated": truncated if measured else None,
+    }
+    return envelope
+
+
 def build_vaccine_candidates(registry, correlation=None) -> dict:
     """Uma vaccine por ataque not_detected/partial do registo (D-02), do id de
     ataque mais alto para o mais baixo. `unknown` (incluindo o unknown por
-    truncagem de alertas e por correlação indisponível) nunca gera."""
+    truncagem de alertas e por correlação indisponível) nunca gera.
+
+    Três resultados distintos (VAC-04), `reason` em {None, no_data, source_unavailable}:
+    - source_unavailable: registo ausente/malformado, ou `correlation` passada
+      sem available=True. available=False, considered/skipped/alerts_truncated
+      None. Fail-closed: uma fonte em baixo nunca vira "ataque não detetado".
+    - no_data: fonte disponível mas lista de ataques vazia. available=False,
+      zeros verdadeiros. A UI (Phase 14) desenha o rótulo "Sem dados" a partir
+      deste código; o motor devolve só o código estável.
+    - reason None: há ataques; available=True, mesmo que não saia nenhuma
+      vaccine (por exemplo tudo unknown ou tudo detected)."""
+    # VAC-04: nunca inventa. Fonte não confirmada ou sem amostra -> código estável.
+    if correlation is not None and not (isinstance(correlation, dict) and correlation.get("available") is True):
+        return _envelope("source_unavailable")  # D-02: fail-closed, antes de olhar para vereditos
     attacks = _as_dict(registry).get("attacks")
-    attacks = attacks if isinstance(attacks, list) else []
+    if not isinstance(attacks, list):
+        return _envelope("source_unavailable")
+    truncated = isinstance(correlation, dict) and correlation.get("alerts_truncated") is True
+    if not attacks:
+        return _envelope("no_data", truncated=truncated)  # aqui o zero é verdadeiro: sabemos que não há ataques
     considered = {"attacks": len(attacks), "detected": 0, "partial": 0, "not_detected": 0, "unknown": 0, "invalid": 0}
     skipped = {reason: 0 for reason in SKIP_REASONS}
-    truncated = isinstance(correlation, dict) and correlation.get("alerts_truncated") is True
     vaccines: list[dict] = []
 
     # Pré-passagem: ids repetidos (qualquer veredito, como o registo faz). Uma
