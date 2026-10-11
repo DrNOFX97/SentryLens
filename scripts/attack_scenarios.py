@@ -12,6 +12,12 @@ Cada cenário lançado escreve uma linha JSON no log de ataques
 tarde para atribuir o rótulo verdadeiro is_attack aos eventos do Wazuh
 por correspondência de timestamp.
 
+Cada linha escrita por run_scenario leva um `id` inteiro (max+1 sobre os ids
+válidos já no log, ver next_attack_id): é por ele que um ataque not_detected ou
+partial chega a uma vaccine rastreável (Phase 12, VAC-03). As entradas antigas
+sem `id` nunca são reescritas (sem backfill) e um ataque sem `id` não gera
+vaccine (D-04).
+
 Uso:
     python attack_scenarios.py --list
     python attack_scenarios.py --target 192.0.2.20 --scenario brute_force_rdp
@@ -245,6 +251,76 @@ def _validated_expected(value: str) -> list[str]:
     return [s for s in EXPECTED_SOURCES if s in items]
 
 
+# Mesmo teto de attack_registry.normalize_attack_id e do padrão ^[0-9]{1,9}$ da
+# rota GET /api/attacks/{attack_id}. Este ficheiro não importa o registo (o
+# registo importa a biblioteca, que importa este ficheiro: import circular; e o
+# CLI corre sozinho na VM Kali), por isso a regra repete-se aqui e um teste de
+# paridade (test_attack_log_ids.py) garante que não diverge.
+MAX_ATTACK_ID = 999_999_999
+
+
+class AttackIdUnavailable(ValueError):
+    """Não foi possível atribuir um id ao ataque (log ilegível ou espaço de ids
+    esgotado). Fail-closed: nada é lançado nem escrito. A mensagem não traz o
+    caminho completo do log."""
+
+
+def valid_attack_id(raw) -> int | None:
+    """Id de ataque válido: int (nunca bool) entre 1 e MAX_ATTACK_ID; senão None.
+    Mesma regra de attack_registry.normalize_attack_id."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int) and 0 < raw <= MAX_ATTACK_ID:
+        return raw
+    return None
+
+
+def next_attack_id(log_path) -> int:
+    """Próximo id do attack log: o máximo dos ids válidos de TODAS as entradas
+    (qualquer status) mais 1, ou 1 se não houver nenhum. Nunca contagem+1: falhas
+    e ids repetidos (ou semeados à mão) fariam a contagem colidir com um id já
+    existente (mesmo motivo de model_registry.next_version_id). O parsing espelha
+    feature_extractor.load_attack_log (ignora linhas vazias, JSON partido e o que
+    não for objeto); ficheiro inexistente começa em 1. O log é relido antes de
+    cada cenário.
+
+    Escritor único (CLI corrido à mão), sem lock de ficheiro. Se dois processos
+    escreverem ao mesmo tempo e colidirem, o registo marca `duplicate_id` e o
+    motor de vaccines salta ambos (D-04): nunca atribui uma vaccine ao ataque
+    errado.
+
+    Levanta AttackIdUnavailable se o log não pode ser lido ou se o espaço de ids
+    está esgotado."""
+    name = Path(log_path).name
+    highest = 0
+    try:
+        with open(log_path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                entry_id = valid_attack_id(entry.get("id"))
+                if entry_id is not None and entry_id > highest:
+                    highest = entry_id
+    except FileNotFoundError:
+        return 1
+    except (OSError, UnicodeDecodeError) as exc:
+        raise AttackIdUnavailable(
+            f"não foi possível atribuir id ao ataque: log '{name}' ilegível ({type(exc).__name__})"
+        ) from None
+    if highest >= MAX_ATTACK_ID:
+        raise AttackIdUnavailable(
+            f"não foi possível atribuir id ao ataque: espaço de ids esgotado no log '{name}'"
+        )
+    return highest + 1
+
+
 def format_log_entry(
     scenario_name: str,
     target: str,
@@ -255,10 +331,14 @@ def format_log_entry(
     operator: str | None = None,
     source: str | None = None,
     expected: list[str] | None = None,
+    attack_id: int | None = None,
 ) -> dict:
     """Constrói a entrada de log (função pura, testável sem lançar ataques).
-    operator/source/expected (R4) são opcionais e só são gravados quando
-    fornecidos — o formato antigo não muda."""
+    operator/source/expected (R4) e attack_id são opcionais e só são gravados
+    quando fornecidos — o formato antigo não muda. attack_id inválido levanta
+    ValueError (nunca se grava um id que o registo rejeitaria)."""
+    if attack_id is not None and valid_attack_id(attack_id) is None:
+        raise ValueError(f"attack_id inválido: tem de ser int entre 1 e {MAX_ATTACK_ID}")
     timestamp = (now or datetime.now(timezone.utc)).isoformat()
     entry = {
         "timestamp": timestamp,
@@ -268,6 +348,8 @@ def format_log_entry(
         "status": status,
         "details": details or {},
     }
+    if attack_id is not None:
+        entry["id"] = attack_id
     if operator:
         entry["operator"] = operator
     if source:
@@ -285,9 +367,14 @@ def append_attack_log(entry: dict, log_path: Path = DEFAULT_LOG_PATH) -> None:
 def run_scenario(scenario: Scenario, args: argparse.Namespace, log_path: Path = DEFAULT_LOG_PATH) -> dict:
     """Lança o cenário. Defesa em profundidade (R5): mesmo chamado diretamente, um
     alvo fora da allowlist não lança nada — fica "skipped" no log, tal como a
-    falta de argumentos. allow_any_target (--allow-any-target) é o override explícito."""
+    falta de argumentos. allow_any_target (--allow-any-target) é o override explícito.
+
+    O id do ataque (next_attack_id) é atribuído antes de tudo, antes da allowlist
+    e do subprocess: fail-closed, sem id válido (AttackIdUnavailable) nada é
+    lançado nem escrito. Todas as entradas escritas aqui levam esse id."""
+    attack_id = next_attack_id(log_path)
     meta = {"operator": getattr(args, "operator", None), "source": getattr(args, "source", None),
-            "expected": getattr(args, "expect", None)}
+            "expected": getattr(args, "expect", None), "attack_id": attack_id}
 
     def _fmt(*a, **k):
         return format_log_entry(*a, **meta, **k)
