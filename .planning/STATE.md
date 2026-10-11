@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: R11 Vaccine Engine
 current_phase: 12
 current_phase_name: Motor de vaccines
-status: executing
-stopped_at: Completed 12-02-PLAN.md
-last_updated: "2026-10-11T23:03:41.471Z"
+status: verifying
+stopped_at: Completed 12-03-PLAN.md
+last_updated: "2026-10-11T23:09:54.970Z"
 last_activity: 2026-10-11
 last_activity_desc: Phase 12 execution started
-state_head: d432a2ee642c76ba1bac1862df787780e1424281
+state_head: 58d4518aab5d3c437f317c1157d2fcccbf602bbd
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-11)
 
 Phase: 12 (Motor de vaccines) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-11 — Phase 12 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 12 P01 | 4 min | 2 tasks | 2 files |
 | Phase 12 P02 | 5 min | 2 tasks | 2 files |
+| Phase 12 P03 | 6 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,7 @@ Recent decisions affecting current work:
 - [Phase 12]: D-03 fixado: vaccine id = vac- + 12 hex sha256('<attack_id>:<sensores em falta>'), literais golden no teste
 - [Phase 12]: D-07 refinado: uma vaccine por ataque com proposals[] por sensor em falta; so a proposta rule traz regra {event_ids,min_count=1,window_seconds=300}
 - [Phase 12]: 12-02: regex da origem com fullmatch; correlation sem available=True e source_unavailable (fail-closed); considered/skipped/alerts_truncated None quando nada foi medido
+- [Phase 12]: 12-03: id do attack log = int 1..999_999_999, max+1 sobre ids validos de qualquer status (nunca contagem+1); AttackIdUnavailable fail-closed antes de lancar e de escrever; sem backfill
 
 ### Pending Todos
 
@@ -90,8 +92,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-11T23:03:41.431Z
-Stopped at: Completed 12-02-PLAN.md
+Last session: 2026-10-11T23:09:54.918Z
+Stopped at: Completed 12-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
