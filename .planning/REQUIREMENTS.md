@@ -9,7 +9,7 @@ Uma *vaccine* é uma regra de deteção **proposta** a partir de um ataque não 
 
 ### Motor
 
-- [ ] **VAC-01**: O analista obtém candidatos a vaccine a partir do relatório Red vs Blue: ataques `not_detected` e `partial` geram candidato; `detected` e `unknown` nunca geram.
+- [x] **VAC-01**: O analista obtém candidatos a vaccine a partir do relatório Red vs Blue: ataques `not_detected` e `partial` geram candidato; `detected` e `unknown` nunca geram.
 - [ ] **VAC-02**: Cada vaccine traz a regra proposta (`event_ids`, janela, condição e sensor esperado) derivada de `attack_library`, `attack_scenarios` e `event_catalog`; nenhum campo contém um comando executável.
 - [ ] **VAC-03**: Cada vaccine liga à origem (`attack_id`, cenário, técnica MITRE, incidentes e evidência por referência) e tem id determinístico: reprocessar os mesmos ataques não cria duplicados.
 - [ ] **VAC-04**: Sem amostra ou com fonte indisponível, o motor devolve "Sem dados" ou um código estável; nunca inventa uma vaccine.
@@ -50,7 +50,7 @@ Preenchido na criação do roadmap (2026-10-11).
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VAC-01 | Phase 12 | Pending |
+| VAC-01 | Phase 12 | Complete |
 | VAC-02 | Phase 12 | Pending |
 | VAC-03 | Phase 12 | Pending |
 | VAC-04 | Phase 12 | Pending |
