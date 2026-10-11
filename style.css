@@ -832,3 +832,15 @@ tr.rb-stale td { font-style: italic; }
 .mle-origin-synthetic { background: #fdecc8; }
 .mle-origin-unknown { background: #e0e0e0; color: #666; }
 .mle-live-error { background: #f8d7da; }
+
+/* ===== Comparação vN vs vN−1 (R11) — ml_evaluation.js ===== */
+.mle-delta-up { color: #155724; font-weight: 600; }
+.mle-delta-down { color: #721c24; font-weight: 600; }
+.mle-delta-flat { color: #6c757d; font-weight: 600; }
+.mle-verdict { font-weight: 600; text-transform: capitalize; }
+
+/* ===== Resultado do treino (R10) — ml_models.js ===== */
+/* O mesmo âmbar do aviso e o mesmo vermelho do badge de erro.
+   A distinção que importa é "é preciso reiniciar" vs "falhou". */
+.mlm-train-reiniciar { background: #fdecc8; color: var(--ink-900); font-size: 12px; padding: 4px 8px; }
+.mlm-train-erro { background: #f8d7da; }

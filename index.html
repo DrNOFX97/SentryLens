@@ -566,15 +566,49 @@
         <p class="panel-note">
           Versões do modelo de ML registadas em <code>scripts/models/vN/</code> (metadados em
           <code>metadata.json</code>); a versão ativa é a indicada por <code>scripts/models/ACTIVE</code>.
-          Só leitura — adotar, treinar ou ativar uma versão é operação de CLI, nunca a partir do dashboard.
-          Depois de adotar ou treinar, reinicia o backend para ele passar a usar a nova versão
-          (o modelo fica em memória por processo).
+          O botão treina a partir do próprio dashboard e regista o resultado como uma versão
+          nova em <code>scripts/models/vN/</code>, com <code>metadata.json</code> e SHA-256,
+          apontando <code>ACTIVE</code> para ela. O dataset é escolhido pelo servidor
+          (export recente do Wazuh Indexer ou gerador sintético) — o pedido não leva
+          caminhos. Um treino demora alguns segundos e não há cancelamento: o servidor só
+          aceita um de cada vez. <strong>Depois de treinar é preciso reiniciar o backend</strong>
+          (<code>.\scripts\start-backend.ps1</code>): enquanto isso, as deteções continuam a
+          usar a versão anterior. Ativar uma versão já existente continua a não ter botão aqui.
         </p>
 
         <div class="filter-row">
           <button id="mlm-models-reload" type="button">Atualizar</button>
         </div>
         <div id="mlm-models-notice" class="panel-note" role="status"></div>
+
+        <div id="mlm-train-block">
+          <h3>Treinar uma versão nova</h3>
+          <p class="panel-note">
+            O botão treina a partir do próprio dashboard e regista o resultado como uma versão
+            nova em <code>scripts/models/vN/</code>, com <code>metadata.json</code> e SHA-256,
+            apontando <code>ACTIVE</code> para ela. O dataset é escolhido pelo servidor
+            (export recente do Wazuh Indexer ou gerador sintético) — o pedido não leva
+            caminhos. Um treino demora alguns segundos e não há cancelamento: o servidor só
+            aceita um de cada vez. <strong>Depois de treinar é preciso reiniciar o backend</strong>
+            (<code>.\scripts\start-backend.ps1</code>): enquanto isso, as deteções continuam a
+            usar a versão anterior. Ativar uma versão já existente continua a não ter botão aqui.
+          </p>
+          <div class="filter-row">
+            <label for="mlm-train-dataset">Dataset</label>
+            <select id="mlm-train-dataset">
+              <option value="latest_export" selected>Export recente do Indexer</option>
+              <option value="sample_fixture">Gerador sintético</option>
+            </select>
+            <label for="mlm-train-origin">Origem declarada</label>
+            <select id="mlm-train-origin">
+              <option value="real" selected>dados reais</option>
+              <option value="synthetic">dados sintéticos</option>
+              <option value="unknown">não declarada</option>
+            </select>
+            <button id="mlm-train-button" type="button">Treinar</button>
+          </div>
+          <div id="mlm-train-result" class="panel-note" role="status"></div>
+        </div>
 
         <div class="table-scroll">
           <table id="mlm-models-table">
@@ -653,6 +687,59 @@
               <tr><td colspan="6" class="empty-state">A carregar...</td></tr>
             </tbody>
           </table>
+        </div>
+
+        </div>
+
+        <!-- Comparação vN vs vN−1 (R11): derivada do que GET /api/ml/models já traz,
+             sem endpoint novo (D-07). Fica aqui, entre a tabela de versões e o
+             bloco ao vivo, dentro do MESMO section — assim o banner de erro de
+             renderPanelError aparece uma vez só. -->
+        <div id="mle-compare-block">
+          <h3>Comparação vN vs vN−1</h3>
+          <p class="panel-note">
+            Cada par compara a versão mais recente (vN) com a anterior (vN−1) por <strong>número de
+            versão</strong> — não por ordem na lista. Se uma versão não tem avaliação, a cadeia
+            pára nessa versão; não se salta para a seguinte em silêncio. O veredicto tem três
+            palavras («melhorou», «piorou», «estável») e usa um limiar de <strong>0,5 pp</strong>
+            (meio ponto percentual): um delta abaixo disso é «estável», nunca «melhorou».
+            Uma métrica ausente de um dos lados não é «piorou» — é «não comparável».
+          </p>
+          <div id="mle-compare-notice" class="panel-note" role="status"></div>
+          <div class="table-scroll">
+            <table id="mle-compare-table">
+              <thead>
+                <tr>
+                  <th>vN</th>
+                  <th>vN−1</th>
+                  <th>Lado</th>
+                  <th>Métrica</th>
+                  <th>Antes (vN−1)</th>
+                  <th>Depois (vN)</th>
+                  <th>Δ (pp)</th>
+                  <th>Veredicto</th>
+                </tr>
+              </thead>
+              <tbody id="mle-compare-body">
+                <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Feature stats (D-03): média e desvio de cada feature no LOTE de treino
+             — descrevem o lote, não o comportamento do modelo. O mesmo evento
+             pode mudar de feature (e de veredicto) conforme o lote que o acompanha. -->
+        <div id="mle-feature-stats-block">
+          <h3>Feature stats do lote de treino (D-03)</h3>
+          <p class="panel-note">
+            Estes números descrevem o <strong>lote de treino</strong> (média e desvio populacional
+            de cada feature no lote), <strong>não</strong> o comportamento do modelo. O mesmo evento
+            pode mudar de feature — e de veredicto anómalo/normal — conforme o lote que o
+            acompanha (medido: ~9,6 % dos eventos mudam de feature, ~8,7 % mudam de veredicto só
+            por isso). A resposta do projecto não é corrigir o skew — é declará-lo.
+          </p>
+          <div id="mle-feature-stats" class="panel-note" role="status"></div>
         </div>
 
         <!-- Concordância ao vivo: segundo pedido, ciclo de estados próprio. Fica

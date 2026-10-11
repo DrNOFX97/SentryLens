@@ -1,4 +1,4 @@
-// Aba "📐 Evaluation" (marco R9, Fase 2 — avaliação ligada à versão).
+// Aba "📐 Evaluation" (marco R9, Fase 2 — avaliação ligada à versão; R11: comparação vN vs vN−1).
 // Carregado DEPOIS de app.js e de ml_models.js: reutiliza os globais de
 // app.js (API_BASE, API_KEY, escapeHtml, renderPanelError) e os helpers puros
 // de ml_models.js (mlmErrorText, mlmCodeFromResponse) — não redeclara nenhum
@@ -16,7 +16,9 @@
 //   1. camada pura — sem DOM, sem fetch, devolve strings (mlePercent,
 //      mleMetricCell, mleBuildEvalRows, mleEvalNoticeText, mleOriginHtml,
 //      mleSmallSampleNotice, mleBuildLiveAgreement, mleLiveErrorHtml,
-//      mleEmptyState);
+//      mleEmptyState, mleVersionNumber, mleNumeradas, mleDeltaPontos,
+//      mleDeltaTexto, mleVeredicto, mleComparePairs, mleCompareRows,
+//      mleCompareNoticeText, mleFeatureStatsNotice, mleLiveModelText);
 //   2. camada DOM — só chamada a partir de mleInit().
 //
 // Nenhuma linha de topo toca em `document`: é o que permite ao teste Node
@@ -31,6 +33,11 @@
 // O bloco de concordância ao vivo faz o SEGUNDO pedido desta aba, a
 // /api/ml-anomalies (D-10). Os dois pedidos são independentes: uma falha de um
 // não apaga o que o outro já mostrou.
+//
+// A comparação vN vs vN−1 (R11) é derivada NO BROWSER do que GET /api/ml/models
+// já traz (cada versão já vem com a sua `evaluation`). Nenhum endpoint novo,
+// nenhuma chamada extra, nenhum segundo pedido — mleRefresh continua a fazer
+// exactamente os mesmos dois pedidos de antes (D-07).
 
 // ======================= camada pura (sem DOM) ==============================
 
@@ -41,6 +48,160 @@ const MLE_SEM_AVALIACAO =
 // Quantas colunas a tabela desenha. Uma linha de aviso ou de "Sem avaliação"
 // ocupa a largura toda, por isso o colspan é o mesmo número da tabela.
 const MLE_COLUNAS = 6;
+
+// --- Comparação vN vs vN-1 (R11) -----------------------------------------------
+//
+// A comparação é derivada NO BROWSER do que GET /api/ml/models já traz
+// (cada versão já vem com a sua `evaluation`). Nenhum endpoint novo,
+// nenhuma chamada extra, nenhum segundo pedido — mleRefresh continua
+// a fazer exactamente os mesmos dois pedidos de antes (D-07).
+//
+// O par comparado é sempre (vN, vN-1) por NÚMERO de versão, nunca por
+// ordem da lista nem por "as duas últimas": uma lista reordenada pelo
+// backend dá a mesma comparação, e uma versão sem avaliação interrompe
+// a cadeia em vez de ser saltada em silêncio.
+//
+// A palavra de veredicto é uma de três: "melhorou", "piorou", "estável" —
+// e sai de um limiar NOMEADO em pontos percentuais (MLE_DELTA_LIMIAR_PP),
+// ao jeito dos MIN_EVENTS/MIN_ATTACKS da Fase 2. Um delta abaixo do
+// limiar é "estável", nunca "melhorou".
+//
+// Uma métrica ausente num dos lados NÃO é "piorou": a célula fica "—",
+// o delta fica "—" e a leitura fica "—". Nunca se compara com um valor
+// inventado.
+//
+// D-03: quando metadata.dataset.feature_stats existe, a Evaluation mostra,
+// por feature, a média e o desvio **do lote de treino** e diz por escrito
+// que um evento pode mudar de feature — e de veredicto — conforme o lote.
+// Honestidade como funcionalidade; a forma do objecto que o backend
+// escrever tem de ser lida, não adivinhada.
+
+const MLE_DELTA_LIMIAR_PP = 0.5;   // limiar em pontos percentuais (ex.: 0.5 pp)
+
+function mleVersionNumber(id) {
+  if (typeof id !== "string") return null;
+  const m = id.match(/^v(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function mleNumeradas(versions) {
+  return (versions || [])
+    .filter((e) => e && e.kind !== "legacy" && mleVersionNumber(e.id) !== null)
+    .sort((a, b) => mleVersionNumber(b.id) - mleVersionNumber(a.id));
+}
+
+function mleDeltaPontos(a, b) {
+  if (a === null || b === null) return null;
+  return Math.round((b - a) * 1000) / 10; // b - a em pontos percentuais, 1 casa
+}
+
+function mleDeltaTexto(delta) {
+  if (delta === null) return "—";
+  const sinal = delta > 0 ? "+" : "";
+  return `${sinal}${delta.toFixed(1).replace(".", ",")} pp`;
+}
+
+function mleVeredicto(delta) {
+  if (delta === null) return "—";
+  if (Math.abs(delta) < MLE_DELTA_LIMIAR_PP) return "estável";
+  return delta > 0 ? "melhorou" : "piorou";
+}
+
+function mleComparePairs(versions) {
+  const num = mleNumeradas(versions);
+  const pares = [];
+  for (let i = 0; i < num.length - 1; i++) {
+    const maisNova = num[i];
+    const maisVelha = num[i + 1];
+    if (mleVersionNumber(maisNova.id) - mleVersionNumber(maisVelha.id) !== 1) continue;
+    const evN = maisNova.evaluation;
+    const evV = maisVelha.evaluation;
+    if (!evN || !evV) continue;
+    pares.push({ maisNova, maisVelha });
+  }
+  return pares;
+}
+
+function mleCompareRows(pares) {
+  const metricas = ["precision", "recall", "f1"];
+  const lados = ["ml", "rules"];
+  return pares.map((par) => {
+    const n = par.maisNova;
+    const v = par.maisVelha;
+    const linhas = [];
+    for (const lado of lados) {
+      for (const metrica of metricas) {
+        const a = mleNumero(par.maisVelha.evaluation?.[lado]?.[metrica]);
+        const b = mleNumero(par.maisNova.evaluation?.[lado]?.[metrica]);
+        const delta = mleDeltaPontos(a, b);
+        const veredicto = mleVeredicto(delta);
+        linhas.push({
+          versaoNova: mleVersionNumber(n.id),
+          versaoVelha: mleVersionNumber(v.id),
+          lado,
+          metrica,
+          antes: mlePercent(a),
+          depois: mlePercent(b),
+          delta: mleDeltaTexto(delta),
+          veredicto,
+          veredictoClass:
+            delta === null ? "" : (delta > 0 ? "mle-delta-up" : delta < 0 ? "mle-delta-down" : "mle-delta-flat"),
+        });
+      }
+    }
+    return linhas;
+  }).flat();
+}
+
+function mleCompareNoticeText(versions) {
+  const num = mleNumeradas(versions);
+  const pares = mleComparePairs(versions);
+  const semPar = num.length - pares.length;
+  let txt = `${pares.length} par(es) comparado(s) (vN vs vN−1).`;
+  if (semPar > 0) {
+    txt += ` ${semPar} versão(ões) avaliada(s) sem par para comparar.`;
+  }
+  return txt;
+}
+
+// --- feature_stats notice (D-03) -----------------------------------------------
+//
+// Quando metadata.dataset.feature_stats existe, mostra a média e o desvio
+// por feature no lote de treino, e avisa que estes números descrevem o
+// lote, não o comportamento do modelo. O mesmo evento pode mudar de
+// feature (e de veredicto) conforme o lote — 9,6 % dos casos mudam de
+// feature, 8,7 % dos eventos mudam de veredicto anómalo/normal só por
+// isso. A resposta do projecto não é corrigir o skew — é declará-lo.
+function mleFeatureStatsNotice(entry) {
+  const meta = entry?.metadata;
+  const stats = meta?.dataset?.feature_stats;
+  if (!stats || typeof stats !== "object") return "";
+  const chaves = Object.keys(stats);
+  if (!chaves.length) return "";
+  const linhas = chaves.map((k) => {
+    const v = stats[k];
+    if (!v || typeof v !== "object" || typeof v.mean !== "number" || typeof v.std !== "number") return null;
+    return `${escapeHtml(k)}: mean ${v.mean.toFixed(3).replace(".", ",")}, std ${v.std.toFixed(3).replace(".", ",")}`;
+  }).filter(Boolean).join("; ");
+  if (!linhas) return "";
+  return `⚠ Feature stats do lote de treino: ${linhas}. Estes números descrevem o lote de treino (média e desvio populacional de cada feature no lote), não o comportamento do modelo. O mesmo evento pode mudar de feature — e de veredicto — conforme o lote que o acompanha (medido: ~9,6 % dos eventos mudam de feature, ~8,7 % mudam de veredicto só por isso).`;
+}
+
+// --- live model_version (D-06) -------------------------------------------------
+//
+// Durante e depois de um reset_cache, um relatório pode ser de uma
+// versão que já não é a activa. Sem model_version o painel diz "o modelo"
+// e não diz qual. "legacy" é uma resposta honesta (o modelo sem metadados),
+// None é "nada carregado".
+function mleLiveModelText(mlReport) {
+  const v = mlReport?.model_version;
+  if (v === "legacy") return "Modelo: legado (sem metadados nem verificação SHA-256).";
+  if (v === null || v === undefined) return "Modelo: (não carregado / indeterminado).";
+  if (typeof v === "string") return `Modelo: ${escapeHtml(v)} (versão que mediu esta janela).`;
+  return `Modelo: ${escapeHtml(String(v))} (versão que mediu esta janela).`;
+}
+
+// ======================= camada pura (sem DOM) ==============================
 
 // --- concordância ao vivo (D-10) ----------------------------------------------
 //
@@ -214,6 +375,7 @@ function mleBuildLiveAgreement(mlReport) {
     mleMetrica("Marcados pelo ML", mleContagem(mlReport.ml_anomalies_count)),
     mleMetrica("Marcados pelas regras", mleContagem(mlReport.rule_flagged_count)),
     mleMetrica("Divergentes", mleContagem(mlReport.diverge_count)),
+    mleMetrica("Modelo que mediu", mleLiveModelText(mlReport)),
   ];
   if (mlReport.alerts_truncated === true) {
     linhas.push(`<div class="mle-warning">${escapeHtml(MLE_LIVE_TRUNCADO)}</div>`);
@@ -335,8 +497,58 @@ async function mleRefresh() {
   mleRefreshLive();
 }
 
-function mleIsShown(tab) {
-  return tab.classList.contains("active") && document.visibilityState === "visible";
+function mleRenderCompare(report) {
+  const versions = (report && report.versions) || [];
+  const pares = mleComparePairs(versions);
+  const corpo = document.getElementById("mle-compare-body");
+  const aviso = document.getElementById("mle-compare-notice");
+  if (!corpo || !aviso) return;
+
+  aviso.textContent = mleCompareNoticeText((report && report.versions) || []);
+
+  if (!pares.length) {
+    corpo.innerHTML = '<tr><td colspan="7" class="empty-state">Sem pares para comparar — cada versão precisa de avaliação, e o par exige números consecutivos (vN vs vN−1).</td></tr>';
+    return;
+  }
+
+  const linhas = mleCompareRows(mleComparePairs((report && report.versions) || []));
+  corpo.innerHTML = linhas.map((l) =>
+    `<tr>
+      <td>${l.versaoNova}</td>
+      <td>${l.versaoVelha}</td>
+      <td>${l.lado === "ml" ? "ML" : "Regras"}</td>
+      <td>${l.metrica === "precision" ? "Precisão" : l.metrica === "recall" ? "Recall" : "F1"}</td>
+      <td>${l.antes}</td>
+      <td>${l.depois}</td>
+      <td>${l.delta}</td>
+      <td class="${l.veredictoClass}">${l.veredicto}</td>
+    </tr>`
+  ).join("");
+}
+
+function mleRenderFeatureStats(report) {
+  const versions = (report && report.versions) || [];
+  const container = document.getElementById("mle-feature-stats");
+  if (!container) return;
+  let html = "";
+  for (const entry of (report && report.versions) || []) {
+    const notice = mleFeatureStatsNotice(entry);
+    if (notice) {
+      html += `<div class="mle-warning" style="margin-bottom: 8px;">${escapeHtml(entry.id || entry.label)}: ${notice}</div>`;
+    }
+  }
+  if (!html) {
+    container.innerHTML = '<div class="empty-state">Nenhuma feature_stats disponível nas versões avaliadas.</div>';
+  } else {
+    container.innerHTML = html;
+  }
+}
+
+function mleRenderEvaluation(report) {
+  document.getElementById("mlm-eval-body").innerHTML = mleBuildEvalRows(report);
+  document.getElementById("mlm-eval-notice").textContent = mleEvalNoticeText(report);
+  mleRenderCompare(report);
+  mleRenderFeatureStats(report);
 }
 
 // Recarrega SEMPRE que a aba passa de escondida a visível, como ml_models.js

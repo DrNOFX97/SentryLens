@@ -1,6 +1,6 @@
-// Aba "📦 Models" (marco R9, registo de modelos). Carregado depois de app.js e
-// metrics.js: reutiliza os seus globais (API_BASE, API_KEY, escapeHtml,
-// renderPanelError) — não redeclarar nenhum aqui.
+// Aba "📦 Models" (marco R9, registo de modelos; R10: treinar a partir do dashboard).
+// Carregado depois de app.js e metrics.js: reutiliza os seus globais (API_BASE,
+// API_KEY, escapeHtml, renderPanelError) — não redeclarar nenhum aqui.
 //
 // A aba "📐 Evaluation" NÃO vive aqui desde a Fase 2: saiu para
 // ml_evaluation.js, com o seu próprio prefixo `mle` e o seu próprio ciclo de
@@ -77,6 +77,100 @@ function mlmCodeFromResponse(status, body) {
   const detail = body ? body.detail : null;
   if (typeof detail === "string" && MLM_CODE_RE.test(detail)) return detail;
   return "http_" + status;
+}
+
+// ======================= treino (R10) — camada pura ===========================
+//
+// O corpo do pedido de treino: DUAS chaves e nada mais. Os parâmetros do
+// modelo (contamination/random_state/n_estimators) são omissões do servidor —
+// os tetos são uma protecção do backend (D-01.3), não um campo do formulário.
+const MLM_TRAIN_DATASETS = ["latest_export", "sample_fixture"];
+const MLM_TRAIN_ORIGINS = ["real", "synthetic", "unknown"];
+const MLM_TRAIN_DATASET_OMISSAO = "latest_export";
+const MLM_TRAIN_ORIGEM_OMISSAO = "unknown";
+
+function mlmTrainBody(dataset, dataset_origin) {
+  return {
+    dataset: MLM_TRAIN_DATASETS.includes(dataset) ? dataset : MLM_TRAIN_DATASET_OMISSAO,
+    dataset_origin: MLM_TRAIN_ORIGINS.includes(dataset_origin) ? dataset_origin : MLM_TRAIN_ORIGEM_OMISSAO,
+  };
+}
+
+// O estado do botão vive aqui para ser testável sem DOM: nenhum sítio
+// escreve "A treinar…" por sua conta.
+const MLM_TREINAR_LABEL = "Treinar";
+const MLM_TREINANDO_LABEL = "A treinar…";
+
+function mlmTrainButtonState(ocupado) {
+  return ocupado
+    ? { text: MLM_TREINANDO_LABEL, disabled: true }
+    : { text: MLM_TREINAR_LABEL, disabled: false };
+}
+
+// Devolve {estado, texto} com estado em "ok" | "reiniciar" | "nao_ativa" | "incompleto".
+// "reiniciar" é o caso que decide a UX de todo o R10: a vN foi criada e
+// está ativa, mas a cache do modelo é por processo e o backend continua a
+// medir com a anterior (D-01 invertida; ver CLAUDE.md, "a cache é por processo").
+function mlmTrainResult(resposta) {
+  if (!resposta || typeof resposta !== "object") {
+    return { estado: "incompleto", texto: "O servidor respondeu sem dizer que versão foi criada — não há forma de dizer o que foi treinado. Vê o backend.log." };
+  }
+  const version = typeof resposta.version === "string" ? resposta.version : "desconhecida";
+  const active = typeof resposta.active === "string" ? resposta.active : null;
+  const loaded = typeof resposta.loaded === "string" ? resposta.loaded : null;
+
+  if (!active) {
+    return { estado: "incompleto", texto: "O servidor respondeu sem dizer que versão foi criada — não há forma de dizer o que foi treinado. Vê o backend.log." };
+  }
+
+  if (loaded && active && loaded !== active) {
+    return {
+      estado: "reiniciar",
+      texto: `«${version}» foi criada e está ativa, mas o backend continua a usar «${loaded}»: as deteções ainda são da «${loaded}» até reiniciar o backend (scripts/start-backend.ps1).`
+    };
+  }
+  if (active && loaded && loaded === active) {
+    return {
+      estado: "ok",
+      texto: `«${version}» foi criada, está ativa e é a versão que o backend está a usar.`
+    };
+  }
+  if (active && (!loaded || loaded !== active)) {
+    return {
+      estado: "nao_ativa",
+      texto: `«${version}» foi criada e registada, mas a versão ativa continua a ser «${active}»: o treino não passa a ativar a versão nova.`
+    };
+  }
+  return { estado: "incompleto", texto: "O servidor respondeu sem dizer que versão foi criada — não há forma de dizer o que foi treinado. Vê o backend.log." };
+}
+
+// Mensagens de erro do treino. Nem `training_in_progress` nem nenhum código novo
+// entra em `MLM_ERROR_TEXT`: essa tabela é do registo (mlmStatusText usa-a para
+// `entry.error_code`), e o treino é uma operação diferente com códigos diferentes.
+const MLM_TRAIN_GENERIC_ERROR = "O treino não foi concluído. Olha o backend.log.";
+const MLM_TRAIN_ERROR_TEXT = {
+  training_in_progress: "Já há um treino a correr — o servidor só aceita um de cada vez (D-01.2). Espera que o primeiro termine e volta a carregar em «Treinar».",
+  dataset_unavailable: "O conjunto de dados pedido não está disponível no servidor: o export do Indexer falhou ou não há eventos na janela. Confirma que o Wazuh Indexer está ligado e olha o backend.log.",
+  training_failed: "O treino falhou a meio e nenhuma versão nova ficou registada. O motivo está no backend.log.",
+  models_dir_unavailable: "Não foi possível escrever em scripts/models/ (permissões ou disco cheio). Corrige as permissões e olha o backend.log.",
+};
+const MLM_TRAIN_HTTP_TEXT = {
+  http_400: "O pedido de treino foi recusado pelo servidor. Volta a carregar em «Treinar» sem alterar os campos.",
+  http_404: "A rota de treino não foi encontrada no backend. Verifica se o backend do R10 está a correr.",
+  http_409: "Já há um treino a correr — o servidor só aceita um de cada vez (D-01.2). Espera que o primeiro termine e volta a carregar em «Treinar».",
+  http_422: "O servidor recusou o pedido — um dos parâmetros está fora dos valores aceites. Volta a carregar em «Treinar» sem alterar os campos.",
+  http_500: "O backend deu um erro interno a treinar. Olha o backend.log.",
+  http_503: "O registo de modelos recusou a operação (ACTIVE inválido, hash em falta ou metadata.json corrompido). Vê a aba 📦 Models e o backend.log.",
+};
+
+// Os códigos do registo continuam traduzidos pela tabela que já existe —
+// nenhuma segunda cópia de "unauthorized" ou "registry_unavailable".
+function mlmTrainErrorText(codigo) {
+  if (typeof codigo !== "string") return MLM_TRAIN_GENERIC_ERROR;
+  if (Object.prototype.hasOwnProperty.call(MLM_TRAIN_ERROR_TEXT, codigo)) return MLM_TRAIN_ERROR_TEXT[codigo];
+  if (Object.prototype.hasOwnProperty.call(MLM_TRAIN_HTTP_TEXT, codigo)) return MLM_TRAIN_HTTP_TEXT[codigo];
+  const doRegisto = mlmErrorText(codigo);
+  return doRegisto === MLM_GENERIC_ERROR ? MLM_TRAIN_GENERIC_ERROR : doRegisto;
 }
 
 function mlmCell(value) {
@@ -375,6 +469,7 @@ let mlmModelsWasShown = false;
 let mlmLoading = false;
 let mlmLastReport = null;
 let mlmSelectedKey = null;
+let mlmTraining = false;
 
 async function mlmRequest(path) {
   const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
@@ -386,6 +481,68 @@ async function mlmRequest(path) {
     throw new Error(mlmCodeFromResponse(response.status, corpo));
   }
   return response.json();
+}
+
+// POST com o mesmo tratamento de erro de mlmRequest — o `detail` entra como CHAVE
+// de lookup em mlmCodeFromResponse e o código nunca chega ao DOM (API-02).
+async function mlmPost(path, body) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  if (!response.ok) {
+    let corpo = null;
+    try { corpo = await response.json(); } catch (_) { /* corpo não-JSON: fica só o código HTTP */ }
+    throw new Error(mlmCodeFromResponse(response.status, corpo));
+  }
+  return response.json();
+}
+
+function mlmSetTrainButton(ocupado) {
+  const botao = document.getElementById("mlm-train-button");
+  if (!botao) return;
+  const estado = mlmTrainButtonState(ocupado);
+  botao.disabled = estado.disabled;
+  botao.textContent = estado.text;
+}
+
+function mlmRenderTrainResult(estado, texto, mensagem) {
+  const alvo = document.getElementById("mlm-train-result");
+  if (!alvo) return;
+  alvo.className = "panel-note " + (estado === "erro" ? "mlm-train-erro" : "mlm-train-reiniciar");
+  alvo.textContent = texto;   // texto simples: escapeHtml antes de chegar aqui
+}
+
+async function mlmDoTrain() {
+  if (mlmTraining) return;                 // clique duplo não vira dois POST
+  mlmTraining = true;
+  mlmSetTrainButton(true);
+  try {
+    const resposta = await mlmPost("/api/ml/train", mlmTrainBody(mlmTrainDataset(), mlmTrainOrigin()));
+    const resultado = mlmTrainResult(resposta);
+    mlmRenderTrainResult(resultado.estado === "incompleto" ? "erro" : resultado.estado,
+                        escapeHtml(resultado.texto), "");
+  } catch (err) {
+    mlmRenderTrainResult("erro", escapeHtml("Não foi possível treinar: " + mlmTrainErrorText(err.message)), "");
+  } finally {
+    mlmTraining = false;
+    mlmSetTrainButton(false);
+  }
+  // UM ÚNICO refrescamento, no fim, qualquer que seja o desfecho (D-07):
+  // a tabela tem de mostrar a vN nova — ou, se o treino falhou, tem de
+  // continuar a mostrar o registo como estava, com o erro em cima.
+  await mlmRefresh(true);
+}
+
+function mlmTrainDataset() {
+  const select = document.getElementById("mlm-train-dataset");
+  return select ? select.value : MLM_TRAIN_DATASET_OMISSAO;
+}
+
+function mlmTrainOrigin() {
+  const select = document.getElementById("mlm-train-origin");
+  return select ? select.value : MLM_TRAIN_ORIGEM_OMISSAO;
 }
 
 function mlmRenderModels(report) {
@@ -460,8 +617,8 @@ function mlmIsShown(tab) {
 
 // Um só pedido alimenta a aba Models. A Evaluation tem o seu próprio pedido,
 // em ml_evaluation.js (D-09).
-async function mlmRefresh() {
-  if (mlmLoading) return;
+async function mlmRefresh(forcar) {
+  if (mlmLoading && forcar !== true) return;
   mlmLoading = true;
   try {
     const report = await mlmRequest("/api/ml/models");
@@ -498,6 +655,8 @@ function mlmInit() {
   }
   document.addEventListener("visibilitychange", mlmOnTabChange);
   document.getElementById("mlm-models-reload").addEventListener("click", () => mlmRefresh());
+  const treinar = document.getElementById("mlm-train-button");
+  if (treinar) treinar.addEventListener("click", () => mlmDoTrain());
   // Linhas selecionáveis com rato e com teclado (Enter/Espaço), como na
   // Attack Library. O keydown delega em mlmHandleRowKey, que é puro.
   const corpo = document.getElementById("mlm-models-body");
