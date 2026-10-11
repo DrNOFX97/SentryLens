@@ -94,3 +94,5 @@ No specific requirements — open to standard approaches.
 ## Decisão posterior (plan-phase, 2026-10-11)
 
 - **D-07 refinado (confirmado pelo utilizador):** a vaccine é uma por ataque (D-02) e traz uma lista `proposals[]`, uma entrada por sensor em falta, cada uma com `sensor`, `rule` e `recommendation`. Não há `sensor` singular no topo da vaccine.
+
+- **Âmbito alargado (confirmado pelo utilizador, 2026-10-11):** a Fase 12 inclui um plano 12-03 que faz `attack_scenarios.format_log_entry` gravar um `id` válido em cada entrada nova do attack log, com teste de que uma entrada criada pelo escritor real produz uma vaccine através do registo e do motor. Isto substitui a instrução anterior de não tocar em `attack_scenarios.py`. Entradas antigas sem `id` continuam a ir para `skipped.no_attack_id` (sem backfill). A política para uma vaccine antiga quando o id evolui (partial → not_detected) fica entregue à Fase 13.
