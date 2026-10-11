@@ -57,11 +57,11 @@ Layout em disco:
 scripts/models/ACTIVE                           uma linha UTF-8, p.ex. "v1"
 scripts/models/vN/isolation_forest.pkl
 scripts/models/vN/scaler.pkl
-scripts/models/vN/metadata.json                   schema 1 (13 chaves)
+scripts/models/vN/metadata.json                   schema 1 (15 chaves)
 scripts/models/{isolation_forest,scaler}.pkl     o "legado": nunca movidos nem apagados
 ```
 
-Schema do `metadata.json` (13 chaves: 12 públicas + `evaluation`):
+Schema do `metadata.json` (15 chaves: 13 públicas + `evaluation` + `feature_stats`):
 - `schema_version`: 1
 - `version`: nome da pasta (ex.: "v1")
 - `origin`: "trained" | "adopted"
@@ -74,14 +74,29 @@ Schema do `metadata.json` (13 chaves: 12 públicas + `evaluation`):
 - `trained_at_estimated`: booleano, True só quando `trained_at` foi estimada
 - `model_type`: "IsolationForest"
 - `parameters`: {contamination, random_state, n_estimators} — `None` no `adopt`
-- `dataset`: {name (só `Path(...).name`), size, attacks, synthetic (bool)}
+- `dataset`: {name (só `Path(...).name`), size, attacks, synthetic,
+  documents, processable, truncated, window_first, window_last} —
+  `size` são as linhas **processáveis**; `documents` é quantos documentos
+  brutos entraram e `truncated` diz se bateram o tecto, para que "35 eventos"
+  seja distinguível de "os 35 que couberam de 500". `synthetic` é
+  **tri-estado**: `true`, `false` ou `null` (= origem não declarada)
 - `library_versions`: {python, scikit-learn, joblib, numpy} — `None` no `adopt`
 - `artifacts`: {`isolation_forest.pkl`: {"sha256": "...", "size_bytes": N},
   `scaler.pkl`: {"sha256": "...", "size_bytes": N}} — ambos obrigatórios
+- `catalog_sha256`: hash de `event_catalog.CRITICAL_EVENTS` no momento do
+  treino. `event_id_encoded` é o **índice posicional** no catálogo ordenado,
+  por isso acrescentar um Event ID desloca todos os índices seguintes e
+  invalida em silêncio qualquer `.pkl` antigo — o hash é o que transforma
+  "não sei" em "sei que é incompatível"
 - `evaluation`: `null` ou objeto (preenchido após `model_registry.py evaluate vN`)
-- `METADATA_PUBLIC_KEYS`: **12** chaves projectadas para a API — exatamente as
-  12 acima até `artifacts`. `evaluation` **não** entra: é um campo de nível
-  superior do `metadata.json`, projectado à parte
+- `feature_stats`: por feature, {mean, std} do **lote de treino**. Aviso
+  importante: `is_new_source_ip` e `failed_attempts_last_hour` acumulam dentro
+  do lote, por isso estes números descrevem o lote e não o comportamento —
+  em serviço os lotes são de 1000. É por isso que se registam em vez de se
+  esconderem
+- `METADATA_PUBLIC_KEYS`: **13** chaves projectadas para a API — as 12
+  originais mais `catalog_sha256`. `evaluation` e `feature_stats` **não**
+  entram: são campos de nível superior projectados à parte
 - `EVALUATION_PUBLIC_KEYS`: **14** chaves — a sub-projeção de `evaluation`,
   a mesma lista que `ml_evaluation.EVALUATION_KEYS` (igualdade verificada por
   `scripts/test_ml_models_api.py`)
