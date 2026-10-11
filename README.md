@@ -153,23 +153,36 @@ Só conta como tentativa de ligação um pacote TCP com SYN e sem ACK, para as r
 
 O painel **ML Anomalias** usa um `IsolationForest` (scikit-learn), um modelo não supervisionado: aprende o que é um alerta normal neste ambiente e assinala o que se afasta disso. Serve de **segunda opinião** sobre as regras, não de substituto.
 
-Resultados do primeiro ciclo com dados reais do laboratório (14 set 2026; 5 ataques lançados a partir do Kali, 35 eventos processáveis, 20 rotulados como ataque):
+### Resultados medidos, e o que eles provam
+
+O primeiro ciclo com dados reais (14 de setembro de 2026) mediu, sobre **35 eventos processáveis** de 500 alertas capturados no laboratório:
 
 | | Precisão | Recall | F1 |
 |---|---|---|---|
 | ML (Isolation Forest) | 0,86 | 0,30 | 0,44 |
 | Regras (`event_catalog.py`) | 0,88 | 0,35 | 0,50 |
 
-**Atenção ao que isto significa:** a amostra é pequena, por isso não é uma estimativa de desempenho em produção. O ML não é melhor do que as regras; o interesse está em os dois falharem em sítios diferentes (5 alertas marcados por ambos, 2 só pelo ML, 3 só pelas regras) e em essa diferença ser mensurável.
+**Isto é um registo histórico, não um resultado reproduzível hoje.** A medição foi feita com o `scripts/attack_log.jsonl` de 14 de setembro, que registava os 5 ataques lançados nessa sessão. O `attack_log.jsonl` que existe no repositório hoje é de **6 de outubro de 2026** e **não cobre** a janela do dataset: avaliá-lo contra estes eventos dá **0 ataques rotulados** e recall 0 **por definição** — não por falha do modelo. O comando de avaliação avisa-o quando isso acontece, em vez de publicar o número a zero.
+
+Para uma avaliação rotulada a sério: lança os ataques com `scripts/attack_scenarios.py`, exporta os alertas **na mesma janela** com `scripts/export_raw_events.py`, e avalia com `python model_registry.py evaluate vN --events ... --attack-log ... --dataset-origin real`. O resultado fica gravado no `metadata.json` **daquela versão** e é o que a aba 📐 Evaluation mostra. Nenhum número aparece no dashboard sem dizer que versão mediu e sobre que dataset.
 
 Para treinar o modelo:
 
 ```bash
 cd scripts
-python train_anomaly_model.py
+python train_anomaly_model.py --models-dir models --dataset-origin real
 ```
 
-Isto escreve `models/isolation_forest.pkl` e `models/scaler.pkl`, que não são versionados. Até existirem, `GET /api/ml-anomalies` devolve `503`. Metodologia, features e o ciclo de validação completo estão em [`docs/ML.md`](docs/ML.md).
+Isto escreve `models/vN/` + `metadata.json` + `ACTIVE` com SHA-256 verificado; os `.pkl` soltos são o modelo legado. `--report <ficheiro>` é opt-in; se não for usado, o relatório fica gravado na `metadata.json` da versão treinada. Até existirem, `GET /api/ml-anomalies` devolve `503`. Metodologia, features e o ciclo de validação completo estão em [`docs/ML.md`](docs/ML.md).
+
+Registo de modelos
+
+- **Versões:** cada execução de `train_anomaly_model.py` cria uma nova pasta `models/vN/` (ex.: `v1`, `v2`) com `isolation_forest.pkl`, `scaler.pkl` e `metadata.json`. A pasta `models/ACTIVE` aponta para a versão atualmente ativa.
+- **Adopt:** `python model_registry.py adopt --models-dir models` regista o que já existe em `scripts/models/` como `v1` e a activa. Se `v1` já existir, recusa.
+- **SHA-256:** antes de a pasta `vN` ficar visível, o SHA-256 dos `.pkl` é verificado contra os bytes originais. Deteta corrupção e troca acidental, mas não autentica quem escreve — quem reescreve `models/` reescreve também o `metadata.json`.
+- **`ACTIVE`:** depois de um adopt ou de um treino, é necessário reiniciar o backend (`uvicorn main:app --reload`) para que a cache do modelo seja atualizada e a nova versão seja carregada.
+- **API:** `GET /api/ml/models` devolve o registo completo de todas as versões, incluindo a ativa, com os metadados, SHA-256 e estado de avaliação.
+- **Limitação:** até à primeira versão registada, o que o backend carrega é o modelo legado (`scripts/models/isolation_forest.pkl` + `scaler.pkl`), que não tem verificação de integridade. A partir da primeira versão registada, o backend carrega uma versão com SHA-256 verificado.
 
 ---
 
@@ -259,7 +272,7 @@ Ver [`QUICKSTART.md`](QUICKSTART.md).
 
 ## Testes
 
-33 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
+38 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
 
 ```bash
 cd scripts
@@ -286,6 +299,7 @@ Todos os endpoints `/api/*` exigem o header `X-API-Key` e devolvem JSON (exceto 
 | GET | `/api/stats` | KPIs agregados |
 | GET | `/api/compliance` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/ml-anomalies` | Isolation Forest vs. regras |
+| GET | `/api/ml/models` | Registo de modelos (versões, ativa, adopt, avaliação) |
 | GET | `/api/redblue/metrics` | Cobertura e MTTD por cenário de ataque |
 | GET | `/api/redblue/network` | Snapshot da captura de rede |
 | GET | `/api/detections` | Vista unificada recente dos detetores (regra/ML/rede) |
@@ -326,12 +340,13 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 │   ├── compliance_evaluator.py / .yaml          motor RGPD, NIS2 e AI Act
 │   ├── network_monitor.py / network_detections.py   captura e deteção de rede
 │   ├── ml_anomalies.py / feature_extractor.py / train_anomaly_model.py   Machine Learning
+│   ├── model_registry.py, ml_evaluation.py, export_raw_events.py   registo, avaliação e exportação
 │   ├── attack_scenarios.py / redblue_correlator.py  Red vs Blue
 │   ├── incident_*.py, attack_registry.py, attack_library.py/.yaml   incidentes, registo e biblioteca de ataques
 │   ├── detection_event.py, network_soc.py, siem_health.py   deteções unificadas, painéis de rede, saúde do SIEM
 │   ├── history_store.py / history_index.py      histórico JSONL e índice SQLite
 │   ├── deploy/                                  serviço tshark e logrotate da VM
-│   └── test_*.py                                33 testes standalone
+│   └── test_*.py                                38 testes standalone
 └── docs/                                        API, ML e guia do laboratório
 ```
 
@@ -341,7 +356,7 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 
 - **API key partilhada:** não há login nem distinção entre utilizadores. Para uso real, evoluir para autenticação por utilizador.
 - **Perfil da organização fixo:** a conformidade usa um perfil estático. Falta ligar `scripts/nis2_lookup.py` a dados reais de uma empresa.
-- **ML com pouca amostra:** o modelo foi treinado com 35 eventos reais. Repetir os cenários de ataque ao longo de vários dias daria uma estimativa mais robusta.
+- **ML com pouca amostra:** o que está registado é a versão e a avaliação por versão; a limitação passa a ser "o dataset de referência não é rotulável com o `attack_log.jsonl` actual", pois este só cobre 2026-10-06 e não rotula a janela de 2026-09-14.
 - **Deteção de rede por limiares fixos:** não aprende uma linha de base do tráfego normal.
 - **Só Windows:** a monitorização do sistema local usa WMI e PowerShell.
 
