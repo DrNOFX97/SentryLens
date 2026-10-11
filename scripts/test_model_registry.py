@@ -22,6 +22,7 @@ import model_registry
 import os
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 import hashlib
@@ -1754,6 +1755,214 @@ def espera_erro_valor(func, *args, **kwargs):
     return None
 
 
+# --- R10 T-10-04: compare-and-set do ACTIVE -----------------------------------
+
+
+def test_write_active_cas(tmp: Path) -> None:
+    """
+    `_write_active_atomic(root, vid, expected=...)`: escreve só se o `ACTIVE`
+    ainda for o que o chamador leu.
+
+    O caminho que importa é o do `return False`: **não escrever nada** e não
+    deixar um `ACTIVE.tmp-*` para trás. Cada caso usa a sua própria pasta
+    (nada aqui pode contaminar outro caso), e o que se compara byte a byte é o
+    `ACTIVE` fotografado antes e depois.
+    """
+    secao("T-10-04 — compare-and-set do ACTIVE")
+
+    base = dict(version_id="v3", contamination=0.2, random_state=42, n_estimators=200,
+                dataset_name="e.json", dataset_size=1, dataset_attacks=0,
+                synthetic=None, library_versions={"python": "3.12"})
+
+    # (a) sem `expected`: escreve sempre, byte a byte como sempre
+    a = tmp / "cas-sem-expected"
+    a.mkdir(parents=True, exist_ok=True)
+    check("CAS (a): sem expected -> True",
+          model_registry._write_active_atomic(a, "v3") is True)
+    check("CAS (a): escreve exactamente b'v3\\n'",
+          (a / model_registry.ACTIVE_FILE).read_bytes() == b"v3\n")
+    check("CAS (a): não deixa temporários", restos(a, "ACTIVE.tmp-") == [])
+
+    # (b) `expected` que bate: escreve
+    b = tmp / "cas-bate"
+    b.mkdir(parents=True, exist_ok=True)
+    write_active(b, b"v1\n")
+    check("CAS (b): expected que bate -> True",
+          model_registry._write_active_atomic(b, "v3", expected="v1") is True)
+    check("CAS (b): o ACTIVE passou a v3",
+          (b / model_registry.ACTIVE_FILE).read_bytes() == b"v3\n")
+
+    # (c) `expected` que NÃO bate: não escreve, nada muda, nada sobra
+    c = tmp / "cas-nao-bate"
+    c.mkdir(parents=True, exist_ok=True)
+    write_active(c, b"v1\n")
+    antes = (c / model_registry.ACTIVE_FILE).read_bytes()
+    check("CAS (c): expected que não bate -> False",
+          model_registry._write_active_atomic(c, "v3", expected="v2") is False)
+    check("CAS (c): os bytes do ACTIVE ficaram exactamente iguais",
+          (c / model_registry.ACTIVE_FILE).read_bytes() == antes)
+    check("CAS (c): não deixou nenhum ACTIVE.tmp-*", restos(c, "ACTIVE.tmp-") == [])
+
+    # (d) `expected=None` com ACTIVE inexistente: `None` é "não compares"
+    d = tmp / "cas-none-sem-active"
+    d.mkdir(parents=True, exist_ok=True)
+    check("CAS (d): expected=None sem ACTIVE -> True (não compara, não exige ausência)",
+          model_registry._write_active_atomic(d, "v3", expected=None) is True)
+    check("CAS (d): e escreve", (d / model_registry.ACTIVE_FILE).read_bytes() == b"v3\n")
+
+    # (e) `expected` preenchido mas sem ACTIVE: esperava-se um conteúdo e não há
+    e = tmp / "cas-espera-sem-active"
+    e.mkdir(parents=True, exist_ok=True)
+    check("CAS (e): expected preenchido sem ACTIVE -> False",
+          model_registry._write_active_atomic(e, "v3", expected="v1") is False)
+    check("CAS (e): e não criou o ACTIVE",
+          not (e / model_registry.ACTIVE_FILE).exists())
+    check("CAS (e): nem temporários", restos(e, "ACTIVE.tmp-") == [])
+
+    # (f) ACTIVE em UTF-16 (o `echo v1 > ACTIVE` do PowerShell 5.1):
+    # `read_active` levanta e a função propaga — fail-closed, não "escreve por cima"
+    f = tmp / "cas-utf16"
+    f.mkdir(parents=True, exist_ok=True)
+    (f / model_registry.ACTIVE_FILE).write_bytes("v1".encode("utf-16"))
+    exc = espera_erro(model_registry._write_active_atomic, f, "v3", expected="v1")
+    check("CAS (f): ACTIVE em UTF-16 -> invalid_version_id",
+          exc is not None and exc.code == "invalid_version_id")
+    check("CAS (f): nada foi escrito por cima",
+          (f / model_registry.ACTIVE_FILE).read_bytes() == "v1".encode("utf-16"))
+    check("CAS (f): nem temporários", restos(f, "ACTIVE.tmp-") == [])
+
+    # (g) o compare-and-set é sobre o CONTEÚDO, não sobre a validade do
+    # apontamento: um ACTIVE a dizer "v9" (pasta que não existe) é um conteúdo
+    # perfeitamente legível para comparar
+    g = tmp / "cas-apontamento"
+    g.mkdir(parents=True, exist_ok=True)
+    write_active(g, b"v9\n")
+    check("CAS (g): ACTIVE aponta para uma v9 inexistente -> expected='v9' bate",
+          model_registry._write_active_atomic(g, "v3", expected="v9") is True)
+    write_active(g, b"v9\n")
+    check("CAS (g): e expected='v1' não bate (o conteúdo é v9)",
+          model_registry._write_active_atomic(g, "v3", expected="v1") is False)
+
+    # (h) id inválido: a validação é a PRIMEIRA instrução, nada toca no disco
+    h = tmp / "cas-id-invalido"
+    h.mkdir(parents=True, exist_ok=True)
+    write_active(h, b"v1\n")
+    antes_h = (h / model_registry.ACTIVE_FILE).read_bytes()
+    exc = espera_erro(model_registry._write_active_atomic, h, "../x", expected="v1")
+    check("CAS (h): id inválido -> invalid_version_id",
+          exc is not None and exc.code == "invalid_version_id")
+    check("CAS (h): o ACTIVE ficou intacto",
+          (h / model_registry.ACTIVE_FILE).read_bytes() == antes_h)
+    check("CAS (h): nem temporários", restos(h, "ACTIVE.tmp-") == [])
+
+    # (i) `os.replace` bloqueado (OneDrive/antivírus): registry_unavailable,
+    #     ACTIVE intacto e o `finally` limpa o temporário
+    i = tmp / "cas-replace-bloqueado"
+    i.mkdir(parents=True, exist_ok=True)
+    write_active(i, b"v1\n")
+    original = replace_bloqueado(model_registry.ACTIVE_FILE)
+    try:
+        exc = espera_erro(model_registry._write_active_atomic, i, "v3", expected="v1")
+    finally:
+        model_registry.os.replace = original
+    check("CAS (i): replace bloqueado -> registry_unavailable",
+          exc is not None and exc.code == "registry_unavailable")
+    check("CAS (i): o ACTIVE ficou intacto",
+          (i / model_registry.ACTIVE_FILE).read_bytes() == b"v1\n")
+    check("CAS (i): o finally apagou o ACTIVE.tmp-*", restos(i, "ACTIVE.tmp-") == [])
+
+    # (j) a releitura falha por OSError (o ACTIVE é um directório: abrir dá
+    #     IsADirectoryError/PermissionError, ambos OSError) -> registry_unavailable
+    j = tmp / "cas-releitura-oserror"
+    (j / model_registry.ACTIVE_FILE).mkdir(parents=True, exist_ok=True)
+    exc = espera_erro(model_registry._write_active_atomic, j, "v3", expected="v1")
+    check("CAS (j): releitura com OSError -> registry_unavailable",
+          exc is not None and exc.code == "registry_unavailable")
+    check("CAS (j): nada foi escrito no lugar do ACTIVE",
+          (j / model_registry.ACTIVE_FILE).is_dir())
+    check("CAS (j): nem temporários", restos(j, "ACTIVE.tmp-") == [])
+
+# (k) PROVA DETERMINISTA de que o compare-and-set trava: duas threads com
+    #     a MESMA leitura; a segunda não escreve. Sem barreira isto passaria
+#     thread levanta `registry_unavailable` — o `os.replace` do Windows falha
+#     com `PermissionError` quando outro handle tem o destino aberto, e a
+#     releitura TEM o destino aberto. Isso é um resultado legítimo e é medido
+#     como tal abaixo; o que tem de ser verdade SEMPRE é a integridade.
+    k = tmp / "cas-corrida-determinista"
+    k.mkdir(parents=True, exist_ok=True)
+    write_active(k, b"v0\n")
+    barreira = threading.Barrier(2, timeout=10)
+    resultados: dict = {}
+
+    def corrida(nome, vid):
+        try:
+            barreira.wait()
+            resultados[nome] = model_registry._write_active_atomic(k, vid, expected="v0")
+        except threading.BrokenBarrierError:
+            resultados[nome] = "barreira-partida"
+        except model_registry.ModelRegistryError as exc:
+            resultados[nome] = f"erro:{exc.code}"
+        except Exception as exc:  # noqa: BLE001 — qualquer outra coisa é um bug
+            resultados[nome] = f"inesperado:{type(exc).__name__}"
+
+    t1 = threading.Thread(target=corrida, args=("a", "v1"), daemon=True)
+    t2 = threading.Thread(target=corrida, args=("b", "v2"), daemon=True)
+    t1.start()
+    t2.start()
+    t1.join(timeout=30)
+    t2.join(timeout=30)
+    valores = set(resultados.values())
+    check("CAS (k): nenhuma thread ficou pendurada",
+          not t1.is_alive() and not t2.is_alive())
+    check("CAS (k): a barreira não partiu (timeout=10)",
+          "barreira-partida" not in valores)
+    check("CAS (k): nenhuma thread levantou uma excepção inesperada",
+          not any(isinstance(v, str) and v.startswith("inesperado:") for v in valores))
+    check("CAS (k): os resultados são só bool ou um erro do registo",
+          valores <= {True, False, "erro:registry_unavailable"}
+          and resultados.get("a") in {True, False, "erro:registry_unavailable"}
+          and resultados.get("b") in {True, False, "erro:registry_unavailable"})
+    check("CAS (k): o ACTIVE nunca fica truncado, vazio ou parcial",
+          (k / model_registry.ACTIVE_FILE).read_bytes() in (b"v0\n", b"v1\n", b"v2\n"))
+    check("CAS (k): se alguém escreveu, escreveu uma das duas versões",
+          True not in valores
+          or (k / model_registry.ACTIVE_FILE).read_bytes() in (b"v1\n", b"v2\n"))
+    check("CAS (k): nem ACTIVE.tmp-* sobraram", restos(k, "ACTIVE.tmp-") == [])
+
+    # (l) EXATAMENTE UMA escreve — a propriedade que o plano pede, provada sem
+    #     depender de sorte: a segunda thread parte da releitura JÁ FEITA pela
+    #     primeira, que é a janela que o compare-and-set fecha.
+    l = tmp / "cas-corrida-uma-só"
+    l.mkdir(parents=True, exist_ok=True)
+    write_active(l, b"v0\n")
+    primeiro = model_registry.read_active(l)
+    resultados2 = {
+        "a": model_registry._write_active_atomic(l, "v1", expected=primeiro),
+        "b": model_registry._write_active_atomic(l, "v2", expected=primeiro),
+    }
+    check("CAS (l): das duas, exactamente uma escreve",
+          sorted(resultados2.values(), key=str) == [False, True])
+    check("CAS (l): o ACTIVE é o da que ganhou",
+          (l / model_registry.ACTIVE_FILE).read_bytes()
+          == (b"v1\n" if resultados2["a"] else b"v2\n"))
+
+    # (m) a documented limitation: a releitura e o `os.replace` NÃO são uma
+    #     operação atómica única, por isso duas threads a sério podem ambas
+    #     ler "v0" e ambas escrever. O que é garantido é o ficheiro ficar
+    #     íntegro e sem sobras (medido em (k)) — e está escrito no docstring.
+    check("CAS (m): a limitação está escrita no docstring",
+          "NÃO fecha um escritor externo" in inspect.getdoc(model_registry._write_active_atomic))
+    check("CAS (m): e o compare-and-set está descrito como o que fecha a janela",
+          "DECISÃO" in inspect.getdoc(model_registry._write_active_atomic))
+
+    # (n) a assinatura: o CLI continua a poder chamar sem `expected`
+    parametros = inspect.signature(model_registry._write_active_atomic).parameters
+    check("CAS (n): a assinatura é (root, version_id, expected)",
+          list(parametros) == ["root", "version_id", "expected"])
+    check("CAS (n): expected tem valor por omissão None",
+          parametros["expected"].default is None)
+
+
 def run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         raiz = Path(tmp)
@@ -1777,6 +1986,7 @@ def run() -> None:
         test_cli_evaluate(raiz)
         test_catalog_sha256(raiz)
         test_dataset_com_proveniencia(raiz)
+        test_write_active_cas(raiz)
         # Estas quatro Sections foram escritas DEPOIS do `run()` e nunca foram
         # ligadas a ele: o ficheiro passou 38/38 sem nunca as executar. É a
         # mesma lição de `model_registry.register_trained_version` (escrito e

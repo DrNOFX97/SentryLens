@@ -42,6 +42,13 @@ acidental e ficheiros alheios sem metadados, mas NÃO autentica quem escreveu
 — quem tem escrita em `models/` reescreve também o `metadata.json`. HMAC ou
 assinatura ficam fora do âmbito do R9; ver README/ROADMAP_STATUS.
 
+O mesmo limite honesto repete-se no `catalog_sha256` (D-04 do R10): o hash do
+catálogo de features mede COMPATIBILIDADE — se os `event_id_encoded` com que
+o modelo foi treinado ainda significam o mesmo — e não autenticidade. Por isso
+é publicado como `catalog_compatible: true|false|null` em cada versão, e
+**não** como um `status` novo: os `.pkl` estão íntegros numa versão cujo
+catálogo já não bate.
+
 O módulo tem também o CLI (`python model_registry.py adopt` e
 `python model_registry.py evaluate vN --events F`), que é o ÚNICO ponto do
 projecto que escreve no registo: escrever por HTTP mudaria o modelo em uso
@@ -983,7 +990,7 @@ def _materialize_version(root: Path, version_id: str, sources: dict, meta: dict)
     return meta
 
 
-def _write_active_atomic(root: Path, version_id: str) -> None:
+def _write_active_atomic(root: Path, version_id: str, expected: str | None = None) -> bool:
     """
     Escreve `models/ACTIVE` com uma linha UTF-8 (o `newline` final é o que o
     `echo` do POSIX produz; `read_active` faz `strip()`, portanto também
@@ -991,8 +998,47 @@ def _write_active_atomic(root: Path, version_id: str) -> None:
     `ACTIVE` nunca fica truncado, e um bloqueio a meio deixa o ficheiro
     anterior intacto em vez de o substituir por lixo (T-01-19).
 
+    `expected` é o COMPARE-AND-SET: com `expected="v1"`, o `ACTIVE` é relido
+    **imediatamente antes** do `os.replace` e a escrita só acontece se ainda
+    for o que o chamador leu. Devolve `True` se escreveu, `False` se não
+    escreveu porque o conteúdo já não era o esperado.
+
+    `expected=None` significa **"não compares"**, não "tem de estar ausente":
+    é o valor por omissão e o que os QUATRO chamadores existentes passam, por
+    isso o comportamento deles em disco é byte a byte o de sempre. `None` como
+    valor de comparação (quando o `ACTIVE` não existe) nunca bate com um
+    `expected` preenchido — o que é a resposta certa: esperava-se um conteúdo
+    e não há nenhum.
+
     Não decide se deve ou não escrever — quem decide é o chamador (D-01:
-    `adopt` só escreve quando não existe nenhum).
+    `adopt` só escreve quando não existe nenhum). Esta função **não levanta**
+    quando o compare-and-set falha; devolve `False` e o chamador é que traduz
+    isso em 409. Um `ACTIVE` ilegível (o `echo v1 > ACTIVE` do PowerShell 5.1,
+    em UTF-16) propaga o `ModelRegistryError` **sem escrever nada** — é
+    fail-closed, não um "escreve por cima".
+
+    Ordem do corpo (o comentário numera porque a ordem É o contrato):
+
+    1. `validate_version_id` — a validação do id é a PRIMEIRA instrução, para
+       que um id mau nunca chegue a tocar no disco;
+    2. escrever o temporário `ACTIVE.tmp-*`;
+    3. com `expected`, reler e comparar — `return False` sem `os.replace`;
+    4. `os.replace` e marcar o temporário como consumido;
+    5. `return True`.
+
+    O passo 3 é um `return` DENTRO do `try`, e é por isso que o `finally` é
+    indispensável: ele apaga o `ACTIVE.tmp-*` em qualquer caso. Sem ele, um
+    compare-and-set falhado deixaria lixo em `models/`. O `os.unlink` num
+    ficheiro já removido levanta `FileNotFoundError`, que é um `OSError` — e o
+    `except OSError: pass` do `finally` engole-o, portanto o caminho limpo
+    está garantido.
+
+    Limite honesto (T-10-04): isto fecha a janela entre a DECISÃO de activar e
+    a ESCRITA, que é de milissegundos. NÃO fecha um escritor externo que
+    escreva o `ACTIVE` DEPOIS da releitura — nem outro processo do registo a
+    correr em simultâneo, porque a releitura e o `os.replace` não são uma
+    operação atómica única. É o que a rota de activação tem de embrulhar com
+    o seu próprio lock.
     """
     vid = validate_version_id(version_id)
     tmp_name = None
@@ -1000,6 +1046,17 @@ def _write_active_atomic(root: Path, version_id: str) -> None:
         descritor, tmp_name = tempfile.mkstemp(prefix=f"{ACTIVE_FILE}.tmp-", dir=root)
         with os.fdopen(descritor, "wb") as fh:
             fh.write((vid + "\n").encode("utf-8"))
+        if expected is not None:
+            actual = read_active(root)
+            # `""` e não `str(None)`: `actual is None` é ausência, não o texto
+            # "none". `compare_digest` exige ASCII em `str`, por isso as duas
+            # pontas vão em bytes — um `expected` não-ASCII não pode levantar
+            # um TypeError num caminho de escrita.
+            if not hmac.compare_digest(
+                ("" if actual is None else actual).lower().encode("utf-8"),
+                expected.lower().encode("utf-8"),
+            ):
+                return False
         os.replace(tmp_name, root / ACTIVE_FILE)
         tmp_name = None
     except OSError as exc:
@@ -1010,6 +1067,7 @@ def _write_active_atomic(root: Path, version_id: str) -> None:
                 os.unlink(tmp_name)
             except OSError:
                 pass
+    return True
 
 
 def next_version_id(models_dir) -> str:
@@ -1301,7 +1359,9 @@ def register_trained_version(
        Se `status != "ok"` ⇒ `raise ModelRegistryError(status)`. Melhor falhar aqui do que deixar
        um ACTIVE a apontar para uma versão que não verifica.
     7. `_write_active_atomic(root, vid)` — **sobrescreve sempre** (ao contrário do `adopt`, que só escreve
-       se não existir nenhum). Este passo grava `models/ACTIVE` com o novo vid.
+       se não existir nenhum). Este passo grava `models/ACTIVE` com o novo vid. Segue a chamar
+       **sem `expected`** e **ignora** o retorno: o treino é o dono do registo, e o compare-and-set
+       (parametro `expected` do passo 7) é da rota de activação, não do CLI.
     8. Devolve `{"version": vid, "metadata": confirmado, "active_written": True}` — `confirmado` é o
        dict relido do disco (com os artifacts), não o dict em memória.
 
@@ -1361,7 +1421,9 @@ def register_trained_version(
     if status != "ok":
         raise ModelRegistryError(status)
 
-    # 7. escreve ACTIVE (sobrescreve sempre)
+    # 7. escreve ACTIVE (sobrescreve sempre, sem compare-and-set: o treino é o
+    #    dono do registo). O `bool` devolvido é ignorado aqui — quem decide
+    #    se deve ou não escrever é o CLI, e não a primitiva.
     _write_active_atomic(root, vid)
 
     # 8. devolve resultado
@@ -1390,6 +1452,11 @@ def _resume_adoption(root: Path) -> dict:
     se ia adotar. Falhar aqui é sempre preferível a ficar a servir o modelo
     errado em silêncio; a falha a escrever o `ACTIVE` volta a ser
     `registry_unavailable` e o utilizador repete o comando.
+
+    A escrita final é `ACTIVE` por `_write_active_atomic(...)` **sem**
+    compare-and-set, e o `bool` devolvido é ignorado: esta é a retoma de um
+    adopt interrompido, não uma decisão de activação — quem Activate tem um
+    `ACTIVE` a ler, e o `adopt` (D-01) não reescreve um `ACTIVE` existente.
     """
     active_path = root / ACTIVE_FILE
     if active_path.exists() or active_path.is_symlink():
@@ -1414,6 +1481,9 @@ def _resume_adoption(root: Path) -> dict:
         # nada escrito. O código original fica na `__cause__` para o log.
         raise ModelRegistryError("already_adopted") from exc
 
+    # Sem compare-and-set (`expected` omitted) e sem olhar para o `bool`: esta
+    # escrita é a recuperação de um adopt interrompido, não uma activação — o
+    # `ACTIVE` que acabámos de confirmar que não existe é o que escrevemos.
     _write_active_atomic(root, "v1")
     return {"version": "v1", "metadata": meta, "active_written": True, "resumed": True}
 
@@ -1445,6 +1515,10 @@ def adopt(models_dir) -> dict:
     (adopt completo, ou uma `v1` que não é a adoção do legado),
     `hash_mismatch` (a cópia não bate com o original) e `registry_unavailable`
     (bloqueio de I/O — nada fica a meio).
+
+    O passo 3 é `ACTIVE` por `_write_active_atomic(...)` **sem** compare-and-set
+    e **só quando não existe nenhum** (D-01); o `bool` devolvido é ignorado —
+    o `adopt` não é uma decisão de activação.
     """
     root = _root(models_dir)
     if not root.is_dir() or detect_legacy(root) is None:
