@@ -261,6 +261,70 @@ def run() -> None:
 
             main.ML_MODEL_DIR = original_dir
 
+            # --- Fixtures de treino (R10) ---
+            # Se a rota ainda não existir, falha com mensagem explícita (fail-closed).
+            # Nunca escreve um fixture de substituição.
+            treino = Path(reg_tmp) / "treino"
+            treino.mkdir(parents=True, exist_ok=True)
+            make_version(treino, "v1", model_bytes=model_bytes, scaler_bytes=scaler_bytes)
+            (treino / "ACTIVE").write_text("v1\n", encoding="utf-8")
+            main.ML_MODEL_DIR = str(treino)
+            main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
+            original_indexer = main.indexer_client.get_recent_alerts
+            try:
+                ok = client.post("/api/ml/train",
+                                 json={"dataset": "sample_fixture", "dataset_origin": "synthetic"},
+                                 headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+                if ok.status_code in (404, 405):
+                    print("[FALHOU] POST /api/ml/train não existe — a frente de backend do R10 ainda não foi executada", file=sys.stderr)
+                    sys.exit(1)
+                check("POST /api/ml/train -> 200", ok.status_code == 200)
+                if ok.status_code == 200:
+                    Path(out_dir, "train_ok.json").write_text(
+                        json.dumps(ok.json(), ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    body = ok.json()
+                    check("train_ok.json tem version/active/loaded",
+                          all(k in body for k in ("version", "active", "loaded")))
+                    # GET /api/ml/models logo a seguir ao treino -> train_pos_treino.json
+                    resp_pos = client.get("/api/ml/models")
+                    check("GET /api/ml/models (train_pos_treino.json) -> 200", resp_pos.status_code == 200)
+                    Path(out_dir, "train_pos_treino.json").write_text(
+                        json.dumps(resp_pos.json(), ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    # GET /api/ml/models depois do treino -> report_treinado.json (para o 11-03)
+                    # Só quando o metadata.json trouxer feature_stats — caso contrário
+                    # o wrapper regista como sem feature_stats e o .cjs usa os casos sintéticos.
+                    resp_treinado = client.get("/api/ml/models")
+                    report_treinado = resp_treinado.json()
+                    tem_feature_stats = False
+                    for v in report_treinado.get("versions", []):
+                        meta = v.get("metadata", {})
+                        if meta and isinstance(meta.get("dataset", {}).get("feature_stats"), dict):
+                            tem_feature_stats = True
+                            break
+                    if tem_feature_stats:
+                        Path(out_dir, "report_treinado.json").write_text(
+                            json.dumps(report_treinado, ensure_ascii=False, indent=2), encoding="utf-8"
+                        )
+                        check("report_treinado.json gravado com feature_stats", True)
+                    else:
+                        check("report_treinado.json: sem feature_stats (o .cjs usa casos sintéticos)", True)
+
+                # Caso inválido: dataset fora do Literal -> 422 (detail é lista do FastAPI)
+                mau = client.post("/api/ml/train",
+                                  json={"dataset": "inventado"},
+                                  headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+                check("POST /api/ml/train com dataset fora do Literal -> 422", mau.status_code == 422)
+                check("o 422 não devolve um código de ERROR_CODES em detail (é a lista do FastAPI)",
+                      not (isinstance(mau.json().get("detail"), str)))
+                Path(out_dir, "train_422.json").write_text(
+                    json.dumps(mau.json(), ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            finally:
+                main.indexer_client.get_recent_alerts = original_indexer
+            main.ML_MODEL_DIR = original_dir
+
             # As três janelas de /api/ml-anomalies: com amostra, vazia e a
             # encher o tecto de 1000 alertas (o caso alerts_truncated).
             ml_anomalies_fixtures(client, out_dir)

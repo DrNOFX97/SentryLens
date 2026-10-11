@@ -137,9 +137,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 11-01-PLAN.md — `ml_models.js` ganha `mlmPost`, o botão Treinar e o aviso `loaded != active` (wave 1)
-- [ ] 11-02-PLAN.md — `ml_evaluation.js` ganha a comparação vN vs vN-1 derivada, mais `model_version` no bloco ao vivo e o hash do catálogo no detalhe (wave 2)
-- [ ] 11-03-PLAN.md — Fecho: `feature_stats` lido contra o `metadata.json` real, suite completa e a pergunta em aberto da sidebar (wave 3)
+- [x] 11-01-PLAN.md — `ml_models.js` ganha `mlmPost`, o botão Treinar e o aviso `loaded != active` (wave 1)
+- [x] 11-02-PLAN.md — `ml_evaluation.js` ganha a comparação vN vs vN-1 derivada, mais `model_version` no bloco ao vivo e o hash do catálogo no detalhe (wave 2)
+- [x] 11-03-PLAN.md — Fecho: `feature_stats` lido contra o `metadata.json` real, suite completa e a pergunta em aberto da sidebar (wave 3)
 **Nota:** estes três planos foram escritos **antes** do backend do R10 existir — o 11-03 existe precisamente para conferir as hipóteses deles contra a resposta real (`feature_stats`, `model_version`).
 
 ## Progress
@@ -153,4 +153,4 @@ Phases execute in order: 1 → 2 → 3 → 10 → 11
 | 2. Avaliação ligada à versão | 4/4 | Complete | 2026-10-10 |
 | 3. Treino gera versões, testes e documentação | 3/3 | Complete | 2026-10-11 |
 | 10. Registo, motor e superfície HTTP (backend do R10) | 3/3 | Complete | 2026-10-11 |
-| 11. O learning loop no dashboard (frontend do R10) | 0/3 | Planned | - |
+| 11. O learning loop no dashboard (frontend do R10) | 3/3 | Complete | 2026-10-11 |

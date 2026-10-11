@@ -102,7 +102,10 @@ const {
 const helpersEval = vm.runInContext(
   "({ mleEmptyState, mlePercent, mleMetricCell, mleBuildEvalRows, mleEvalNoticeText,"
   + "   mleOriginHtml, mleSmallSampleNotice, mleBuildLiveAgreement, mleLiveErrorHtml,"
-  + "   mleLiveErrorMessage, MLE_LIVE_SEM_DADOS, MLE_LIVE_TRUNCADO, MLE_ORIGIN_AVISO })",
+  + "   mleLiveErrorMessage, MLE_LIVE_SEM_DADOS, MLE_LIVE_TRUNCADO, MLE_ORIGIN_AVISO,"
+  + "   mleFeatureStatsNotice, mleLiveModelText, mleComparePairs, mleCompareRows,"
+  + "   mleCompareNoticeText, mleVersionNumber, mleNumeradas, mleDeltaPontos,"
+  + "   mleDeltaTexto, mleVeredicto })",
   ctx
 );
 const {
@@ -119,6 +122,16 @@ const {
   MLE_LIVE_SEM_DADOS,
   MLE_LIVE_TRUNCADO,
   MLE_ORIGIN_AVISO,
+  mleFeatureStatsNotice,
+  mleLiveModelText,
+  mleComparePairs,
+  mleCompareRows,
+  mleCompareNoticeText,
+  mleVersionNumber,
+  mleNumeradas,
+  mleDeltaPontos,
+  mleDeltaTexto,
+  mleVeredicto,
 } = helpersEval;
 
 // --- relatórios reais gerados pelo wrapper ------------------------------------
@@ -153,6 +166,25 @@ const mlReportVazio = JSON.parse(
   fs.readFileSync(path.join(fixturesDir, "ml_report_vazio.json"), "utf8"));
 const mlReportTruncado = JSON.parse(
   fs.readFileSync(path.join(fixturesDir, "ml_report_truncado.json"), "utf8"));
+
+// --- Fixtures de treino (R10, 11-03) -----------------------------------------
+//
+// report_treinado.json: resposta de GET /api/ml/models depois de um treino real
+// pelo POST /api/ml/train, com dataset.feature_stats no metadata.json.
+// Só existe se o backend tiver gravado feature_stats; caso contrário o wrapper
+// não o escreve e os casos abaixo usam o ramo fail-closed (sem números).
+let reportTreinado = null;
+try {
+  const caminhoTreinado = path.join(fixturesDir, "report_treinado.json");
+  if (fs.existsSync(caminhoTreinado)) {
+    reportTreinado = JSON.parse(fs.readFileSync(caminhoTreinado, "utf8"));
+    check("report_treinado.json carregado do wrapper (com feature_stats)", true);
+  } else {
+    check("report_treinado.json não existe (sem feature_stats — ramo fail-closed)", true);
+  }
+} catch (e) {
+  check("report_treinado.json falhou ao carregar", false);
+}
 
 // --- mlmErrorText: cada código de D-06 traduzido, nunca em bruto -------------
 
@@ -1080,6 +1112,239 @@ for (const codigo of ["codigo_inventado", undefined, "<img src=x>", ""]) {
 check("mleLiveErrorHtml nunca devolve a mensagem de erro em cru",
   mleLiveErrorMessage("http_502") !== "<div></div>"
   && !mleLiveErrorMessage("http_502").includes("<"));
+
+// --- feature_stats real (R10, 11-03) -----------------------------------------
+// Se report_treinado.json existe (o wrapper gravou com feature_stats),
+// provamos o aviso de D-03 com números REAIS do lote.
+// Se não existe, testamos o ramo fail-closed (sem números).
+if (reportTreinado) {
+  check("report_treinado.json tem feature_stats no metadata", 
+    (reportTreinado.versions || []).some(v => 
+      v.metadata && v.metadata.dataset && typeof v.metadata.dataset.feature_stats === "object"
+    ));
+  const entryComStats = reportTreinado.versions.find(v => 
+    v.metadata && v.metadata.dataset && typeof v.metadata.dataset.feature_stats === "object"
+  );
+  if (entryComStats) {
+    const aviso = mleFeatureStatsNotice(entryComStats);
+    check("mleFeatureStatsNotice com feature_stats real -> aviso com números",
+      typeof aviso === "string" && aviso.length > 0 && aviso.includes("mean") && aviso.includes("std"));
+    check("mleFeatureStatsNotice avisa que números são do lote, não do modelo",
+      aviso.includes("lote de treino") && aviso.includes("não o comportamento do modelo"));
+  }
+} else {
+  // Ramo fail-closed: feature_stats ausente ou forma desconhecida
+  const entrySemStats = versioned({ metadata: { dataset: {} } });
+  const avisoVazio = mleFeatureStatsNotice(entrySemStats);
+  check("mleFeatureStatsNotice sem feature_stats -> aviso vazio",
+    avisoVazio === "");
+  const entryFormaInvalida = versioned({ metadata: { dataset: { feature_stats: "não-é-objecto" } } });
+  const avisoInvalido = mleFeatureStatsNotice(entryFormaInvalida);
+  check("mleFeatureStatsNotice com feature_stats inválida -> aviso vazio",
+    avisoInvalido === "");
+}
+
+// --- model_version real no bloco ao vivo (D-06, 11-03) ------------------------
+// O ml_report_ok.json real (vindo do wrapper com o treino a sério) deve trazer
+// model_version. O bloco ao vivo deve mostrá-lo via mleLiveModelText.
+if (typeof mlReportOk.model_version === "string" && mlReportOk.model_version.trim() !== "") {
+  check("ml_report_ok.json real tem model_version",
+    typeof mlReportOk.model_version === "string" && mlReportOk.model_version.trim().length > 0);
+  const texto = mleLiveModelText(mlReportOk);
+  check("mleLiveModelText com model_version real -> texto inclui a versão",
+    texto.includes(mlReportOk.model_version));
+  check("mleLiveModelText não contém HTML cru",
+    !texto.includes("<") && !texto.includes(">"));
+} else {
+  check("ml_report_ok.json NÃO tem model_version (bloqueio D-06)",
+    !mlReportOk.hasOwnProperty("model_version") || mlReportOk.model_version === null || mlReportOk.model_version === "");
+}
+
+// --- Treino (R10) - mlmTrainBody / mlmTrainButtonState / mlmTrainResult /
+//     mlmTrainErrorText / mlmPost --------------------------------------------
+//
+// Um fetch stubado no contexto para exercitar mlmPost sem rede. O stub regista
+// (url, options) e devolve um Response-like já feito. Só mlmPost o usa;
+// mlmRequest e ml_evaluation.js continuam intactos.
+const fetchCalls = [];
+const mlmFakeFetch = async (url, options) => {
+  fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
+  // Devolve um Response-like mínimo com ok, status, json() assíncrona
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ version: "v3", active: "v3", loaded: "v3" }),
+  };
+};
+vm.runInContext("({})", vm.createContext({ fetch: mlmFakeFetch, console }), { filename: "stub.js" });
+
+// Re-carregar o contexto com o fetch stubado para mlmPost poder usá-lo
+const ctxTrain = vm.createContext({ escapeHtml, console, fetch: mlmFakeFetch });
+vm.runInContext(mlSource, ctxTrain, { filename: "ml_models.js" });
+vm.runInContext(mleSource, ctxTrain, { filename: "ml_evaluation.js" });
+
+const helpersTrain = vm.runInContext(
+  "({ MLM_TRAIN_DATASETS, MLM_TRAIN_ORIGINS, MLM_TRAIN_ERROR_TEXT,"
+  + " MLM_TRAIN_HTTP_TEXT, MLM_TRAIN_GENERIC_ERROR, mlmTrainBody, mlmTrainButtonState,"
+  + " mlmTrainResult, mlmTrainErrorText, mlmPost })",
+  ctxTrain
+);
+const {
+  MLM_TRAIN_DATASETS,
+  MLM_TRAIN_ORIGINS,
+  MLM_TRAIN_ERROR_TEXT,
+  MLM_TRAIN_HTTP_TEXT,
+  MLM_TRAIN_GENERIC_ERROR,
+  mlmTrainBody,
+  mlmTrainButtonState,
+  mlmTrainResult,
+  mlmTrainErrorText,
+  mlmPost,
+} = helpersTrain;
+
+// --- mlmTrainBody: DUAS chaves, listas fechadas, omissões do servidor --------
+check("mlmTrainBody: dataset válido + origin válido -> duas chaves exatas",
+  JSON.stringify(mlmTrainBody("latest_export", "real")) === '{"dataset":"latest_export","dataset_origin":"real"}');
+check("mlmTrainBody: dataset inválido -> omissão latest_export",
+  mlmTrainBody("inventado", "real").dataset === "latest_export");
+check("mlmTrainBody: origin inválido -> omissão unknown",
+  mlmTrainBody("latest_export", "inventado").dataset_origin === "unknown");
+check("mlmTrainBody: null/undefined -> omissões",
+  JSON.stringify(mlmTrainBody(null, undefined)) === '{"dataset":"latest_export","dataset_origin":"unknown"}');
+check("mlmTrainBody: nunca contém contamination/random_state/n_estimators",
+  !JSON.stringify(mlmTrainBody("latest_export", "real")).includes("contamination")
+  && !JSON.stringify(mlmTrainBody("latest_export", "real")).includes("random_state")
+  && !JSON.stringify(mlmTrainBody("latest_export", "real")).includes("n_estimators"));
+
+// --- mlmTrainButtonState: estado do botão sem DOM ----------------------------
+check("mlmTrainButtonState(true) -> {text:'A treinar…', disabled:true}",
+  JSON.stringify(mlmTrainButtonState(true)) === '{"text":"A treinar…","disabled":true}');
+check("mlmTrainButtonState(false) -> {text:'Treinar', disabled:false}",
+  JSON.stringify(mlmTrainButtonState(false)) === '{"text":"Treinar","disabled":false}');
+
+// --- mlmTrainResult: quatro estados, texto simples nunca HTML ----------------
+check("mlmTrainResult: ok (loaded===active)",
+  JSON.stringify(mlmTrainResult({ version: "v3", active: "v3", loaded: "v3" }))
+    .includes("foi criada, está ativa e é a versão que o backend está a usar"));
+check("mlmTrainResult: reiniciar (loaded!==active)",
+  JSON.stringify(mlmTrainResult({ version: "v3", active: "v3", loaded: "v1" }))
+    .includes("reiniciar o backend")
+    && JSON.stringify(mlmTrainResult({ version: "v3", active: "v3", loaded: "v1" })).includes("v3")
+    && JSON.stringify(mlmTrainResult({ version: "v3", active: "v3", loaded: "v1" })).includes("v1"));
+check("mlmTrainResult: nao_ativa (loaded null/undefined, active presente)",
+  JSON.stringify(mlmTrainResult({ version: "v3", active: "v1", loaded: null }))
+    .includes("versão ativa continua a ser"));
+check("mlmTrainResult: incompleto (sem version string)",
+  JSON.stringify(mlmTrainResult({})).includes("não há forma de dizer o que foi treinado"));
+check("mlmTrainResult: incompleto (version não string)",
+  JSON.stringify(mlmTrainResult({ version: 42 })).includes("não há forma de dizer o que foi treinado"));
+check("mlmTrainResult: devolve object com estado e texto (escape feito no DOM)",
+  typeof mlmTrainResult({ version: "<script>", active: "v1", loaded: "v1" }).texto === "string"
+  && mlmTrainResult({ version: "<script>", active: "v1", loaded: "v1" }).texto.includes("<script>"));
+
+// --- mlmTrainErrorText: códigos de treino + HTTP + delegação ao registo ------
+check("mlmTrainErrorText: training_in_progress -> frase completa sem o código",
+  mlmTrainErrorText("training_in_progress") === "Já há um treino a correr — o servidor só aceita um de cada vez (D-01.2). Espera que o primeiro termine e volta a carregar em «Treinar».");
+check("mlmTrainErrorText: dataset_unavailable -> frase completa",
+  mlmTrainErrorText("dataset_unavailable") === "O conjunto de dados pedido não está disponível no servidor: o export do Indexer falhou ou não há eventos na janela. Confirma que o Wazuh Indexer está ligado e olha o backend.log.");
+check("mlmTrainErrorText: training_failed -> frase completa",
+  mlmTrainErrorText("training_failed") === "O treino falhou a meio e nenhuma versão nova ficou registada. O motivo está no backend.log.");
+check("mlmTrainErrorText: models_dir_unavailable -> frase completa",
+  mlmTrainErrorText("models_dir_unavailable") === "Não foi possível escrever em scripts/models/ (permissões ou disco cheio). Corrige as permissões e olha o backend.log.");
+check("mlmTrainErrorText: http_422 -> frase de MLM_TRAIN_HTTP_TEXT",
+  mlmTrainErrorText("http_422") === "O servidor recusou o pedido — um dos parâmetros está fora dos valores aceites. Volta a carregar em «Treinar» sem alterar os campos.");
+check("mlmTrainErrorText: http_409 -> mesma frase de training_in_progress",
+  mlmTrainErrorText("http_409") === "Já há um treino a correr — o servidor só aceita um de cada vez (D-01.2). Espera que o primeiro termine e volta a carregar em «Treinar».");
+check("mlmTrainErrorText: código do registo (unauthorized) -> delega a mlmErrorText",
+  mlmTrainErrorText("unauthorized") !== MLM_TRAIN_GENERIC_ERROR
+  && mlmTrainErrorText("unauthorized") === mlmErrorText("unauthorized"));
+check("mlmTrainErrorText: código do registo (registry_unavailable) -> delega a mlmErrorText",
+  mlmTrainErrorText("registry_unavailable") !== MLM_TRAIN_GENERIC_ERROR
+  && mlmTrainErrorText("registry_unavailable") === mlmErrorText("registry_unavailable"));
+check("mlmTrainErrorText: código inventado -> genérica",
+  mlmTrainErrorText("codigo_inventado") === MLM_TRAIN_GENERIC_ERROR);
+check("mlmTrainErrorText: null/undefined -> genérica",
+  mlmTrainErrorText(null) === MLM_TRAIN_GENERIC_ERROR
+  && mlmTrainErrorText(undefined) === MLM_TRAIN_GENERIC_ERROR);
+
+// --- mlmPost: mesmo tratamento de erro de mlmRequest -------------------------
+fetchCalls.length = 0;
+const fakeFetch200 = async (url, options) => {
+  fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ version: "v3", active: "v3", loaded: "v3" }),
+  };
+};
+vm.runInContext("({})", vm.createContext({ fetch: fakeFetch200, console }), { filename: "stub2.js" });
+const ctxPost = vm.createContext({ escapeHtml, console, fetch: fakeFetch200, API_BASE: "/api", API_KEY: "test-key" });
+vm.runInContext(mlSource, ctxPost, { filename: "ml_models.js" });
+// Usar mlmPost e mlmCodeFromResponse do contexto novo (evita redeclarar no mesmo scope)
+const { mlmPost: mlmPost2, mlmCodeFromResponse: mlmCodeFromResponse2 } = vm.runInContext(
+  "({ mlmPost, mlmCodeFromResponse })",
+  ctxPost
+);
+
+check("mlmPost 200 -> devolve JSON parseado",
+  (async () => {
+    const r = await mlmPost2("/api/ml/train", { dataset: "latest_export", dataset_origin: "real" });
+    return r.version === "v3" && r.active === "v3" && r.loaded === "v3";
+  })());
+
+check("mlmPost: url, method POST, headers X-API-Key + Content-Type, body JSON",
+  (async () => {
+    fetchCalls.length = 0;
+    await mlmPost2("/api/ml/train", { dataset: "latest_export", dataset_origin: "real" });
+    const c = fetchCalls[0];
+    return c.url === "/api/ml/train"
+      && c.options.method === "POST"
+      && c.options.headers["X-API-Key"] === "test-key"
+      && c.options.headers["Content-Type"] === "application/json"
+      && c.options.body === '{"dataset":"latest_export","dataset_origin":"real"}';
+  })());
+
+check("mlmPost 409 -> rejeita Error('training_in_progress')",
+  (async () => {
+    fetchCalls.length = 0;
+    const fakeFetch409 = async (url, options) => {
+      fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
+      return { ok: false, status: 409, json: async () => ({ detail: "training_in_progress" }) };
+    };
+    const ctx409 = vm.createContext({ escapeHtml, console, fetch: fakeFetch409, API_BASE: "/api", API_KEY: "test-key" });
+    vm.runInContext(mlSource, ctx409, { filename: "ml_models.js" });
+    const { mlmPost: mlmPost409 } = vm.runInContext("({ mlmPost })", ctx409);
+    try { await mlmPost409("/api/ml/train", {}); return false; }
+    catch (e) { return e.message === "training_in_progress"; }
+  })());
+
+check("mlmPost corpo não-JSON -> rejeita Error('http_500')",
+  (async () => {
+    fetchCalls.length = 0;
+    const fakeFetch500 = async (url, options) => {
+      fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
+      return { ok: false, status: 500, json: async () => { throw new Error("não é JSON"); } };
+    };
+    const ctx500 = vm.createContext({ escapeHtml, console, fetch: fakeFetch500, API_BASE: "/api", API_KEY: "test-key" });
+    vm.runInContext(mlSource, ctx500, { filename: "ml_models.js" });
+    const { mlmPost: mlmPost500 } = vm.runInContext("({ mlmPost })", ctx500);
+    try { await mlmPost500("/api/ml/train", {}); return false; }
+    catch (e) { return e.message === "http_500"; }
+  })());
+
+check("mlmPost 422 com detail lista -> rejeita Error('http_422')",
+  (async () => {
+    fetchCalls.length = 0;
+    const fakeFetch422 = async (url, options) => {
+      fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
+      return { ok: false, status: 422, json: async () => ({ detail: [{ loc: ["body", "dataset"] }] }) };
+    };
+    const ctx422 = vm.createContext({ escapeHtml, console, fetch: fakeFetch422, API_BASE: "/api", API_KEY: "test-key" });
+    vm.runInContext(mlSource, ctx422, { filename: "ml_models.js" });
+    const { mlmPost: mlmPost422 } = vm.runInContext("({ mlmPost })", ctx422);
+    try { await mlmPost422("/api/ml/train", {}); return false; }
+    catch (e) { return e.message === "http_422"; }
+  })());
 
 // --- fim ---------------------------------------------------------------------
 
