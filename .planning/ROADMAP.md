@@ -62,11 +62,12 @@ Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
   3. Cada vaccine liga à origem — `attack_id`, cenário, técnica MITRE, incidentes e evidência por referência (nunca cópia de payload) — e tem um id determinístico: correr o motor duas vezes sobre os mesmos ataques dá os mesmos ids e nenhum duplicado.
   4. Sem amostra (nenhum ataque lançado) ou com uma fonte indisponível, o motor devolve "Sem dados" ou um código estável; nunca fabrica uma vaccine para encher a lista.
 
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] 12-01-PLAN.md — Tracer: registo real -> build_vaccine_candidates com proposals[], origem e ids golden; saltos D-04, matriz de vereditos e determinismo (VAC-01, VAC-02, VAC-03)
+- [ ] 12-01-PLAN.md — Tracer: registo real -> build_vaccine_candidates com proposals[], origem e ids golden; sensores em falta via attack_library; saltos D-04, matriz de vereditos e determinismo (VAC-01, VAC-02, VAC-03)
 - [ ] 12-02-PLAN.md — validate_vaccine (contrato fechado, nenhum comando) e três estados honestos no_data/source_unavailable/tudo unknown; suite completa verde (VAC-02, VAC-04)
+- [ ] 12-03-PLAN.md — Escritor do attack log grava id (max+1, fail-closed, sem backfill); entrada do escritor real -> registo -> motor -> vaccine validada (VAC-03)
 
 **UI hint**: no — módulo puro sem I/O; a superfície visível chega na Phase 14.
 

@@ -326,7 +326,7 @@ Ordenar `vaccines` por `origin.attack_id` descendente (independente da ordem de 
 ### Pitfall 1: O escritor do attack_log não grava `id` (motor inerte em dados reais)
 **What goes wrong:** `format_log_entry` constrói `{"timestamp","scenario","target","tool","status","details"}` e só acrescenta `operator`/`source`/`expected` — nenhum `id`. [VERIFIED: scripts/attack_scenarios.py:263-276]. O `scripts/attack_log.jsonl` atual tem 12 linhas, todas com `"id"` (1..12), semeadas à mão (formato `{"scenario":...,"id":1,"technique":"T1046","tool":"nmap"}`). [VERIFIED: leitura do ficheiro + `grep -c '"id"'` = 12 de 12 linhas]. Um ataque novo lançado por `attack_scenarios.py` fica `id: null` no registry (`normalize_attack_id(None)` -> `None`), e por D-04 conta-se em `skipped.no_attack_id` e **nunca gera vaccine**.
 **Why it happens:** o R4 definiu o `id` como "o id do registo" mas nunca implementou a atribuição no escritor; `docs/superpowers/specs/2026-10-07-r4-attack-registry-design.md` aceita `id: null` para o formato antigo.
-**How to avoid:** não é desta fase (D-04 é decisão bloqueada). O motor tem de contar e devolver `skipped.no_attack_id` e o teste tem de o cobrir. Registar como dívida/risco para o utilizador decidir (Open Question 2).
+**How to avoid:** não é desta fase (D-04 é decisão bloqueada). O motor tem de contar e devolver `skipped.no_attack_id` e o teste tem de o cobrir. Registar como dívida/risco para o utilizador decidir (Open Question 2). **Atualização (2026-10-11):** o utilizador decidiu incluir a correção nesta fase — plano 12-03 (ver Open Question 2, RESOLVED); D-04 continua a valer para entradas antigas sem `id`.
 **Warning signs:** `considered.not_detected > 0` mas `total == 0` e `skipped.no_attack_id > 0` em dados reais.
 
 ### Pitfall 2: `duplicate_id` marca TODAS as entradas com o mesmo id
@@ -442,6 +442,8 @@ check("validate_vaccine rejeita comando", vaccine_engine.validate_vaccine(bad) !
 
 Não aplicável: fase greenfield (módulo novo), sem rename/refactor/migração. Nenhum dado armazenado, serviço, registo do SO, variável de ambiente ou artefacto de build é afetado.
 
+**Atualização (2026-10-11, plano 12-03):** as entradas novas de `scripts/attack_log.jsonl` passam a levar a chave `id` (max+1). Não há migração: as linhas existentes não são reescritas (sem backfill, por decisão do utilizador) e o leitor (`feature_extractor.load_attack_log`) e o registo já aceitam entradas com e sem `id`.
+
 ## Assumptions Log
 
 | # | Claim | Section | Risk if Wrong |
@@ -455,20 +457,23 @@ Não aplicável: fase greenfield (módulo novo), sem rename/refactor/migração.
 | A7 | `skipped.no_missing_sensors` e `skipped.no_event_ids` são ramos defensivos que o registry real nunca produz (esperado nunca vazio; `event_ids` de `SCENARIOS` nunca vazio). | Diagrama | Se existirem cenários sem `event_ids`, o motor salta-os em vez de propor uma regra vazia — comportamento honesto. |
 | A8 | Rascunho PT das `recommendation` de `ml`/`network`. | Code Examples | Texto é discrição do CONTEXT; confirmar redação. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`sensor` singular (D-07) vs vários sensores em falta (D-01/D-02)?**
    - What we know: um ataque `not_detected` tem `missing_sensors` = todos os esperados (hoje `["rule","ml"]` para 4 dos 5 cenários, por `attack_library.yaml`); D-02 exige um candidato por ataque; D-07 diz "Cada vaccine tem `sensor` ∈ {rule, ml, network}" com `rule: null` para ml/network.
    - What's unclear: como uma vaccine com `missing_sensors == ["rule","ml"]` tem um único `sensor`.
    - Recommendation: `proposals[]` (uma por sensor em falta), cada uma com `sensor`/`rule`/`recommendation` exatamente como D-07. Alternativas: (b) `sensor` de topo = sensor primário (rule > ml > network) perdendo as outras propostas, ou (c) um candidato por (ataque, sensor), que contradiz D-02. Pedir confirmação rápida ao utilizador; é a única decisão com custo a jusante.
+   - **RESOLVED (2026-10-11):** o utilizador confirmou `proposals[]` — CONTEXT, "Decisão posterior", D-07 refinado: uma vaccine por ataque com uma entrada por sensor em falta (`sensor`, `rule`, `recommendation`) e sem `sensor` singular no topo. Implementado no plano 12-01.
 
 2. **Ataques lançados pelo CLI não têm `id` (Pitfall 1).**
    - What we know: `format_log_entry` não grava `id`; só o log semeado tem; D-04 salta `id` inválido.
    - What's unclear: quem atribuirá ids no escritor (R4 deixou "id do registo" por implementar) para o motor gerar vaccines com dados reais.
-   - Recommendation: manter D-04 e a fase como está (fixtures); registar como dívida visível ao utilizador antes da Phase 13/14 (a UI mostraria "0 vaccines" com `skipped.no_attack_id > 0`). Não alterar `attack_scenarios.py` nesta fase (fora do âmbito).
+   - Recommendation (original): manter D-04 e a fase como está (fixtures); registar como dívida visível ao utilizador antes da Phase 13/14 (a UI mostraria "0 vaccines" com `skipped.no_attack_id > 0`). Não alterar `attack_scenarios.py` nesta fase (fora do âmbito).
+   - **RESOLVED (2026-10-11):** a recomendação original foi substituída por decisão do utilizador (CONTEXT, "Âmbito alargado"): o plano 12-03 faz `attack_scenarios.format_log_entry` gravar um `id` válido (max+1 sobre o log, atribuído por `run_scenario` antes de lançar) em cada entrada nova, com teste de que uma entrada do escritor real chega a uma vaccine através do registo e do motor. D-04 mantém-se: entradas antigas sem `id` continuam em `skipped.no_attack_id` (sem backfill).
 
 3. **Política para vaccines antigas do mesmo `attack_id` quando o id evolui (Pitfall 6).**
    - Recommendation: deixar explícito no handoff para a Phase 13; nada a fazer no motor.
+   - **RESOLVED (2026-10-11):** entregue à Phase 13 (CONTEXT, "Âmbito alargado", última frase). Nesta fase o motor só garante ids determinísticos e sem duplicados ao reprocessar a mesma entrada; os SUMMARY dos planos 12-01 e 12-03 registam o handoff.
 
 ## Environment Availability
 
