@@ -9,6 +9,7 @@ Correr (a partir de scripts/):
     python test_vaccine_engine.py
 """
 
+import ast
 import copy
 import json
 import re
@@ -348,9 +349,168 @@ def run_selection() -> None:
     check("invariante: registo das fixtures", invariant_holds(first))
 
 
+# Deny-list de comandos (VAC-02): metacaracteres de shell, nomes de ferramentas,
+# opções --x e IPv4. Aplicada a TODAS as strings (chaves e valores).
+DENY_RE = re.compile(r"[;&|`$<>\\]|\b(netexec|hydra|psexec|nmap|schtasks|powershell|cmd|bash|sudo|curl|wget|rm|whoami)\b|--[a-z]|\b\d{1,3}(?:\.\d{1,3}){3}\b", re.IGNORECASE)
+
+ENGINE_ALLOWED_IMPORTS = {"__future__", "hashlib", "re", "attack_registry", "event_catalog", "redblue_correlator"}
+ENGINE_FORBIDDEN_CALLS = {"open", "print", "input", "eval", "exec", "compile", "__import__", "breakpoint"}
+
+
+def walk_strings(value):
+    """Todas as strings (chaves e valores) de dicts, listas e tuplos."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from walk_strings(key)
+            yield from walk_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from walk_strings(item)
+    elif isinstance(value, str):
+        yield value
+
+
+def run_contract() -> None:
+    build = vaccine_engine.build_vaccine_candidates
+    validate = vaccine_engine.validate_vaccine
+
+    corpus: list[tuple[str, dict]] = []
+
+    def add(label: str, out: dict) -> None:
+        for vac in out["vaccines"]:
+            corpus.append((f"{label}/{vac['id']}", vac))
+
+    # (a) fixtures, (b) com incidentes, (c) truncagem.
+    reg = attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS)
+    add("fixtures", build(reg))
+    incs = [{"id": "INC-20261007-001", "severity": "high", "status": "NEW", "evidence_count": 2, "attack_ids": [2, 3]}]
+    add("incidentes", build(attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS, incidents=incs)))
+    add("truncado", build(attack_registry.build_attack_registry(ATTACKS, SCENARIOS, ML_RESULTS, alerts_truncated=True),
+                          correlation={"available": True, "alerts_truncated": True}))
+
+    # (d) ataque hostil pelo registo real: texto livre com comandos no log.
+    hostile_log = [{"id": 30, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(60), "status": "launched",
+                    "technique": "T1110 netexec smb 192.0.2.10", "tool": "hydra -l admin", "operator": "x; rm -rf",
+                    "details": {"command": "netexec smb 192.0.2.10 --shares"}}]
+    hostile_incs = [{"id": "INC-20261007-001", "attack_ids": [30]}, {"id": "X; rm", "attack_ids": [30]}]
+    out_hostile = build(attack_registry.build_attack_registry(hostile_log, SCENARIOS, [], incidents=hostile_incs))
+    add("hostil", out_hostile)
+
+    # (e) à mão: Pitfall 3, event_ids filtrados, tipos de deteção de rede sujos.
+    add("pitfall3", build({"attacks": [make_attack(5, "partial", ["network"], ["rule"])]}))
+    add("event_ids", build({"attacks": [make_attack(6, "not_detected", ["rule"], [], event_ids=[5140, True, "5145", 5140, -1])]}))
+    net_attack = make_attack(7, "not_detected", ["rule", "ml", "network"], [])
+    net_attack["evidence"]["network_detection_types"] = ["port_scan", "bad type; rm"]
+    out_net = build({"attacks": [net_attack]})
+    add("rede", out_net)
+
+    check(f"contrato: corpus com vaccines suficientes ({len(corpus)})", len(corpus) >= 8)
+    for label, vac in corpus:
+        problems = validate(vac)
+        check(f"contrato: validate_vaccine == [] para {label}", problems == [])
+
+    # Varrimento: nenhuma string de nenhuma vaccine casa a deny-list.
+    offenders = [(label, s) for label, vac in corpus for s in walk_strings(vac) if DENY_RE.search(s)]
+    check(f"varrimento: nenhuma string do corpus casa DENY_RE {offenders[:3]}", not offenders)
+    check("varrimento: o gerador vê chaves e valores", "proposals" in set(walk_strings(corpus[0][1]))
+          and corpus[0][1]["id"] in set(walk_strings(corpus[0][1])))
+
+    # Sanidade das fontes da allowlist.
+    check("sanidade: RECOMMENDATIONS não casam DENY_RE",
+          not any(DENY_RE.search(text) for text in vaccine_engine.RECOMMENDATIONS.values()))
+    from event_catalog import CRITICAL_EVENTS
+    check("sanidade: nomes/severidades de CRITICAL_EVENTS não casam DENY_RE",
+          not any(DENY_RE.search(str(v.get("name", ""))) or DENY_RE.search(str(v.get("severity", "")))
+                  for v in CRITICAL_EVENTS.values()))
+    check("sanidade: o DENY_RE apanha mesmo comandos",
+          all(DENY_RE.search(s) for s in ("netexec smb 192.0.2.10 --shares", "T1110; rm -rf /", "smb_enum && whoami",
+                                          "hydra -l admin", "INC-1; drop", "$(id)", "a|b",
+                                          "T1110 netexec smb 192.0.2.10")))
+
+    # Negativos sobre a vaccine 2 das fixtures (tem proposta rule e ml).
+    base = next(v for v in build(reg)["vaccines"] if v["origin"]["attack_id"] == 2)
+    check("negativos: a base (ataque 2) é válida e tem rule e ml",
+          validate(base) == [] and [p["sensor"] for p in base["proposals"]] == ["rule", "ml"])
+
+    def negative(label: str, mutate) -> None:
+        bad = copy.deepcopy(base)
+        mutate(bad)
+        problems = validate(bad)
+        check(f"negativo: {label} -> rejeitado {problems}", problems != [])
+
+    negative("recommendation de ml com comando", lambda v: v["proposals"][1].update(recommendation="netexec smb 192.0.2.10 --shares"))
+    negative("recommendation de rule passa a texto", lambda v: v["proposals"][0].update(recommendation="Rever a regra."))
+    negative("chave extra 'command' na vaccine", lambda v: v.update(command="x"))
+    negative("chave extra 'command' em rule", lambda v: v["proposals"][0]["rule"].update(command="x"))
+    negative("chave em falta em origin", lambda v: v["origin"].pop("scenario"))
+    negative("rule.min_count = 5", lambda v: v["proposals"][0]["rule"].update(min_count=5))
+    negative("rule.window_seconds = 60", lambda v: v["proposals"][0]["rule"].update(window_seconds=60))
+    negative("rule.event_ids = []", lambda v: v["proposals"][0]["rule"].update(event_ids=[]))
+    negative("mitre_technique com comando", lambda v: v["origin"].update(mitre_technique="T1110; rm -rf /"))
+    negative("scenario com comando", lambda v: v["origin"].update(scenario="smb_enum && whoami"))
+    negative("incident_ids com comando", lambda v: v["origin"].update(incident_ids=["INC-1; drop"]))
+    negative("events[0].name alterado", lambda v: v["proposals"][0]["events"][0].update(name="Outro nome"))
+    negative("id trocado por outro hex válido (id_mismatch)", lambda v: v.update(id="vac-000000000000"))
+    negative("proposals por ordem invertida", lambda v: v["proposals"].reverse())
+    negative("missing_sensors com sensor fora de EXPECTED_SOURCES", lambda v: v["missing_sensors"].append("bogus"))
+    negative("matched_alert_count = True", lambda v: v["origin"]["evidence"].update(matched_alert_count=True))
+    negative("chave extra na origem", lambda v: v["origin"].update(tool="hydra"))
+    negative("verdict fora de GENERATING_VERDICTS", lambda v: v.update(verdict="detected"))
+    negative("expected_source desconhecido", lambda v: v.update(expected_source="outro"))
+    negative("event_ids com bool", lambda v: v["proposals"][0]["rule"].update(event_ids=[True, 5145]))
+    negative("tipo de deteção de rede com comando", lambda v: v["origin"]["evidence"].update(network_detection_types=["x; rm"]))
+    negative("matched_event_ids com texto", lambda v: v["origin"]["evidence"].update(matched_event_ids=["5140"]))
+    negative("attack_id como texto", lambda v: v["origin"].update(attack_id="2"))
+    negative("mitre_tactic com comando", lambda v: v["origin"].update(mitre_tactic="Discovery; rm"))
+    negative("events com severidade alterada", lambda v: v["proposals"][0]["events"][0].update(severity="critical"))
+    negative("proposta ml com rule preenchida", lambda v: v["proposals"][1].update(rule={"event_ids": [1], "min_count": 1, "window_seconds": 300}))
+
+    for odd in (None, "x", [], 5, {}):
+        try:
+            problems = validate(odd)
+            ok = isinstance(problems, list) and problems != []
+        except Exception as exc:  # noqa: BLE001 - o teste prova que nunca levanta
+            ok = False
+            problems = repr(exc)
+        check(f"validate_vaccine({odd!r}) -> lista não vazia, sem exceção", ok)
+    codes = validate({"id": 5})
+    check("validate_vaccine: códigos ordenados e sem repetidos",
+          codes == sorted(set(codes)) and all(isinstance(c, str) for c in codes))
+
+    # Hostil pelo registo.
+    hv = out_hostile["vaccines"]
+    check("hostil: uma só vaccine", len(hv) == 1)
+    blob = json.dumps(out_hostile)
+    leaks = [w for w in ("netexec", "hydra", "rm -rf", "192.0.2.") if w in blob]
+    check(f"hostil: nada de netexec/hydra/rm -rf/IP no resultado {leaks}", not leaks)
+    check("hostil: mitre_technique None (texto livre não passa a regex)", hv[0]["origin"]["mitre_technique"] is None)
+    check("hostil: incident_ids só com o id válido", hv[0]["origin"]["incident_ids"] == ["INC-20261007-001"])
+    check("hostil: validate_vaccine == []", validate(hv[0]) == [])
+
+    check("rede: tipos sujos filtrados -> ['port_scan']",
+          out_net["vaccines"][0]["origin"]["evidence"]["network_detection_types"] == ["port_scan"])
+
+    # Gate AST: o motor continua puro.
+    with open(vaccine_engine.__file__, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            imported.add(node.module.split(".")[0])
+    check(f"AST: imports do motor dentro da allowlist {sorted(imported - ENGINE_ALLOWED_IMPORTS)}",
+          imported <= ENGINE_ALLOWED_IMPORTS)
+    bad_calls = sorted({node.func.id for node in ast.walk(tree)
+                        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id in ENGINE_FORBIDDEN_CALLS})
+    check(f"AST: sem open/print/input/eval/exec/compile/__import__ {bad_calls}", not bad_calls)
+
+
 if __name__ == "__main__":
     run_tracer()
     run_selection()
+    run_contract()
     print()
     if failures:
         print(f"{len(failures)} falha(s):")
