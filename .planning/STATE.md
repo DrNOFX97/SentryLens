@@ -2,9 +2,14 @@
 gsd_state_version: "1.0"
 milestone: v1.1
 milestone_name: R11 Vaccine Engine
+current_phase: 12
+current_phase_name: Motor de vaccines
 status: planning
-last_updated: "2026-10-11T21:58:56.000Z"
+stopped_at: Phase 12 context gathered
+last_updated: "2026-10-11T22:04:28.219Z"
 last_activity: 2026-10-11
+last_activity_desc: Roadmap v1.1 criado (3 fases, 8/8 requisitos mapeados)
+state_head: cee04d418fc72efbcbc9ad6c4bd73d215db719c2
 progress:
   total_phases: 3
   completed_phases: 0
@@ -76,9 +81,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-11 21:58
-Stopped at: Roadmap v1.1 escrito (Phases 12-14); requisitos VAC-01..08 mapeados.
-Resume file: None
+Last session: 2026-10-11T22:04:28.198Z
+Stopped at: Phase 12 context gathered
+Resume file: .planning/phases/12-motor-de-vaccines/12-CONTEXT.md
 
 ## Operator Next Steps
 
