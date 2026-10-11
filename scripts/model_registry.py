@@ -118,6 +118,19 @@ ERROR_CODES = (
 
 # Projeção do metadata.json que a API expõe. `evaluation` NÃO entra aqui: é
 # uma chave do nível da versão, não dos metadados (e só a Fase 2 a preenche).
+#
+# `catalog_sha256` entrou no R10 (D-04) e é das 13 chaves: é o rótulo de máquina
+# com que o frontend compara a compatibilidade do catálogo. É publicado também,
+# por versão, como `catalog_compatible: true|false|null` (ver
+# `_catalog_compatible`) — que é o sinal que a UI desenha.
+#
+# `feature_stats` (D-03) NÃO entra na tupla, e é a única excepção desde a Fase
+# 2: é gravado em disco como chave de topo e sub-projectado em
+# `_public_metadata`, mas somar uma 14.ª chave aqui quebraria os três números
+# que o plano fixa (13 chaves aqui, 14 no metadata.json — ver
+# `test_dataset_com_proveniencia`, que mede a diferença em vez de a esconder).
+# O efeito para quem lê a API é nil: `feature_stats` continua a sair no bloco
+# `metadata`, projectado pelas FEATURE_STATS_KEYS.
 METADATA_PUBLIC_KEYS = (
     "schema_version",
     "version",
@@ -131,7 +144,14 @@ METADATA_PUBLIC_KEYS = (
     "dataset",
     "library_versions",
     "artifacts",
+    "catalog_sha256",
 )
+
+# Chaves que o registo grava no metadata.json e projecta em `_public_metadata`
+# mas que, por essa mesma razão aritmética, não estão em METADATA_PUBLIC_KEYS.
+# Escrita à mão para o gate as comparar com a tupla — é a costura que
+# `STATE.md:86` avisa, com o nome do ficheiro onde a excepção está escrita.
+METADATA_EXTRA_PROJECTED_KEYS = ("feature_stats",)
 
 # Projeção do campo `evaluation` que a API expõe (D-08). É a MESMA lista de 14
 # chaves que `ml_evaluation.EVALUATION_KEYS` — mas escrita aqui, porque este
@@ -159,6 +179,46 @@ EVALUATION_PUBLIC_KEYS = (
 # chaves). Também comparados com os do motor no mesmo teste.
 EVALUATION_METRIC_KEYS = ("precision", "recall", "f1")
 EVALUATION_COMPARISON_KEYS = ("both_flagged", "ml_only", "rules_only", "neither")
+
+# As chaves do bloco `dataset` que a API expõe (D-02). D-02 acrescenta as cinco
+# últimas: `size` sozinho não distingue "35 eventos" de "os 35 que couberam de
+# 500" (o teto do Indexer é 1000). Subconjunto das antigas por compatibilidade
+# — `ml_models.js` continua a ler as 4 sem alteração.
+DATASET_PUBLIC_KEYS = (
+    "name", "size", "attacks", "synthetic",
+    "documents", "processable", "truncated", "window_first", "window_last",
+)
+
+# Tipo de cada chave do `dataset`, para a sub-projeção nunca repassar o que vier
+# do disco do utilizador tal e qual (mesmo papel de EVALUATION_KEY_TYPES).
+DATASET_KEY_TYPES = {
+    "name": str,
+    "size": int,
+    "attacks": int,
+    "synthetic": bool,
+    "documents": int,
+    "processable": int,
+    "truncated": bool,
+    "window_first": str,
+    "window_last": str,
+}
+
+# O par por feature no LOTE DE TREINO (D-03). `is_new_source_ip` e
+# `failed_attempts_last_hour` acumulam dentro do lote, por que estes números
+# descrevem o lote e não o comportamento do modelo — o skew NÃO foi corrigido
+# de propósito (mexer no `feature_extractor` parte o contrato partilhado com a
+# inferência e invalida todos os `.pkl`).
+FEATURE_STATS_KEYS = ("mean", "std")
+
+# Teto de features: 7 reais. 32 dá folga para o extractor crescer sem que um
+# metadata.json escrito à mão possa meter um payload grande na resposta (a mesma
+# razão de EVALUATION_TEXT_LIMIT).
+FEATURE_STATS_MAX_ENTRIES = 32
+
+# Teto por campo de texto do `dataset`. Mesmo valor de EVALUATION_TEXT_LIMIT,
+# e por isso a sub-projeção reusa o mesmo truncamento — as duas listas
+# partilham a defesa, não uma cópia dela.
+DATASET_TEXT_LIMIT = 200
 
 # Tipo esperado de cada chave, para a sub-projeção nunca repassar o que vier do
 # disco do utilizador tal e qual. str -> truncada; float/int/bool projectados
@@ -296,6 +356,14 @@ def load_metadata(version_dir: Path, version_id: str) -> dict:
     Inválido = `metadata_invalid`; ausente = `metadata_missing`; erro de I/O
     = `registry_unavailable`. Chaves a mais dentro de `artifacts` são
     ignoradas — em particular nunca são usadas como nome de ficheiro.
+
+    `dataset`, `feature_stats` e `catalog_sha256` **não** são validados aqui, e
+    é uma escolha, não um esquecimento: exigi-las transformaria qualquer
+    `metadata.json` anterior ao R10 em `metadata_invalid` e apagaria da
+    listagem as versões que o utilizador já tem em disco. A defesa é a
+    SUB-PROJEÇÃO em `_public_metadata`: o que sai pela API é só a lista
+    fechada, projectado por tipo e truncado, mesmo quando o ficheiro foi
+    escrito à mão. É a mesma decisão que a Fase 2 tomou com `evaluation`.
     """
     path = version_dir / METADATA_FILE
     try:
@@ -345,9 +413,83 @@ def load_metadata(version_dir: Path, version_id: str) -> dict:
     return meta
 
 
+def _public_feature_stats(stats) -> dict | None:
+    """
+    Sub-projeção do `feature_stats` (D-03), no mesmo molde de
+    `_public_evaluation`: só as chaves da lista fechada saem, cada número
+    projectado pelo seu tipo, e **nunca levanta**.
+
+    - `None` (não declarado) continua `None` — tri-estado, como `synthetic`;
+    - mais de `FEATURE_STATS_MAX_ENTRIES` chaves é TRUNCADO, não recusado: a
+      leitura nunca levanta, e o `MAX_METADATA_BYTES` já limita o ficheiro
+      inteiro (T-10-05 é sobre a escrita, não sobre a leitura);
+    - uma feature que não seja um `dict`, ou que não tenha as duas chaves,
+      dá `{"mean": None, "std": None}` — nunca levanta, nunca repropaga.
+
+    Limite honesto, e é o que a sub-projeção FECHA e o que NÃO fecha: os NOMES
+    das features não podem ser fechados aqui. `feature_extractor.FEATURE_NAMES`
+    é stdlib puro mas continua a ser um import de domínio que este ficheiro não
+    pode ter no topo (D-01), e copiá-lo para uma lista local seria uma segunda
+    lista escrita à mão a divergir em silêncio. O que é fechado são os VALORES
+    (mean/std projectados por tipo — um texto nunca passa) e o NÚMERO de
+    chaves (teto de FEATURE_STATS_MAX_ENTRIES). Um nome de feature inventado
+    escrito à mão chega ao browser como texto e é escapado pelo `ml_models.js`.
+    """
+    if not isinstance(stats, dict):
+        return None
+    limite = FEATURE_STATS_MAX_ENTRIES
+    # Ordena-se pela forma textual (determinismo entre processos) mas a
+    # projecção lê pela chave ORIGINAL — `str(k)` não pode servir de chave de
+    # leitura, ou um `metadata.json` escrito à mão com uma chave não-string
+    # entraria projectada em vez de ignorada.
+    chaves = sorted(stats, key=str)[:limite]
+    projectado: dict = {}
+    for nome in chaves:
+        entrada = stats.get(nome)
+        if not isinstance(entrada, dict):
+            projectado[nome] = {k: None for k in FEATURE_STATS_KEYS}
+            continue
+        projectado[nome] = {
+            k: _public_evaluation_scalar(entrada.get(k), float) for k in FEATURE_STATS_KEYS
+        }
+    return projectado
+
+
+def _public_dataset(dataset) -> dict:
+    """
+    Sub-projeção do bloco `dataset` pelas 9 chaves de DATASET_PUBLIC_KEYS
+    (D-02), projectadas pelo tipo de DATASET_KEY_TYPES e truncadas a
+    DATASET_TEXT_LIMIT.
+
+    O `dataset` vinha CRU desde a Fase 3: uma chave `rodao` escrita à mão pelo
+    utilizador saía tal e qual pela rota (T-10-01). Fecha-se com a mesma
+    barreira que `_public_evaluation` fechou na Fase 2 (T-01-14) — lista
+    fechada, tipo certo, texto truncado.
+
+    As quatro chaves antigas (`name`/`size`/`attacks`/`synthetic`) continuam a
+    sair com os mesmos valores, por isso `mlmDatasetHtml` não se parte sem uma
+    linha alterada.
+
+    Um `dataset` que não seja um `dict` dá as 9 chaves a `None`. Nunca levanta.
+    """
+    if not isinstance(dataset, dict):
+        return {key: None for key in DATASET_PUBLIC_KEYS}
+    return {
+        key: _public_evaluation_scalar(dataset.get(key), DATASET_KEY_TYPES[key])
+        for key in DATASET_PUBLIC_KEYS
+    }
+
+
 def _public_metadata(meta: dict) -> dict:
-    """Projeção das chaves públicas do metadata.json (chave em falta = None)."""
+    """Projeção das chaves públicas do metadata.json (chave em falta = None).
+
+    `dataset` e `feature_stats` passam por sub-projeção (`_public_dataset` /
+    `_public_feature_stats`) em vez de sair crus — o resto são escalares que a
+    lista fechada já contém, e `artifacts` é projectado à mão logo a seguir.
+    """
     public = {key: meta.get(key) for key in METADATA_PUBLIC_KEYS}
+    public["dataset"] = _public_dataset(meta.get("dataset"))
+    public["feature_stats"] = _public_feature_stats(meta.get("feature_stats"))
     artifacts = meta.get("artifacts")
     if not isinstance(artifacts, dict):
         artifacts = {}
@@ -359,6 +501,67 @@ def _public_metadata(meta: dict) -> dict:
         for name in ARTIFACT_FILES
     }
     return public
+
+
+def catalog_sha256() -> str:
+    """
+    SHA-256 do **catálogo de features** (D-04), em 64 hex minúsculas.
+
+    Mede exactamente o que determina `event_id_encoded` e nada mais:
+
+        payload = f"{len(CRITICAL_EVENTS)}\\n" + "\\n".join(sorted(str(eid) for eid in CRITICAL_EVENTS))
+
+    A primeira linha é o bucket do Event ID desconhecido
+    (`feature_extractor.py:52`); o resto é o `_EVENT_ID_ORDER`
+    (`feature_extractor.py:50`) — os índices de `event_id_encoded`. Acrescentar
+    um Event ID desloca-os TODOS e muda o bucket, sem nenhum `.pkl` ser
+    invalidado: é por isso que o hash existe.
+
+    **Não** inclui `name`/`severity`/`category`: mudar um texto de recomendação
+    não muda o que uma feature significa, e um hash que saltasse por causa
+    disso seria um alarme falso.
+
+    Determinístico entre processos: o mesmo catálogo dá a mesma string em
+    qualquer máquina, sem depender de nada fora de `event_catalog.py`.
+
+    Limite honesto, o mesmo do SHA-256 dos `.pkl` (T-10-03): isto mede
+    COMPATIBILIDADE, não é autenticação. Quem escreve em `models/` reescreve
+    também o `metadata.json` e por isso também este campo — o hash não prova
+    que o modelo foi treinado com o catálogo que diz. D-04 do R9 continua
+    aberto, e `docs/SECURITY.md` é que diz isto em linguagem de redacção.
+
+    Import TARDIO (D-01, o mesmo caminho de `evaluate`): `event_catalog` não
+    traz scikit-learn nem joblib, e nenhum comando tem de pagar o custo —
+    `adopt` e a leitura do registo não precisam do catálogo.
+    """
+    event_catalog = importlib.import_module("event_catalog")
+    eventos = event_catalog.CRITICAL_EVENTS
+    payload = f"{len(eventos)}\n" + "\n".join(sorted(str(eid) for eid in eventos))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _catalog_compatible(meta: dict, hash_catalogo: str | None) -> bool | None:
+    """
+    `True` / `False` / `None` a dizer se o `catalog_sha256` gravado com a versão
+    ainda corresponde ao catálogo actual (D-04).
+
+    `None` = "não sei": a chave não foi gravada (uma versão anterior ao R10, ou
+    uma adotada, ou um metadata.json escrito à mão). **Nunca** é um erro — a
+    incompatibilidade não é integridade dos `.pkl`, é sentido das features, e
+    por isso `status`/`error_code` ficam intactos (T-10-02): uma versão com o
+    catálogo incompatível continua `status "ok"`, porque os `.pkl` estão
+    íntegros e é esse o sinal de que carrega.
+
+    `hash_catalogo` é o valor calculado **uma vez** por `build_models_report` e
+    passado aqui, para que uma pasta com N versões não pague N hashes — e para
+    que uma pasta vazia não pague sequer o import de `event_catalog`. `None`
+    quando o cálculo não foi possível: degrada para "não sei", nunca derruba a
+    listagem.
+    """
+    gravado = meta.get("catalog_sha256")
+    if not isinstance(gravado, str) or hash_catalogo is None:
+        return None
+    return hmac.compare_digest(gravado.lower(), hash_catalogo.lower())
 
 
 # --- Integridade (SEC-01) -----------------------------------------------------
@@ -643,6 +846,18 @@ def build_models_report(models_dir, loaded=None) -> dict:
     # adopt/treino em curso) e ficheiros soltos ficam de fora.
     version_ids = [n for n in names if VERSION_ID_RE.fullmatch(n) and (root / n).is_dir()]
 
+    # Hash do catálogo (D-04) calculado UMA vez por relatório, e só quando há
+    # alguma versão: uma pasta vazia não paga sequer o import tardio de
+    # `event_catalog`. Se o cálculo falhar, `None` — e `None` significa "não
+    # sei" em todas as entradas, nunca uma listagem a menos. Uma catálogo
+    # partido tem de degradar a informação, não o relatório.
+    hash_catalogo = None
+    if version_ids:
+        try:
+            hash_catalogo = catalog_sha256()
+        except Exception:  # noqa: BLE001 — degrada para "não sei", não derruba a lista
+            hash_catalogo = None
+
     versions: list[dict] = []
     for version_id in sorted(version_ids, key=lambda v: int(v[1:]), reverse=True):
         try:
@@ -655,9 +870,11 @@ def build_models_report(models_dir, loaded=None) -> dict:
             error_code = None if status == "ok" else status
             metadata = _public_metadata(meta)
             evaluation = _public_evaluation(meta.get("evaluation"))
+            compat = _catalog_compatible(meta, hash_catalogo)
         except ModelRegistryError as exc:
             status = error_code = exc.code
             metadata = evaluation = None
+            compat = None
 
         versions.append({
             "id": version_id,
@@ -666,6 +883,11 @@ def build_models_report(models_dir, loaded=None) -> dict:
             "active": version_id == active,
             "status": status,
             "error_code": error_code,
+            # ADITIVO (D-04) e separado do `status` de propósito: a
+            # incompatibilidade de catálogo não é integridade dos `.pkl`.
+            # Mexer no `status` tiraria da lista uma versão perfeitamente
+            # íntegra e partiria o badge que o frontend já desenha (T-10-02).
+            "catalog_compatible": compat,
             "metadata": metadata,
             "evaluation": evaluation,
         })
@@ -683,6 +905,9 @@ def build_models_report(models_dir, loaded=None) -> dict:
                 "active": active == "legacy",
                 "status": "no_metadata",
                 "error_code": None,
+                # O legado não tem metadata.json, logo não tem catálogo com que
+                # comparar: "não sei", a mesma resposta de uma versão antiga.
+                "catalog_compatible": None,
                 "metadata": None,
                 "evaluation": None,
                 "files": legacy_files,
@@ -820,6 +1045,78 @@ def next_version_id(models_dir) -> str:
     return validate_version_id(result)
 
 
+def _contagem_dataset(valor, campo) -> int | None:
+    """
+    Um inteiro de contagem do `dataset`: `None`, ou um `int` >= 0 que não seja
+    `bool`. O `bool` à parte porque é subclasse de `int` em Python e `True`
+    passaria como "1 evento" sem querer (o mesmo truque que
+    `ml_evaluation.validate_evaluation` documenta).
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, bool) or not isinstance(valor, int):
+        raise ValueError(f"dataset.{campo} tem de ser um inteiro >= 0 ou None; recebeu {valor!r}")
+    if valor < 0:
+        raise ValueError(f"dataset.{campo} não pode ser negativo; recebeu {valor!r}")
+    return valor
+
+
+def _texto_dataset(valor, campo) -> str | None:
+    """Um carimbo de texto do `dataset`: `None`, ou `str` dentro do teto."""
+    if valor is None:
+        return None
+    if not isinstance(valor, str):
+        raise ValueError(f"dataset.{campo} tem de ser texto ou None; recebeu {valor!r}")
+    if len(valor) > DATASET_TEXT_LIMIT:
+        raise ValueError(
+            f"dataset.{campo} tem {len(valor)} caracteres, acima do teto de "
+            f"{DATASET_TEXT_LIMIT}")
+    return valor
+
+
+def _validar_feature_stats(stats) -> None:
+    """
+    Valida `feature_stats` ANTES de qualquer escrita (D-03): `None` ou um dict
+    de no máximo FEATURE_STATS_MAX_ENTRIES chaves de texto, cada uma com
+    exactamente as duas chaves de FEATURE_STATS_KEYS e dois `float` (std >= 0).
+
+    Recusa, com `ValueError`: não-dict, chave não-texto, demasiadas chaves, uma
+    feature cujas chaves não são exactamente `{mean, std}`, `mean`/`std` que não
+    sejam `float` (nem `int`, nem `bool`, nem `str`) e `std` negativo.
+
+    As chaves NÃO são comparadas com `feature_extractor.FEATURE_NAMES`: o
+    registo não pode importar o extractor (D-01, stdlib puro no topo). A
+    igualdade é presa por comparação num teste — a mesma costura de
+    EVALUATION_KEYS vs EVALUATION_PUBLIC_KEYS.
+    """
+    if stats is None:
+        return
+    if not isinstance(stats, dict):
+        raise ValueError(
+            f"feature_stats tem de ser um objeto com as 7 features ou None; recebeu {type(stats).__name__}")
+    if len(stats) > FEATURE_STATS_MAX_ENTRIES:
+        raise ValueError(
+            f"feature_stats tem {len(stats)} chaves, acima do teto de "
+            f"{FEATURE_STATS_MAX_ENTRIES}")
+    for nome, entrada in stats.items():
+        if not isinstance(nome, str):
+            raise ValueError(f"feature_stats tem uma chave que não é texto: {nome!r}")
+        if not isinstance(entrada, dict) or set(entrada) != set(FEATURE_STATS_KEYS):
+            raise ValueError(
+                f"feature_stats[{nome!r}] tem de ter exactamente as chaves "
+                f"{list(FEATURE_STATS_KEYS)}")
+        for chave in FEATURE_STATS_KEYS:
+            valor = entrada[chave]
+            if isinstance(valor, bool) or not isinstance(valor, float):
+                raise ValueError(
+                    f"feature_stats[{nome!r}][{chave!r}] tem de ser um float "
+                    f"(estatística, não inteiro nem texto); recebeu {valor!r}")
+        if entrada["std"] < 0:
+            raise ValueError(
+                f"feature_stats[{nome!r}]['std'] não pode ser negativo; "
+                f"recebeu {entrada['std']!r}")
+
+
 def build_trained_metadata(
     *,
     version_id,
@@ -834,13 +1131,20 @@ def build_trained_metadata(
     model_type="IsolationForest",
     trained_at=None,
     created_at=None,
+    dataset_documents=None,
+    dataset_processable=None,
+    dataset_truncated=None,
+    dataset_window_first=None,
+    dataset_window_last=None,
+    feature_stats=None,
+    catalog_sha256=None,
 ) -> dict:
     """
     Constrói o dict `metadata` que o registo grava para uma versão treinada.
 
     Todas as entradas são escalares — o `train_anomaly_model.py` calcula os
     valores e o registo monta o dict. O registo é o dono do schema (D-01): quem
-    chama nunca escreve um `metadata.json` directamente, entrega os factos ao
+    chama nunca escreve um `metadata.json` diretamente, entrega os factos ao
     registo e este o monta.
 
     Diferenças obrigatórias face ao `adopt` (que usa `origin: "adopted"`,
@@ -852,13 +1156,29 @@ def build_trained_metadata(
     - `evaluation: None` — a versão nova nasce sem avaliação (anti-padrão D-06 da Fase 2).
     - `artifacts: {}` — os .pkl ainda não foram copiados para a pasta da versão.
 
+    Os sete parâmetros do R10 são TODOS keyword-only com valor por omissão
+    `None`, para que `adopt`, o CLI `_cmd_train` e os testes existentes não
+    tenham de mudar a chamada:
+
+    - `dataset_documents`/`dataset_processable`/`dataset_truncated`/
+      `dataset_window_first`/`dataset_window_last` — a PROVENIÊNCIA (D-02):
+      distinguem "35 processáveis de 500 documentos" de "35 processáveis de
+      35", que `size` sozinho não distingue. `size` continua a significar linhas
+      processáveis, por compatibilidade com o que o frontend já lê.
+    - `feature_stats` — média e desvio por feature NO LOTE (D-03). `None` é
+      "não medido", não "medido zero".
+    - `catalog_sha256` — o catálogo de features com que o modelo foi treinado
+      (D-04). `None` é "não declarado".
+
     O `dataset` reduz o nome a apenas o nome de ficheiro (`Path(dataset_name).name`)
     sem separadores ou drive (constrangimento de schema 1). O `library_versions` é
     copiado (`dict(library_versions)`) para que uma mutação posterior do chamador
     não altere o que já foi escrito em disco.
 
-    Valida `synthetic` (tem de ser `True`, `False` ou `None`; outro valor levanta
-    `ValueError` — diferencia "não declarado" de um booleano inventado).
+    Valida, ANTES de devolver o dict e portanto antes de qualquer escrita:
+    `synthetic` (tem de ser `True`, `False` ou `None`; outro valor levanta
+    `ValueError` — diferencia "não declarado" de um booleano inventado), as
+    contagens e os textos novos, `feature_stats` e `catalog_sha256`.
     """
     if synthetic not in (True, False, None):
         raise ValueError(
@@ -872,12 +1192,57 @@ def build_trained_metadata(
     if created_at is None:
         created_at = datetime.now(timezone.utc).isoformat()
 
+    if dataset_truncated is not None and not isinstance(dataset_truncated, bool):
+        raise ValueError(
+            f"dataset_truncated tem de ser True, False ou None; recebeu {dataset_truncated!r}"
+        )
+
+    size = _contagem_dataset(dataset_size, "size")
+    attacks = _contagem_dataset(dataset_attacks, "attacks")
+    documents = _contagem_dataset(dataset_documents, "documents")
+    processable = _contagem_dataset(dataset_processable, "processable")
+    janela_inicio = _texto_dataset(dataset_window_first, "window_first")
+    janela_fim = _texto_dataset(dataset_window_last, "window_last")
+
+    _validar_feature_stats(feature_stats)
+
+    if catalog_sha256 is not None:
+        if not isinstance(catalog_sha256, str) or SHA256_RE.fullmatch(catalog_sha256) is None:
+            raise ValueError(
+                f"catalog_sha256 tem de ser um SHA-256 de 64 hex ou None; recebeu {catalog_sha256!r}")
+
     parameters = {"contamination": contamination, "random_state": random_state, "n_estimators": n_estimators}
+    # Literais pelas 9 chaves de DATASET_PUBLIC_KEYS — nunca um `dict.update`,
+    # para que uma chave nova nunca apareça sem alguém a ter escrito aqui.
     dataset = {
         "name": Path(dataset_name).name if isinstance(dataset_name, str) else dataset_name,
-        "size": dataset_size,
-        "attacks": dataset_attacks,
+        "size": size,
+        "attacks": attacks,
         "synthetic": synthetic,
+        "documents": documents,
+        "processable": processable,
+        "truncated": dataset_truncated,
+        "window_first": janela_inicio,
+        "window_last": janela_fim,
+    }
+    library_versions_copy = dict(library_versions)
+
+    return {
+        "schema_version": 1,
+        "version": validated_version_id,
+        "origin": "trained",
+        "adopted": False,
+        "created_at": created_at,
+        "trained_at": trained_at,
+        "trained_at_estimated": False,
+        "model_type": model_type,
+        "parameters": parameters,
+        "dataset": dataset,
+        "feature_stats": feature_stats,
+        "catalog_sha256": catalog_sha256,
+        "library_versions": library_versions_copy,
+        "artifacts": {},
+        "evaluation": None,
     }
     library_versions_copy = dict(library_versions)
 
@@ -913,13 +1278,20 @@ def register_trained_version(
     model_type="IsolationForest",
     trained_at=None,
     created_at=None,
+    dataset_documents=None,
+    dataset_processable=None,
+    dataset_truncated=None,
+    dataset_window_first=None,
+    dataset_window_last=None,
+    feature_stats=None,
+    catalog_sha256=None,
 ) -> dict:
     """
     Regista uma versão treinada no registo, seguindo a ordem de D-03:
 
     1. `root = _root(models_dir)` — resolve o diretório base.
     2. `vid = next_version_id(root)` — obtém a próxima ID (sempre `max+1`, nunca `count()`).
-    3. `meta = build_trained_metadata(...)` — monta o dict de metadados com as 13 chaves.
+    3. `meta = build_trained_metadata(...)` — monta o dict de metadados com as 14 chaves.
     4. Valida `sources`: tem de ter **exactamente** as chaves de `ARTIFACT_FILES` e mais nenhuma.
        Falta uma → `artifact_missing`; extra → `artifact_missing` (nome de ficheiro vindo do utilizador).
     5. `_materialize_version(root, vid, sources, meta)` — copia os .pkl, verifica SHA-256 cópia↔original,
@@ -932,6 +1304,12 @@ def register_trained_version(
        se não existir nenhum). Este passo grava `models/ACTIVE` com o novo vid.
     8. Devolve `{"version": vid, "metadata": confirmado, "active_written": True}` — `confirmado` é o
        dict relido do disco (com os artifacts), não o dict em memória.
+
+    Os sete keyword-only do R10 (`dataset_documents`, `dataset_processable`,
+    `dataset_truncated`, `dataset_window_first`, `dataset_window_last`,
+    `feature_stats`, `catalog_sha256`) são repassados tal e qual ao passo 3, e
+    são validados ali — antes de `_materialize_version`, portanto antes de
+    qualquer escrita em disco.
 
     Se algum dos passos 6 ou 7 falhar, a versão `vN` fica criada e visível na listagem, mas **não**
     ativa; a versão anterior continua ativa e intacta; voltar a correr o treino cria `vN+1` (resposta
@@ -959,6 +1337,13 @@ def register_trained_version(
         model_type=model_type,
         trained_at=trained_at,
         created_at=created_at,
+        dataset_documents=dataset_documents,
+        dataset_processable=dataset_processable,
+        dataset_truncated=dataset_truncated,
+        dataset_window_first=dataset_window_first,
+        dataset_window_last=dataset_window_last,
+        feature_stats=feature_stats,
+        catalog_sha256=catalog_sha256,
     )
 
     # 4. valida sources — tem de ter exacto as chaves de ARTIFACT_FILES
@@ -1089,7 +1474,12 @@ def adopt(models_dir) -> dict:
         "trained_at_estimated": True,
         "model_type": "IsolationForest",
         "parameters": None,
-        "dataset": {"name": None, "size": None, "attacks": None, "synthetic": None},
+        # As 9 chaves de DATASET_PUBLIC_KEYS a `None`: o adopt não sabe de onde
+        # vieram os dados, e o registo é o dono do schema — o `meta` tem de ter
+        # a mesma forma que o de um treino, mesmo vazio.
+        "dataset": {chave: None for chave in DATASET_PUBLIC_KEYS},
+        "feature_stats": None,
+        "catalog_sha256": None,
         "library_versions": None,
         "artifacts": {},
         "evaluation": None,

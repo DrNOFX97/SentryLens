@@ -167,7 +167,10 @@ def test_reg01(tmp: Path) -> None:
 
     metadata = por_id["v2"]["metadata"] or {}
     check("REG-01: metadata tem todas as METADATA_PUBLIC_KEYS",
-          set(metadata) == set(model_registry.METADATA_PUBLIC_KEYS))
+          set(metadata) == set(model_registry.METADATA_PUBLIC_KEYS)
+          | set(model_registry.METADATA_EXTRA_PROJECTED_KEYS))
+    check("REG-01: as chaves projectadas à parte são só feature_stats (D-03)",
+          set(model_registry.METADATA_EXTRA_PROJECTED_KEYS) == {"feature_stats"})
     check("REG-01: metadata não expõe uma chave desconhecida do metadata.json",
           "chave_desconhecida" not in metadata)
     check("REG-01: artifacts só com os nomes constantes",
@@ -662,8 +665,11 @@ def test_adopt_copia_o_legado(tmp: Path) -> None:
     check("REG-03: trained_at_estimated is True", meta["trained_at_estimated"] is True)
     check("REG-03: model_type 'IsolationForest'", meta["model_type"] == "IsolationForest")
     check("REG-03: parameters None", meta["parameters"] is None)
-    check("REG-03: dataset com os quatro campos a None",
-          meta["dataset"] == {"name": None, "size": None, "attacks": None, "synthetic": None})
+    check("REG-03: dataset com as nove chaves todas a None",
+          meta["dataset"] == {chave: None for chave in model_registry.DATASET_PUBLIC_KEYS})
+    check("REG-03: feature_stats None (D-03: um adopt não tem lote)", meta["feature_stats"] is None)
+    check("REG-03: catalog_sha256 None (D-04: não sei, não incompatível)",
+          meta["catalog_sha256"] is None)
     check("REG-03: library_versions None", meta["library_versions"] is None)
     check("REG-03: evaluation None", meta["evaluation"] is None)
     try:
@@ -1355,6 +1361,399 @@ def test_cli_evaluate(tmp: Path) -> None:
           list(vazia.iterdir()) == [])
 
 
+# --- R10 D-04: o hash do catálogo de features ---------------------------------
+
+
+def test_catalog_sha256(tmp: Path) -> None:
+    """
+    D-04: `catalog_sha256()` mede o que determina `event_id_encoded` e nada
+    mais. É a medição de D-04 em forma de teste — acrescentar um Event ID
+    desloca os índices TODOS e nenhum `.pkl` é invalidado, logo o hash é o
+    único sinal de que o modelo ficou a falar outra língua.
+
+    O `CRITICAL_EVENTS` é substituído por uma cópia própria e restaurado num
+    `finally`: o teste nunca deixa o catálogo do projecto alterado.
+    """
+    secao("D-04 — catalog_sha256 mede o _EVENT_ID_ORDER e nada mais")
+
+    import event_catalog
+
+    catalogo_real = event_catalog.CRITICAL_EVENTS
+    hash_actual = model_registry.catalog_sha256()
+
+    try:
+        check("D-04: o catálogo do projecto tem 31 Event IDs (fixado aqui de propósito)",
+              len(catalogo_real) == 31)
+        check("D-04: devolve 64 hex", model_registry.SHA256_RE.fullmatch(hash_actual) is not None)
+        check("D-04: é minúsculo", hash_actual == hash_actual.lower())
+
+        # determinismo na mesma sessão
+        check("D-04: duas chamadas seguidas dão a mesma string",
+              hash_actual == model_registry.catalog_sha256())
+
+        # determinismo ENTRE PROCESSOS: o valor não pode depender de nada que
+        # só existe neste processo (sys.path, ordem de import, __pycache__).
+        proc = subprocess.run(
+            [sys.executable, "-X", "utf8", "-c",
+             "import model_registry;print(model_registry.catalog_sha256())"],
+            capture_output=True, text=True, encoding="utf-8", cwd=str(SCRIPT_DIR), timeout=60,
+        )
+        check("D-04: determinismo entre processos",
+              proc.returncode == 0 and proc.stdout.strip() == hash_actual)
+
+        # a ordem de INSERÇÃO do dict não importa — o que importa é o sorted()
+        check("D-04: a mesma chave por outra ordem de inserção dá o mesmo hash",
+              _hash_com_catalogo(model_registry, dict(reversed(list(catalogo_real.items())))) == hash_actual)
+
+        # textos NÃO entram no hash: mudar um nome/recomendação não muda o que
+        # uma feature significa, e um alarme falso aqui seria pior que o silêncio
+        textos_mudados = {
+            eid: {**entrada, "name": f"nome alterado {eid}", "severity": "low"}
+            for eid, entrada in catalogo_real.items()
+        }
+        check("D-04: mudar só name/severity NÃO muda o hash",
+              _hash_com_catalogo(model_registry, textos_mudados) == hash_actual)
+
+        # D-04 medido: acrescentar UM Event ID muda o hash
+        com_extra = dict(catalogo_real)
+        com_extra[99999] = {"name": "Evento de teste", "severity": "high", "category": "teste"}
+        hash_extra = _hash_com_catalogo(model_registry, com_extra)
+        check("D-04: acrescentar um Event ID muda o hash", hash_extra != hash_actual)
+
+        # e a mesma chave com valor vazio também (o hash é das CHAVES, não dos
+        # valores — é por isso que a cópia acima também bate)
+        check("D-04: o hash é das chaves, não dos textos",
+              _hash_com_catalogo(
+                  model_registry,
+                  {eid: {} for eid in catalogo_real}) == hash_actual)
+    finally:
+        event_catalog.CRITICAL_EVENTS = catalogo_real
+
+    check("D-04: o catálogo ficou restaurado", event_catalog.CRITICAL_EVENTS is catalogo_real)
+    check("D-04: o hash é o de antes da manipulação",
+          model_registry.catalog_sha256() == hash_actual)
+
+    # Prova negativa: o import é TARDIO. `event_catalog` e `feature_extractor`
+    # não podem estar no namespace do registo — se lá estivessem, `adopt`
+    # estaria a pagar um import que não precisa (D-01).
+    modulos = set(vars(model_registry))
+    check("D-04: 'event_catalog' não está no namespace do registo (import tardio)",
+          "event_catalog" not in modulos)
+    check("D-04: 'feature_extractor' não está no namespace do registo",
+          "feature_extractor" not in modulos)
+    check("D-04: 'ml_evaluation' não está no namespace do registo",
+          "ml_evaluation" not in modulos)
+    # Os únicos módulos no namespace são stdlib (o topo do ficheiro). Nenhum de
+    # domínio — o que prova que `catalog_sha256()` não custa um import a quem
+    # não precisa dele.
+    carregados = {v.__name__.split(".")[0] for v in vars(model_registry).values()
+                  if type(v).__name__ == "module"}
+    check("D-04: nenhum módulo de DOMÍNIO ficou ligado ao registo",
+          not carregados & {"event_catalog", "feature_extractor", "ml_evaluation",
+                            "ml_anomalies", "train_anomaly_model"})
+
+
+def _hash_com_catalogo(modulo, catalogo) -> str:
+    """`modulo.catalog_sha256()` com o `CRITICAL_EVENTS` trocado, restaurado
+    num `finally` — para que nenhum teste deixe o catálogo do projecto sujo."""
+    import event_catalog
+
+    real = event_catalog.CRITICAL_EVENTS
+    try:
+        event_catalog.CRITICAL_EVENTS = catalogo
+        return modulo.catalog_sha256()
+    finally:
+        event_catalog.CRITICAL_EVENTS = real
+
+
+def test_dataset_com_proveniencia(tmp: Path) -> None:
+    """
+    D-02 (proveniência) + D-03 (`feature_stats`) + D-04 (`catalog_sha256`).
+
+    Fecha três portas ao mesmo tempo: o `dataset` deixou de sair CRU (T-10-01),
+    um `metadata.json` antigo continua a ser lido sem migração, e a listagem
+    diz `catalog_compatible` sem nunca mexer em `status`.
+    """
+    secao("D-02/D-03/D-04 — dataset com proveniência, feature_stats e compatibilidade de catálogo")
+
+    import feature_extractor
+
+    NOME_FEATURES = set(feature_extractor.FEATURE_NAMES)
+
+    # --- os pins das listas fechadas ------------------------------------------
+    check("pin: ERROR_CODES tem exactamente 9 chaves (D-06: a lista não cresce)",
+          len(model_registry.ERROR_CODES) == 9)
+    check("pin: ERROR_CODES tem as mesmas 9, pela mesma ordem",
+          model_registry.ERROR_CODES == (
+              "invalid_version_id", "active_not_found", "metadata_missing",
+              "metadata_invalid", "artifact_missing", "hash_mismatch",
+              "already_adopted", "no_legacy_model", "registry_unavailable"))
+    check("pin: MESSAGES_PT tem uma entrada para cada código do registo",
+          set(model_registry.MESSAGES_PT) == set(model_registry.ERROR_CODES))
+    check("pin: METADATA_PUBLIC_KEYS tem 13 chaves",
+          len(model_registry.METADATA_PUBLIC_KEYS) == 13)
+    check("pin: METADATA_PUBLIC_KEYS ganhou catalog_sha256",
+          "catalog_sha256" in model_registry.METADATA_PUBLIC_KEYS)
+    check("pin: DATASET_PUBLIC_KEYS tem 9 chaves pela mesma ordem",
+          model_registry.DATASET_PUBLIC_KEYS == (
+              "name", "size", "attacks", "synthetic",
+              "documents", "processable", "truncated", "window_first", "window_last"))
+    check("pin: DATASET_PUBLIC_KEYS tem as mesmas 9 escritas à mão",
+          set(model_registry.DATASET_PUBLIC_KEYS) == {
+              "name", "size", "attacks", "synthetic",
+              "documents", "processable", "truncated", "window_first", "window_last"})
+    check("pin: FEATURE_STATS_KEYS são exactamente mean e std",
+          model_registry.FEATURE_STATS_KEYS == ("mean", "std"))
+    check("pin: FEATURE_STATS_MAX_ENTRIES == 32", model_registry.FEATURE_STATS_MAX_ENTRIES == 32)
+    check("pin: DATASET_TEXT_LIMIT == EVALUATION_TEXT_LIMIT == 200",
+          model_registry.DATASET_TEXT_LIMIT == model_registry.EVALUATION_TEXT_LIMIT == 200)
+
+    base = dict(
+        version_id="v1", contamination=0.2, random_state=42, n_estimators=200,
+        dataset_name="eventos.json", dataset_size=36, dataset_attacks=5,
+        synthetic=True, library_versions={"python": "3.12"},
+    )
+
+    # --- o pin de schema -------------------------------------------------------
+    meta = model_registry.build_trained_metadata(**base)
+    check("schema: o metadata.json tem 15 chaves", len(meta) == 15)
+    check("schema: as chaves são METADATA_PUBLIC_KEYS + evaluation + feature_stats",
+          set(meta) == set(model_registry.METADATA_PUBLIC_KEYS)
+          | {"evaluation", "feature_stats"})
+    check("schema: METADATA_EXTRA_PROJECTED_KEYS é o que falta à tupla",
+          set(model_registry.METADATA_EXTRA_PROJECTED_KEYS) == {"feature_stats"})
+    check("schema: as 14 do plano + a feature_stats que o plano não contou",
+          len(meta) == len(model_registry.METADATA_PUBLIC_KEYS) + 2)
+
+    # --- o dataset por omissão (D-02) -----------------------------------------
+    check("D-02: o dataset traz as 9 chaves mesmo sem o chamador as dar",
+          set(meta["dataset"]) == set(model_registry.DATASET_PUBLIC_KEYS))
+    check("D-02: as 5 chaves novas ficam None",
+          all(meta["dataset"][k] is None for k in
+              ("documents", "processable", "truncated", "window_first", "window_last")))
+    check("D-02: as 4 antigas continuam com os mesmos valores",
+          meta["dataset"]["name"] == "eventos.json" and meta["dataset"]["size"] == 36
+          and meta["dataset"]["attacks"] == 5 and meta["dataset"]["synthetic"] is True)
+    check("D-03: feature_stats None por omissão (tri-estado, não zero)",
+          meta["feature_stats"] is None)
+    check("D-04: catalog_sha256 None por omissão", meta["catalog_sha256"] is None)
+
+    # --- o dataset completo (D-02) --------------------------------------------
+    completo = model_registry.build_trained_metadata(
+        dataset_documents=40, dataset_processable=36, dataset_truncated=False,
+        dataset_window_first="2026-09-14T15:22:00Z", dataset_window_last="2026-09-14T15:34:00Z",
+        **{**base, "dataset_name": "export.json", "synthetic": None},
+    )
+    check("D-02: o dataset completo é exactamente o esperado",
+          completo["dataset"] == {
+              "name": "export.json", "size": 36, "attacks": 5, "synthetic": None,
+              "documents": 40, "processable": 36, "truncated": False,
+              "window_first": "2026-09-14T15:22:00Z", "window_last": "2026-09-14T15:34:00Z",
+          })
+    check("D-02: '35 de 500' é distinguível de '35 de 35'",
+          completo["dataset"]["documents"] != completo["dataset"]["processable"]
+          and completo["dataset"]["size"] == completo["dataset"]["processable"])
+
+    # --- feature_stats (D-03) --------------------------------------------------
+    stats = {nome: {"mean": 1.5 + i, "std": 0.25} for i, nome in enumerate(sorted(NOME_FEATURES))}
+    com_stats = model_registry.build_trained_metadata(feature_stats=stats, **base)
+    check("D-03: as chaves de feature_stats são as 7 de FEATURE_NAMES",
+          set(com_stats["feature_stats"]) == NOME_FEATURES)
+    check("D-03: cada feature tem exactamente mean e std",
+          all(set(v) == set(model_registry.FEATURE_STATS_KEYS)
+              for v in com_stats["feature_stats"].values()))
+    check("D-03: os valores passam tal e qual (float)",
+          com_stats["feature_stats"]["hour_of_day"] == stats["hour_of_day"])
+
+    # --- recusas: ANTES de qualquer escrita -----------------------------------
+    def recusa(feature_stats=None, catalog_sha256=None, **extra):
+        return espera_erro_valor(
+            model_registry.build_trained_metadata,
+            feature_stats=feature_stats, catalog_sha256=catalog_sha256,
+            **{**base, **extra},
+        )
+
+    check("D-03: feature_stats que não é dict -> ValueError", recusa(feature_stats=["a"]) is not None)
+    check("D-03: feature_stats com uma chave não-texto -> ValueError",
+          recusa(feature_stats={1: {"mean": 0.0, "std": 0.0}}) is not None)
+    check("D-03: feature_stats com mais de 32 chaves -> ValueError",
+          recusa(feature_stats={f"f{i}": {"mean": 0.0, "std": 0.0}
+                                for i in range(33)}) is not None)
+    check("D-03: feature_stats com uma feature sem as duas chaves -> ValueError",
+          recusa(feature_stats={"hour_of_day": {"mean": 0.0}}) is not None)
+    check("D-03: feature_stats com uma chave a mais na feature -> ValueError",
+          recusa(feature_stats={"hour_of_day": {"mean": 0.0, "std": 0.0, "mediana": 1.0}}) is not None)
+    check("D-03: mean inteira -> ValueError",
+          recusa(feature_stats={"hour_of_day": {"mean": 1, "std": 0.0}}) is not None)
+    check("D-03: mean booleana -> ValueError",
+          recusa(feature_stats={"hour_of_day": {"mean": True, "std": 0.0}}) is not None)
+    check("D-03: mean textual -> ValueError",
+          recusa(feature_stats={"hour_of_day": {"mean": "1.0", "std": 0.0}}) is not None)
+    check("D-03: std negativa -> ValueError",
+          recusa(feature_stats={"hour_of_day": {"mean": 0.0, "std": -1.0}}) is not None)
+    check("D-04: catalog_sha256 que não casa SHA256_RE -> ValueError",
+          recusa(catalog_sha256="abc123") is not None)
+    check("D-04: catalog_sha256 com 63 hex -> ValueError",
+          recusa(catalog_sha256="a" * 63) is not None)
+    check("D-02: dataset_truncated=1 -> ValueError (bool não é int aqui)",
+          recusa(dataset_truncated=1) is not None)
+    check("D-02: dataset_documents negativo -> ValueError",
+          recusa(dataset_documents=-1) is not None)
+    check("D-02: dataset_size booleano -> ValueError",
+          recusa(dataset_size=True) is not None)
+    check("D-02: dataset_window_first com 500 caracteres -> ValueError",
+          recusa(dataset_window_first="x" * 500) is not None)
+    check("D-02: dataset_window_last não-texto -> ValueError",
+          recusa(dataset_window_last=12345) is not None)
+    check("D-04: catalog_sha256=None é aceite", recusa(catalog_sha256=None) is None)
+    check("D-02: dataset_truncated=True grava True e não 1",
+          model_registry.build_trained_metadata(
+              dataset_truncated=True, **base)["dataset"]["truncated"] is True)
+
+    # --- retrocompatibilidade: o disco do utilizador não precisa de migração ----
+    antigo = tmp / "retro"
+    antigo.mkdir(parents=True, exist_ok=True)
+    make_version(antigo, "v1", origin="trained")  # o metadata.json de hoje: 13 chaves
+    em_disco = json.loads((antigo / "v1" / model_registry.METADATA_FILE).read_text(encoding="utf-8"))
+    check("retro: o metadata.json de hoje tem 13 chaves (12 + evaluation)",
+          len(em_disco) == 13)
+    check("retro: e não tem catalog_sha256 nem feature_stats",
+          "catalog_sha256" not in em_disco and "feature_stats" not in em_disco)
+    relatorio = model_registry.build_models_report(antigo)
+    por_id = versoes_por_id(relatorio)
+    check("retro: um metadata.json antigo continua a validar",
+          por_id["v1"]["status"] == "ok" and por_id["v1"]["error_code"] is None)
+    check("retro: e sai com catalog_compatible None ('não sei', não incompatível)",
+          por_id["v1"]["catalog_compatible"] is None)
+    check("retro: o dataset antigo sai projectado nas 9 chaves",
+          set(por_id["v1"]["metadata"]["dataset"]) == set(model_registry.DATASET_PUBLIC_KEYS))
+    check("retro: as 4 chaves antigas do utilizador sobrevêm intactas",
+          por_id["v1"]["metadata"]["dataset"]["size"] is None)
+
+    # --- catalog_compatible: as três versões na MESMA resposta ---------------
+    tres = tmp / "tres-versoes"
+    tres.mkdir(parents=True, exist_ok=True)
+    make_version(tres, "v1", catalog_sha256=model_registry.catalog_sha256())
+    make_version(tres, "v2", catalog_sha256="0" * 64)
+    make_version(tres, "v3")  # sem a chave
+    relatorio = model_registry.build_models_report(tres)
+    por_id = versoes_por_id(relatorio)
+    check("D-04: v1 (catálogo actual) -> catalog_compatible True",
+          por_id["v1"]["catalog_compatible"] is True)
+    check("D-04: v2 (hash adulterado) -> catalog_compatible False",
+          por_id["v2"]["catalog_compatible"] is False)
+    check("D-04: v3 (sem a chave) -> catalog_compatible None",
+          por_id["v3"]["catalog_compatible"] is None)
+    check("D-04: as três continuam status 'ok' — a incompatibilidade não é integridade",
+          all(por_id[v]["status"] == "ok" and por_id[v]["error_code"] is None
+              for v in ("v1", "v2", "v3")))
+    check("D-04: nenhuma sai da lista",
+          {v["id"] for v in relatorio["versions"]} == {"v1", "v2", "v3"})
+
+    com_legado = make_legacy(tmp / "com-legado")
+    legado = entradas_legacy(model_registry.build_models_report(com_legado))
+    check("D-04: a entrada legacy traz catalog_compatible None",
+          len(legado) == 1 and legado[0]["catalog_compatible"] is None)
+    check("D-04: a entrada legacy traz a chave nova de qualquer maneira",
+          "catalog_compatible" in legado[0])
+
+    # --- a sub-projeção fecha a porta T-10-01 --------------------------------
+    adulterado = tmp / "adulterado"
+    adulterado.mkdir(parents=True, exist_ok=True)
+    make_version(
+        adulterado, "v1",
+        dataset={"rodao": "<script>x</script>", "name": "a.json",
+                 "window_first": "y" * 500},
+        feature_stats={"hour_of_day": {"mean": "<b>", "std": 0.0, "mediana": 9.0},
+                       "rodao": {"mean": 1.0, "std": 1.0}},
+    )
+    meta_pub = (versoes_por_id(model_registry.build_models_report(adulterado))["v1"]["metadata"])
+    ds = meta_pub["dataset"]
+    fs = meta_pub["feature_stats"]
+    check("T-10-01: o dataset sai com exactamente as 9 chaves fechadas",
+          set(ds) == set(model_registry.DATASET_PUBLIC_KEYS))
+    check("T-10-01: a chave 'rodao' escrita à mão não sai",
+          "rodao" not in ds and "<script>" not in json.dumps(meta_pub, ensure_ascii=False))
+    check("T-10-01: o nome de ficheiro continua a sair",
+          ds["name"] == "a.json")
+    check("T-10-01: o texto de 500 caracteres é truncado",
+          isinstance(ds["window_first"], str) and len(ds["window_first"]) <= 200)
+    check("T-10-01: a feature_stats sai projectada com FEATURE_STATS_KEYS",
+          set(fs["hour_of_day"]) == set(model_registry.FEATURE_STATS_KEYS))
+    check("T-10-01: uma 'mean' textual dá None em vez de repropagar",
+          fs["hour_of_day"]["mean"] is None and fs["hour_of_day"]["std"] == 0.0)
+    check("T-10-01: uma chave arbitrária de dentro da feature não sai",
+          "mediana" not in fs["hour_of_day"])
+    # Limite HONESTO, medido e não escondido: o registo NÃO consegue fechar os
+    # NOMES das features — `feature_extractor.FEATURE_NAMES` não pode ser
+    # importado (D-01, stdlib puro no topo) e copiá-lo para aqui seria uma
+    # segunda lista escrita à mão que divergiria em silêncio. O que a
+    # sub-projeção FECHA é o que é o vector de injecção: os VALORES (mean/std
+    # projectados por tipo) e o NÚMERO de chaves (teto de 32). Um nome de
+    # feature inventado chega ao browser como texto e é escapado pelo `.cjs`.
+    check("T-10-01: um NOME de feature inventado sobrevive (limite conhecido)",
+          "rodao" in fs)
+    check("T-10-01: mas o VALOR dele é projectado por tipo, como todos os outros",
+          fs["rodao"] == {"mean": 1.0, "std": 1.0})
+    check("T-10-01: o limite dos NOMES está escrito no docstring",
+          "NOMES" in inspect.getdoc(model_registry._public_feature_stats).upper())
+    check("T-10-01: nada na resposta traz a pasta temporária",
+          str(tmp) not in json.dumps(meta_pub, ensure_ascii=False))
+
+    # truncagem defensiva (T-10-05): 40 chaves written à mão, não levantam
+    check("T-10-05: mais de FEATURE_STATS_MAX_ENTRIES é truncado, não levanta",
+          len(model_registry._public_feature_stats(
+              {f"f{i}": {"mean": 0.0, "std": 0.0} for i in range(40)})) == 32)
+    check("T-10-05: uma feature que não é dict dá o par a None",
+          model_registry._public_feature_stats({"x": "lixo"}) == {"x": {"mean": None, "std": None}})
+    check("T-10-05: feature_stats que não é dict dá None",
+          model_registry._public_feature_stats(["x"]) is None)
+    check("T-10-05: um dataset que não é dict dá as 9 chaves a None",
+          model_registry._public_dataset("lixo") == {k: None for k in model_registry.DATASET_PUBLIC_KEYS})
+
+    # --- o caminho completo pelo registo real (não só o dict em memória) ------
+    registo = tmp / "registo"
+    registo.mkdir(parents=True, exist_ok=True)
+    fontes = tmp / "fontes"
+    fontes.mkdir(parents=True, exist_ok=True)
+    (fontes / MODEL_FILE).write_bytes(b"modelo-proveniencia")
+    (fontes / SCALER_FILE).write_bytes(b"scaler-proveniencia")
+    resultado = model_registry.register_trained_version(
+        str(registo),
+        {MODEL_FILE: str(fontes / MODEL_FILE), SCALER_FILE: str(fontes / SCALER_FILE)},
+        # `version_id` não entra: quem decide o id é `next_version_id`, e a
+        # pasta está vazia, por isso sai "v1".
+        **{k: v for k, v in base.items() if k != "version_id"},
+        dataset_documents=40, dataset_processable=36, dataset_truncated=False,
+        feature_stats=stats,
+        catalog_sha256=model_registry.catalog_sha256(),
+    )
+    check("disco: a versão registada é a v1", resultado["version"] == "v1")
+    gravado = json.loads(
+        (registo / resultado["version"] / model_registry.METADATA_FILE).read_text(encoding="utf-8"))
+    check("disco: o metadata.json gravado tem 15 chaves", len(gravado) == 15)
+    check("disco: a proveniência sobreviveu ao disco",
+          gravado["dataset"]["documents"] == 40 and gravado["dataset"]["processable"] == 36)
+    check("disco: feature_stats sobreviveu ao disco",
+          set(gravado["feature_stats"]) == NOME_FEATURES)
+    check("disco: o catalog_sha256 gravado é o actual",
+          gravado["catalog_sha256"] == model_registry.catalog_sha256())
+    pub = versoes_por_id(model_registry.build_models_report(registo))["v1"]
+    check("disco: a versão recién-registada sai com catalog_compatible True",
+          pub["catalog_compatible"] is True and pub["status"] == "ok")
+
+
+def espera_erro_valor(func, *args, **kwargs):
+    """Chama func e devolve a `ValueError` levantada (ou None). Para as
+    validações de `build_trained_metadata`, que são erro de PROGRAMAÇÃO e não
+    de dados do utilizador — daí `ValueError` e não `ModelRegistryError`."""
+    try:
+        func(*args, **kwargs)
+    except ValueError as exc:
+        return exc
+    return None
+
+
 def run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         raiz = Path(tmp)
@@ -1376,6 +1775,8 @@ def run() -> None:
         test_resolve_version_artifacts(raiz)
         test_write_evaluation(raiz)
         test_cli_evaluate(raiz)
+        test_catalog_sha256(raiz)
+        test_dataset_com_proveniencia(raiz)
         # Estas quatro Sections foram escritas DEPOIS do `run()` e nunca foram
         # ligadas a ele: o ficheiro passou 38/38 sem nunca as executar. É a
         # mesma lição de `model_registry.register_trained_version` (escrito e
@@ -1455,7 +1856,7 @@ def test_next_version_id(tmp: Path) -> None:
 
 
 def test_build_trained_metadata(tmp: Path) -> None:
-    "Testa build_trained_metadata: schema de 13 chaves, dataset/parameters, synthetic tri-estado (D-04)."
+    "Testa build_trained_metadata: schema de 15 chaves, dataset/parameters, synthetic tri-estado (D-04)."
     import model_registry as mr
 
     meta = mr.build_trained_metadata(
@@ -1470,8 +1871,15 @@ def test_build_trained_metadata(tmp: Path) -> None:
         library_versions={"python": "3.12", "scikit-learn": "1.5", "joblib": "1.4", "numpy": "2.0"},
     )
 
-    # Schema EXACTAMENTE 13 chaves
-    check(f"build_trained_metadata -> 13 chaves", len(meta) == 13)
+    # Schema EXACTAMENTE 15 chaves. O plano 10-01 diz 14 (13 de
+    # METADATA_PUBLIC_KEYS + evaluation) e fixa esses dois números em três
+    # gates; mas D-03 obriga a GRAVAR feature_stats e D-04 a gravar
+    # catalog_sha256, e as duas são de topo. 13 + evaluation + feature_stats
+    # = 15: o plano esqueceu-se de contar a `feature_stats`. O pin de 13 chaves
+    # em METADATA_PUBLIC_KEYS mantém-se (é o que o <verify> do plano mede) e
+    # a diferença de uma chave está escrita e medida em
+    # `test_dataset_com_proveniencia` — não escondida.
+    check(f"build_trained_metadata -> 15 chaves", len(meta) == 15)
     check(f"schema_version == 1", meta.get("schema_version") == 1)
     check(f"origin == 'trained'", meta.get("origin") == "trained")
     check(f"adopted == False", meta.get("adopted") is False)
