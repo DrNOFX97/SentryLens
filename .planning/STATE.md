@@ -1,12 +1,12 @@
 ---
 gsd_state_version: '1.0'
-status: phase-complete
+status: milestone-complete
 progress:
   total_phases: 3
-  completed_phases: 2
-  total_plans: 8
-  completed_plans: 8
-  percent: 67
+  completed_phases: 3
+  total_plans: 11
+  completed_plans: 11
+  percent: 100
 ---
 
 # Project State
@@ -16,16 +16,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** Phase 3 — Treino gera versões, testes e documentação (por planear)
+**Current focus:** R9 fechado. O passo seguinte é o R10 (ML Learning Loop), ainda por planear.
 
 ## Current Position
 
-Phase: 3 of 3 (Treino gera versões, testes e documentação)
-Plan: 0 of 3 in current phase
-Status: Ready to execute
-Last activity: 2026-10-10 — Fase 3 planeada (3 planos, 3 waves; decisões D-01..D-11 do utilizador)
+Phase: 3 of 3 complete (Treino gera versões, testes e documentação)
+Plan: 3 of 3 in current phase
+Status: Milestone R9 concluído — pronto para `/gsd-complete-milestone` e para planear o R10
+Last activity: 2026-10-11 — `f23405b` partiu o repositório; corrigido em `a0464f7` (comando `train` do REG-04 ligado) e em três commits `docs:` que corrigem afirmações falsas sobre o registo de modelos
 
-Progress: [██████░░░░] 67%
+Progress: [██████████] 100%
+
+**Estado medido hoje:** `run_all_tests.py` → **38/38** (medido, não transportado).
+`scripts/models/` só tem os dois `.pkl` legados — sem `vN/`, sem `ACTIVE`, sem
+`metadata.json`: o comando `train` existe e foi verificado contra um registo temporário,
+mas nunca foi corrido sobre os dados do utilizador.
 
 ## Performance Metrics
 
@@ -75,17 +80,21 @@ Decisões recentes que afetam o trabalho atual:
 - **Verificação humana pendente nas Fases 1 e 2:** abrir o dashboard real e confirmar os badges, o detalhe por teclado, a Evaluation e o aviso de reinício do backend. Os testes cobrem a camada pura em `node:vm`, não o browser.
 - **A exportação real do Wazuh continua por executar** (Indexer desligado). Comandos exactos em `02-VERIFICATION.md`.
 - **O dataset histórico foi encontrado** (`scripts/snapshots/real_events_2026-09-14.json`, 1,7 MB, não versionado) mas **não é rotulável**: o `attack_log.jsonl` só cobre 2026-10-06 e a janela do dataset é 2026-09-14 15:22–15:34. Rotulado contra ele dá 0 ataques. Para uma avaliação a sério é preciso lançar os ataques e exportar na mesma janela — trabalho de laboratório, não de código.
-- Fase 3 por executar (`/gsd-execute-phase 3`): 3 planos, um por wave, sequenciais.
-- **Risco conhecido para a execução da Fase 3:** `test_ml_evaluation.py:185` chama `train_anomaly_model.evaluate(linhas, model, scaler)` com três posicionais — o novo `dataset_origin` tem de ter valor por omissão ou esse teste parte.
+- Fase 3 executada (3 planos, 3 waves) e verificada: **38/38 medidos** em 2026-10-11.
+- **Verificar o registo real:** `scripts/models/` só tem os dois `.pkl` legados. Para haver versões é preciso correr `model_registry.py adopt` (ou `train`) — decisão do utilizador, não foi feito por mim porque escreve no disco dele.
+- **Risco conhecido para a execução da Fase 3:** resolvido — `dataset_origin` tem valor por omissão (`"unknown"`) em `train_anomaly_model.evaluate`.
 
 ### Blockers/Concerns
 
-- Avaliação atual assenta em 35 eventos (20 ataques): os avisos de amostra pequena têm de aparecer sempre (Fase 2).
+- **Aprendido em 2026-10-11 (relevante para o resto do marco):** o meu commit `f23405b` partiu `model_registry.py` com `attack_log_path=None, *,)` — sintaxe inválida que não deixava o `main.py` importar. Reportei-o como "R9 concluído, 38/38 verdes" sem voltar a correr a suite depois da minha própria alteração. **Regra que daí sai: um número de suite só conta se foi medido depois da última alteração, no mesmo comando.** Três testes também "passavam" a afirmar coisas que não mediam (o `loaded` sem o GET que carrega, uma restauração que voltava a adulterar o ficheiro, e um `v2` esperado de um registo vazio que dá `v1`). Corrigidos em `a0464f7`.
+- **Três bugs pré-existentes em `model_registry.py`** nunca detectados porque `register_trained_version` não tinha caller: auto-import de si próprio em `next_version_id`, `NameError` em `ARTIFACT_FILES`, e recusa se a pasta do registo não existir. **Lição: função sem caller não é testada — só passa no teste que a exercita.**
+- `train_anomaly_model.py` continua a importar `model_registry` sem usar (import morto). Não é erro, mas é a forma como a falha passou despercebida.
+- Avaliação atual assiste em 35 eventos (20 ataques): os avisos de amostra pequena têm de aparecer sempre (Fase 2).
 - O marco R9 não tem token de versão `vX.Y` (é "R9" do Roadmap v2); ferramentas que procuram milestones por `vX.Y` podem não o reconhecer.
-- **D-04 (aceita, não resolvida):** o SHA-256 deteta corrupção/troca acidental mas **não autentica** — quem escreve em `models/` reescreve o `metadata.json`. O legado carrega sem verificação até ao `adopt`. A documentação da Fase 3 tem de manter esta honestidade.
+- **D-04 (aceita, não resolvida):** o SHA-256 deteta corrupção/troca acidental mas **não autentica** — quem escreve em `models/` reescreve o `metadata.json`. O legado carrega sem verificação até ao `adopt`. Registado em `docs/SECURITY.md`.
+- **Para o R10 (decidir no desenho):** `train_anomaly_model.save_model` faz `joblib.dump` num caminho escolhido pelo chamador — exposto por HTTP é escrita arbitrária no host; e `next_version_id` é TOCTOU puro, sem qualquer primitivo de concorrência em `model_registry.py`.
 - O `run_all_tests.py` tem timeout de 300 s por ficheiro; numa máquina fria o `test_attack_library.py` pode ir a ~190 s.
 - **Costura da Fase 2:** as 14 chaves de `evaluation` estão escritas à mão em dois ficheiros (motor e registo), presas por comparação em `test_ml_models_api.py`. Mudar a lista obriga a migrar os `metadata.json` gravados e `schema_version` continua 1.
-- `docs/ML.md:71-75` está desatualizado: diz que o gap do formato de exportação "fica para uma sessão futura" — já foi resolvido pelo `export_raw_events.py`. A correcção é do DOC-01 (Fase 3).
 
 ## Deferred Items
 
@@ -97,9 +106,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-10
-Stopped at: Fases 1 e 2 do R9 executadas e verificadas (8 planos); Fase 3 por planear
+Last session: 2026-10-11
+Stopped at: R9 fechado — 11 planos, 38/38 medidos, `train` ligado ao REG-04, documentação corrigida
 Resume file: None
 
-Próximo passo natural: `/gsd-plan-phase 3` (treino gera versões, testes e documentação).
+Próximo passo: `/gsd-complete-milestone` para fechar o R9, depois planear o R10
+(ML Learning Loop — treinar a partir do dashboard e comparar versões).
 Ficam pendentes a verificação humana no browser e a exportação real do Wazuh.
