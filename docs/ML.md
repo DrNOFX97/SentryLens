@@ -24,23 +24,38 @@ nunca divirja. 7 features por alerta: `hour_of_day`, `day_of_week`,
 
 ```bash
 cd scripts
-python train_anomaly_model.py
+python model_registry.py train v1 --events <ficheiro.json> --dataset-origin real
 ```
 
-Lê `sample_events_real.json` + `sample_attack_log.jsonl` por default
-(aceita `--events`/`--attack-log` para outros ficheiros, ex. um
-snapshot exportado do laboratório real), treina `IsolationForest` +
-`StandardScaler`, e escreve:
+É este comando — e não o `train_anomaly_model.py` — que cria a pasta da
+versão `models/vN/`, escreve o `metadata.json`, grava o `ACTIVE` a
+apontar para ela e verifica o SHA-256 dos `.pkl` **antes** de a activar.
+O `v1` é um rótulo, não o id final: quem decide é o `next_version_id`
+(sempre `max+1`), por isso pedir um número já ocupado não é erro — o
+comando diz qual ficou.
 
-- `models/vN/` + `metadata.json` + `ACTIVE` com SHA-256 verificado;
-  os `.pkl` soltos (`isolation_forest.pkl`, `scaler.pkl`) são o
-  modelo legado. `--models-dir` indica a pasta (p.e. `models/`),
-  `--dataset-origin {real,synthetic,unknown}` é obrigatório (default:
-  `unknown`). `--report <ficheiro>` é opt-in; se não for usado, o
-  relatório fica gravado na `metadata.json` da versão treinada. Até
-  existirem, `GET /api/ml-anomalies` devolve `503`. Metodologia,
-  features e o ciclo de validação completo estão em
-  [`feature_extractor.py`](../scripts/feature_extractor.py).
+`train_anomaly_model.py` continua a existir como **primitiva de treino**,
+e é o que o comando usa por dentro: lê `sample_events_real.json` +
+`sample_attack_log.jsonl` por omissão (aceita `--events`/`--attack-log`
+para outros ficheiros, ex. um export bruto do laboratório real), treina
+`IsolationForest` + `StandardScaler` e faz `joblib.dump` dos dois `.pkl`
+na pasta de `--models-dir`, que é **obrigatória** (`required=True`). Não
+toca no registo — não cria `models/vN/`, não escreve `metadata.json`, não
+mexe no `ACTIVE` — por isso `--models-dir` tem de apontar para fora de
+`models/`, que é o que o próprio `save_model` avisa. Aqui
+`--dataset-origin {synthetic,real,unknown}` é **opcional**, com default
+`unknown`; `--report <ficheiro>` também é opt-in e grava o resumo num
+artefacto avulso (é de lá que vem `ml_training_report.json`), nunca no
+registo. Sem `--report`, o resumo só é impresso no terminal.
+
+> No `model_registry.py train`, o `--events` por omissão é o mesmo
+> fixture sintético, mas o `--attack-log` por omissão é `$ATTACK_LOG_PATH`
+> ou, na ausência dele, `sample_attack_log.jsonl` — não
+> `attack_log.jsonl`.
+
+Até existirem versões registadas, `GET /api/ml-anomalies` devolve `503`.
+Metodologia, features e o ciclo de validação completo estão em
+[`feature_extractor.py`](../scripts/feature_extractor.py).
 
 ## Resultados no fixture sintético (36 eventos, 5 ataques rotulados)
 
@@ -88,8 +103,18 @@ rotula a janela do dataset (`real_events_2026-09-14.json`, 2026-09-14
 15:22–15:34): avaliá-lo contra estes eventos dá 0 ataques e recall 0 por
 definição. O ficheiro de eventos ainda existe; o que não existe hoje é
 o log de ataques da mesma janela. Para repetir a medição com rótulo é
-Resultado (origin `--dataset-origin` declarado; `metadata.json` da versão
-treinada):
+preciso voltar a lançar os cenários com `attack_scenarios.py` dentro da
+janela do dataset e guardar o `attack_log.jsonl` dessa sessão; com as duas
+peças em mãos, `python model_registry.py evaluate vN --events
+real_events_2026-09-14.json --attack-log <log_da_mesma_janela>
+--dataset-origin real` mede a versão e grava o resultado no
+`metadata.json` dela.
+
+Resultado medido em 2026-09-14, com `--dataset-origin real` declarado ao
+`train_anomaly_model.py` e gravado no artefacto
+[`ml_training_report.json`](../scripts/ml_training_report.json) — não num
+`metadata.json`, porque ainda não há versão registada no registo de
+modelos:
 
 | | Precisão | Recall | F1 |
 |---|---|---|---|

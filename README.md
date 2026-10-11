@@ -73,7 +73,7 @@ O backend nunca fala diretamente com o agente: usa as APIs do Wazuh, que já tê
 
 ## Funcionalidades
 
-O dashboard tem 17 abas:
+O dashboard tem 24 abas:
 
 | Aba | Conteúdo |
 |---|---|
@@ -95,7 +95,7 @@ O dashboard tem 17 abas:
 
 Também inclui:
 
-- Classificação de 23 Event IDs do Windows Security Log.
+- Classificação de 31 Event IDs do Windows Security Log.
 - Atualização em tempo real por WebSocket (`/ws/alerts`), com *fallback* para polling de 30 s.
 - Histórico próprio em JSONL com índice SQLite, para além dos 90 dias do Wazuh Indexer.
 - Exportação de um relatório HTML autónomo (`GET /api/export/report`).
@@ -155,7 +155,7 @@ O painel **ML Anomalias** usa um `IsolationForest` (scikit-learn), um modelo nã
 
 ### Resultados medidos, e o que eles provam
 
-O primeiro ciclo com dados reais (14 de setembro de 2026) mediu, sobre **35 eventos processáveis** de 500 alertas capturados no laboratório:
+O primeiro ciclo com dados reais (14 de setembro de 2026) mediu, sobre **35 eventos processáveis** de 500 alertas capturados no laboratório — números que vêm do artefacto [`scripts/ml_training_report.json`](scripts/ml_training_report.json), gerado pelo `--report` do `train_anomaly_model.py`; ainda **não** há nenhuma versão registada no registo de modelos que os produza:
 
 | | Precisão | Recall | F1 |
 |---|---|---|---|
@@ -170,14 +170,16 @@ Para treinar o modelo:
 
 ```bash
 cd scripts
-python train_anomaly_model.py --models-dir models --dataset-origin real
+python model_registry.py train v1 --events <ficheiro.json> --dataset-origin real
 ```
 
-Isto escreve `models/vN/` + `metadata.json` + `ACTIVE` com SHA-256 verificado; os `.pkl` soltos são o modelo legado. `--report <ficheiro>` é opt-in; se não for usado, o relatório fica gravado na `metadata.json` da versão treinada. Até existirem, `GET /api/ml-anomalies` devolve `503`. Metodologia, features e o ciclo de validação completo estão em [`docs/ML.md`](docs/ML.md).
+É este comando — e não o `train_anomaly_model.py` — quem cria a pasta da versão `models/vN/`, escreve o `metadata.json`, grava o `models/ACTIVE` a apontar para ela e verifica o SHA-256 dos `.pkl` **antes** de a activar. O `v1` do comando é um rótulo: o id final é o seguinte livre no registo (`next_version_id`, `max+1`). Até existirem versões registadas, `GET /api/ml-anomalies` devolve `503`. Metodologia, features e o ciclo de validação completo estão em [`docs/ML.md`](docs/ML.md).
 
-Registo de modelos
+`train_anomaly_model.py` continua a existir como **primitiva de treino**, e é o que o comando usa por dentro: carrega o dataset, treina o `IsolationForest` e faz `joblib.dump` de dois `.pkl` na pasta de `--models-dir`, que é obrigatória. Não toca no registo — não cria `models/vN/`, não escreve `metadata.json`, não mexe no `ACTIVE`. Por isso `--models-dir` tem de apontar para fora de `models/`, que é o que o próprio `save_model` avisa. O `--report <ficheiro>` é opt-in e grava o resumo como artefacto avulso (ex.: `ml_training_report.json`), nunca dentro do registo.
 
-- **Versões:** cada execução de `train_anomaly_model.py` cria uma nova pasta `models/vN/` (ex.: `v1`, `v2`) com `isolation_forest.pkl`, `scaler.pkl` e `metadata.json`. A pasta `models/ACTIVE` aponta para a versão atualmente ativa.
+### Registo de modelos
+
+- **Versões:** cada execução de `model_registry.py train` cria uma nova pasta `models/vN/` (ex.: `v1`, `v2`) com `isolation_forest.pkl`, `scaler.pkl` e `metadata.json`. A pasta `models/ACTIVE` aponta para a versão atualmente ativa.
 - **Adopt:** `python model_registry.py adopt --models-dir models` regista o que já existe em `scripts/models/` como `v1` e a activa. Se `v1` já existir, recusa.
 - **SHA-256:** antes de a pasta `vN` ficar visível, o SHA-256 dos `.pkl` é verificado contra os bytes originais. Deteta corrupção e troca acidental, mas não autentica quem escreve — quem reescreve `models/` reescreve também o `metadata.json`.
 - **`ACTIVE`:** depois de um adopt ou de um treino, é necessário reiniciar o backend (`uvicorn main:app --reload`) para que a cache do modelo seja atualizada e a nova versão seja carregada.
@@ -356,7 +358,7 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 
 - **API key partilhada:** não há login nem distinção entre utilizadores. Para uso real, evoluir para autenticação por utilizador.
 - **Perfil da organização fixo:** a conformidade usa um perfil estático. Falta ligar `scripts/nis2_lookup.py` a dados reais de uma empresa.
-- **ML com pouca amostra:** o que está registado é a versão e a avaliação por versão; a limitação passa a ser "o dataset de referência não é rotulável com o `attack_log.jsonl` actual", pois este só cobre 2026-10-06 e não rotula a janela de 2026-09-14.
+- **ML com pouca amostra e sem versão registada:** hoje `scripts/models/` só tem os dois `.pkl` soltos (`isolation_forest.pkl` + `scaler.pkl`), sem pasta `vN/`, sem `ACTIVE` e sem `metadata.json` — ainda não foi corrido nenhum `train` nem nenhum `adopt`, logo não há versão nem avaliação registadas, e o que o backend carrega continua a ser o legado, sem verificação de integridade. E o dataset de referência também não é reavaliável hoje: o `attack_log.jsonl` actual só cobre 2026-10-06 e não rotula a janela de 2026-09-14.
 - **Deteção de rede por limiares fixos:** não aprende uma linha de base do tráfego normal.
 - **Só Windows:** a monitorização do sistema local usa WMI e PowerShell.
 
