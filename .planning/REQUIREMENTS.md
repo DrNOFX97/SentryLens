@@ -46,24 +46,24 @@ Deferidos para o Vaccine Lab e seguintes.
 
 ## Traceability
 
-Preenchido na criação do roadmap.
+Preenchido na criação do roadmap (2026-10-11).
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VAC-01 | — | Pending |
-| VAC-02 | — | Pending |
-| VAC-03 | — | Pending |
-| VAC-04 | — | Pending |
-| VAC-05 | — | Pending |
-| VAC-06 | — | Pending |
-| VAC-07 | — | Pending |
-| VAC-08 | — | Pending |
+| VAC-01 | Phase 12 | Pending |
+| VAC-02 | Phase 12 | Pending |
+| VAC-03 | Phase 12 | Pending |
+| VAC-04 | Phase 12 | Pending |
+| VAC-05 | Phase 13 | Pending |
+| VAC-06 | Phase 13 | Pending |
+| VAC-07 | Phase 14 | Pending |
+| VAC-08 | Phase 14 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 8 total
-- Mapped to phases: 0
-- Unmapped: 8 ⚠️
+- Mapped to phases: 8 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-10-11*
-*Last updated: 2026-10-11 after initial definition*
+*Last updated: 2026-10-11 after roadmap creation (traceability filled)*

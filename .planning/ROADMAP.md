@@ -3,6 +3,23 @@
 ## Milestones
 
 - ✅ **v1.0 ML Registry & Learning Loop** — Phases 1-3, 10-11 (R9 + R10, shipped 2026-10-11)
+- 🚧 **v1.1 R11 Vaccine Engine** — Phases 12-14 (em curso)
+
+## Overview
+
+O v1.1 abre o ciclo "ataque → deteção → incidente → vaccine" do Roadmap v2. Hoje o
+Red vs Blue já diz, por ataque lançado, se foi `detected`, `partial`, `not_detected`
+ou `unknown`, mas um ataque que escapou fica só como um número na métrica: ninguém
+propõe o que faltava detetar. O R11 fecha essa lacuna **só de leitura** — um ataque
+não detetado ou só parcialmente detetado passa a gerar uma *vaccine*, uma regra de
+deteção proposta, rastreável até ao ataque que a originou, guardada e visível, mas
+nunca aplicada no Wazuh e sem comandos executáveis.
+
+A jornada tem três fatias verticais, da lógica para o ecrã. Primeiro o motor puro,
+que decide que ataques geram vaccine, que regra se propõe e de onde vem, sem tocar em
+disco nem em HTTP. Depois o store e a API de leitura, onde as vaccines persistem com
+estado fixo `proposed` e passam a ser consultáveis com API key. Por fim a aba
+Vaccines no dashboard e o fecho do marco com a suite completa e a documentação.
 
 ## Phases
 
@@ -18,3 +35,78 @@
 Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
 
 </details>
+
+### 🚧 v1.1 R11 Vaccine Engine (Em curso)
+
+**Milestone Goal:** Um ataque não detetado ou só parcialmente detetado passa a gerar uma *vaccine*: uma regra de deteção proposta, rastreável até ao ataque que a originou, guardada e visível mas nunca aplicada.
+
+**Phase Numbering:**
+- Integer phases (12, 13, 14): Planned milestone work (a numeração continua a do v1.0, que acabou na Phase 11)
+- Decimal phases (12.1, 12.2): Urgent insertions (marked with INSERTED)
+
+- [ ] **Phase 12: Motor de vaccines** - Motor puro: que ataques geram vaccine, regra proposta, origem rastreável, id determinístico e "Sem dados" honesto
+- [ ] **Phase 13: Store e API de leitura** - Vaccines persistidas com estado fixo `proposed`, `GET /api/vaccines[/{id}]` com API key e códigos de erro estáveis
+- [ ] **Phase 14: Aba Vaccines, testes e documentação** - `vaccines.js` com filtros e detalhe, suite completa verde e docs a refletir o R11
+
+## Phase Details
+
+### Phase 12: Motor de vaccines
+
+**Goal:** O backend sabe propor, a partir dos gaps do Red vs Blue, uma regra de deteção rastreável até ao ataque que a originou — e recusa propor quando não há amostra.
+**Mode:** mvp
+**Depends on:** Nothing (primeira fase do v1.1; assenta no Red vs Blue, no Attack Registry e na Attack Library já entregues)
+**Requirements:** VAC-01, VAC-02, VAC-03, VAC-04
+**Success Criteria** (what must be TRUE):
+  1. Dado um relatório Red vs Blue com ataques de cada veredito, o motor devolve exatamente um candidato por ataque `not_detected` ou `partial` e nenhum por ataque `detected` ou `unknown` (incluindo o `unknown` de alertas truncados, que nunca vira "não detetado").
+  2. Cada vaccine traz a regra proposta (`event_ids`, janela, condição e sensor esperado) derivada de `attack_library`, `attack_scenarios` e `event_catalog`, e nenhum campo de nenhuma vaccine contém um comando executável (chaves fechadas, verificado varrendo todos os valores).
+  3. Cada vaccine liga à origem — `attack_id`, cenário, técnica MITRE, incidentes e evidência por referência (nunca cópia de payload) — e tem um id determinístico: correr o motor duas vezes sobre os mesmos ataques dá os mesmos ids e nenhum duplicado.
+  4. Sem amostra (nenhum ataque lançado) ou com uma fonte indisponível, o motor devolve "Sem dados" ou um código estável; nunca fabrica uma vaccine para encher a lista.
+
+**Plans:** TBD
+**UI hint**: no — módulo puro sem I/O; a superfície visível chega na Phase 14.
+
+> **Verificação:** o motor é uma função pura, por isso o que se observa é o teste standalone (`test_vaccine_engine.py`, sem Wazuh) a correr sobre fixtures de relatórios Red vs Blue; não há rota nem ecrã nesta fase.
+
+### Phase 13: Store e API de leitura
+
+**Goal:** O analista consulta por HTTP as vaccines propostas, que sobrevivem a um reinício do backend sem duplicados e nunca mudam de estado.
+**Mode:** mvp
+**Depends on:** Phase 12
+**Requirements:** VAC-05, VAC-06
+**Success Criteria** (what must be TRUE):
+  1. As vaccines persistem num store escrito só pelo backend, todas com estado `proposed`; depois de reiniciar o backend a mesma lista volta, sem perdas, e reprocessar os mesmos ataques não acrescenta linhas.
+  2. `GET /api/vaccines` (com API key) devolve a lista — vazia com 200 quando não há amostra — e sem API key devolve 401; `GET /api/vaccines/{id}` devolve o detalhe (regra e origem) e um id inexistente dá 404 com o código estável `entry_not_found`.
+  3. Não existe rota de escrita em `/api/vaccines`: um POST/PUT/PATCH/DELETE a qualquer das duas rotas não altera nada, e o estado só pode ser `proposed`.
+  4. Falhas de leitura (Indexer indisponível, store ilegível) chegam como códigos estáveis, nunca como texto de exceção, traceback ou caminho de ficheiro; cada rota tem a API key aplicada individualmente.
+
+**Plans:** TBD
+
+> **Decisão para o discuss-phase:** quem escreve no store e quando — `GET` tem de continuar sem efeitos secundários visíveis, por isso a vaccine tem de ser gerada e persistida fora do pedido (por exemplo reaproveitando o ciclo de ingestão de incidentes/alertas) ou por um passo explícito do backend. Fica por decidir antes de planear; não está nos requisitos.
+
+### Phase 14: Aba Vaccines, testes e documentação
+
+**Goal:** O analista vê as vaccines na aba Vaccines do dashboard, com o que cada uma propõe e de onde vem, e o marco R11 fica fechado com testes completos e documentação atualizada.
+**Mode:** mvp
+**Depends on:** Phase 13
+**Requirements:** VAC-07, VAC-08
+**Success Criteria** (what must be TRUE):
+  1. O item "Vaccines" da sidebar abre uma aba real (`vaccines.js` servido pelo `serve_frontend.py`, sem editar `app.js`) que lista as vaccines com filtros e abre um detalhe com a regra proposta e a origem (ataque, cenário, técnica MITRE, incidentes); todo o texto dinâmico passa por `escapeHtml`.
+  2. Sem amostra a aba mostra "Sem dados"; um 401/404/502/503 desenha-se como erro com a frase do código, nunca como "Sem dados" nem como lista vazia.
+  3. `python run_all_tests.py` termina verde sem o Wazuh ligado, com testes standalone novos para motor, store e rotas, incluindo as garantias negativas (sem rota de escrita, sem comando executável, sem texto de exceção, sem duplicados após reprocessar ou reiniciar).
+  4. `docs/DATA_MODEL.md` define a entidade Vaccine, `docs/ROADMAP_STATUS.md` marca o R11 como concluído (✅) e `README.md` e `CLAUDE.md` descrevem o motor, o store e a rota.
+
+**Plans:** TBD
+**UI hint**: yes
+
+> **Testes por fase:** os testes do âmbito de cada fase escrevem-se com o respetivo código (como no v1.0); esta fase fecha a cobertura completa da suite e a documentação, e é por isso que VAC-08 mapeia aqui.
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 12 → 13 → 14
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 12. Motor de vaccines | v1.1 | 0/TBD | Not started | - |
+| 13. Store e API de leitura | v1.1 | 0/TBD | Not started | - |
+| 14. Aba Vaccines, testes e documentação | v1.1 | 0/TBD | Not started | - |
