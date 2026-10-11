@@ -17,12 +17,12 @@ Uso:
 """
 
 import argparse
+import importlib
 import json
 import platform
 import tempfile
 from pathlib import Path
 
-import joblib
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import f1_score, precision_score, recall_score
 from sklearn.preprocessing import StandardScaler
@@ -35,6 +35,15 @@ DEFAULT_EVENTS_PATH = Path(__file__).parent / "sample_events_real.json"
 DEFAULT_ATTACK_LOG_PATH = Path(__file__).parent / "sample_attack_log.jsonl"
 DEFAULT_MODEL_DIR = Path(__file__).parent / "models"
 
+# Número de árvores por omissão. É uma constante de módulo — e não um literal
+# dentro de `train_model` — porque é o MESMO valor que vai para
+# `parameters.n_estimators` do `metadata.json`, e os dois têm de sair daqui:
+# o `joblib.dump` é único (diz `ml_training.dump_artifacts`) mas quem o chama
+# pode passar outro `n_estimators`. Um literal fixo no corpo era o bug T-10-08:
+# o CLI escrevia `n_estimators: 77` no metadata.json e treinava com 200, e o
+# `metadata.json` ficava a mentir sobre o modelo que estava em disco.
+N_ESTIMATORS = 200
+
 
 def load_dataset(events_path: Path, attack_log_path: Path) -> list[dict]:
     with open(events_path, encoding="utf-8") as handle:
@@ -43,10 +52,27 @@ def load_dataset(events_path: Path, attack_log_path: Path) -> list[dict]:
     return label_with_attack_log(extract_features(alerts), attack_log)
 
 
-def train_model(vectors: list[list[float]], contamination: float = 0.2, random_state: int = 42):
+def train_model(vectors: list[list[float]], contamination: float = 0.2, random_state: int = 42,
+                *, n_estimators: int = N_ESTIMATORS):
+    """
+    Treina o IsolationForest e o StandardScaler sobre `vectors`.
+
+    `n_estimators` é **keyword-only** com default `N_ESTIMATORS`, para que os
+    seis chamadores existentes (`test_ml_anomalies.py`, `test_redblue.py`,
+    `test_ml_evaluation.py`, `test_ml_models_api.py`, `test_ml_models_ui.py` e o
+    próprio `main`) continuem a chamar exactamente como antes — nenhum deles
+    passa a posição a partir do terceiro argumento.
+
+    E tem de ser o valor que vai para `parameters` do `metadata.json`, nunca
+    outro: é a lição de D-04 aplicada ao código em vez do catálogo. Um
+    `metadata.json` que descreve um modelo diferente do que está gravado ao
+    lado dele é uma mentira que falha em silêncio — o `.pkl` carrega, o hash
+    bate, e ninguém sabe que o modelo não é o que foi pedido.
+    """
     scaler = StandardScaler()
     scaled = scaler.fit_transform(vectors)
-    model = IsolationForest(contamination=contamination, random_state=random_state, n_estimators=200)
+    model = IsolationForest(contamination=contamination, random_state=random_state,
+                            n_estimators=n_estimators)
     model.fit(scaled)
     return model, scaler
 
@@ -114,11 +140,15 @@ def save_model(model, scaler, model_dir: Path) -> None:
     que o `joblib.load` não consegue explicar). O registo (model_registry)
     resolve o destino final; este script apenas garante que os ficheiros
     estão num diretório seguro fora do caminho do registo.
+
+    O `joblib.dump` em si NÃO é mais daqui: vive em `ml_training.dump_artifacts`,
+    que é quem sabe que o destino tem de estar fora do registo (T-10-09). Esta
+    função **sobrevive por compatibilidade** — assinatura e efeito observável
+    inalterados para quem a chama — e delega. Import tardio para não criar um
+    ciclo `ml_training` <-> `train_anomaly_model` no topo dos dois ficheiros.
     """
-    if not model_dir.is_dir():
-        model_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, model_dir / "isolation_forest.pkl")
-    joblib.dump(scaler, model_dir / "scaler.pkl")
+    ml_training = importlib.import_module("ml_training")
+    ml_training.dump_artifacts(model, scaler, model_dir)
 
 
 def main() -> None:
