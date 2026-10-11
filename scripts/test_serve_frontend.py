@@ -203,8 +203,8 @@ def check_static_frontend() -> None:
               bool(linhas) and not any("is-planned" in l for l in linhas))
 
     linhas_training = [l for l in index_html.splitlines() if 'data-label="Training"' in l]
-    check("o botão Training continua planeado (R10)",
-          bool(linhas_training) and any("is-planned" in l and 'data-planned="R10"' in l for l in linhas_training))
+    check("o botão Training foi removido do sidebar (treino está em 📦 Models, D-07)",
+          not linhas_training)
 
     declaracoes = re.findall(
         r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)",
