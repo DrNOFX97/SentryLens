@@ -74,7 +74,7 @@ O backend nunca fala diretamente com o agente: usa as APIs do Wazuh, que já tê
 
 ## Funcionalidades
 
-O dashboard tem 24 abas:
+O dashboard tem 26 abas:
 
 | Aba | Conteúdo |
 |---|---|
@@ -92,6 +92,7 @@ O dashboard tem 24 abas:
 | **Incidentes** | Agrupamento automático de alertas e deteções de rede em incidentes, com estados, timeline e notas |
 | **Attack Registry / Attack Timeline** | Registo de ataques: esperado vs. real (regra/ML/rede) e incidentes ligados; só leitura |
 | **Attack Library** | Catálogo de referência dos cenários de ataque (risco, sensores esperados, limpeza); só leitura, nunca executa nada |
+| **Vaccines** | Vaccines propostas a partir de ataques não detetados ou só parcialmente detetados: regra proposta, origem (ataque, cenário, MITRE, incidentes) e cadeia de substituição; só leitura, nunca aplicadas no Wazuh |
 | **Live Traffic / Network Detections / PCAP Evidence** | Resumos dedicados da captura de rede e evidência de metadados persistida (nunca payload nem PCAP real) |
 
 Também inclui:
@@ -104,6 +105,7 @@ Também inclui:
 - Vista unificada de deteções (`GET /api/detections`): regra, ML e rede num tipo comum (`DetectionEvent`).
 - Métricas SOC (`GET /api/metrics`): MTTD, MTTR, cobertura e taxa de deteção, com FN/FP, em 3 painéis (MTTD / MTTR, Detection Coverage, Detection Rate). Sem dados mostram "Sem dados"; com alertas truncados avisam que os valores são limites inferiores.
 - Triagem experimental de incidentes via JEV (`POST /api/incidents/{id}/triage`): desligada por omissão e anonimizada.
+- Vaccine Engine (`GET /api/vaccines`): propostas de regra de deteção guardadas num store SQLite com estado fixo `proposed`, geradas pelo backend em segundo plano.
 
 ---
 
@@ -147,6 +149,19 @@ As deteções de rede (`scripts/network_detections.py`) usam limiares fixos:
 | Pico de volume | 500 ou mais pacotes do mesmo IP de origem em 10 s |
 
 Só conta como tentativa de ligação um pacote TCP com SYN e sem ACK, para as respostas do alvo não serem confundidas com um segundo ataque.
+
+---
+
+## Vaccines
+
+Uma **vaccine** é uma proposta de regra de deteção para um ataque que o SOC não apanhou. É só uma proposta: nunca é aplicada no Wazuh, não traz comandos e o estado é sempre `proposed` (aprovar ou rejeitar fica para o R12).
+
+- **De onde vem:** o veredito do Red vs Blue. Só os ataques `not_detected` ou `partial` geram uma vaccine (`detected` e `unknown` nunca). O motor (`scripts/vaccine_engine.py`) propõe uma entrada por sensor em falta: uma regra com os Event IDs do cenário, uma janela de 300 s e `min_count` 1, ou, para ML e rede, uma recomendação em texto. Cada vaccine valida-se (`validate_vaccine`) antes de ser gravada.
+- **Quando aparece:** o backend corre um ciclo no arranque e depois a cada 5 min (`main._vaccine_loop`, `scripts/vaccine_ingest.py`) e só grava vaccines de ataques com mais de 10 min, para os alertas terem tempo de chegar. Na prática uma vaccine demora cerca de 10 a 15 min a aparecer.
+- **Onde fica:** `scripts/vaccines.sqlite3` (`scripts/vaccine_store.py`, ignorado pelo git). O `GET` só lê e nunca cria o ficheiro; só o ciclo escreve. Quando o veredito de um ataque muda, a vaccine anterior fica guardada com `superseded_by`.
+- **Variáveis de ambiente opcionais:** `SENTRYLENS_VACCINE_INTERVAL_SECONDS` (omissão 300), `SENTRYLENS_VACCINE_WINDOW_HOURS` (168), `SENTRYLENS_VACCINE_SETTLE_SECONDS` (600) e `SENTRYLENS_VACCINES_DB_PATH` (omissão `scripts/vaccines.sqlite3`).
+- **O que a aba mostra:** em 💉 Candidates, a lista das vaccines com filtros por ataque, técnica MITRE e "Incluir substituídas", uma linha com o estado do gerador (última execução ou o código do erro) e, ao escolher uma linha, o detalhe com a origem, as propostas e a cadeia de substituição, sempre com o aviso "Proposta — não aplicada no Wazuh".
+- **Limites:** o id (`vac-` + 12 hex) deteta troca ou duplicação mas não autentica; o estado do gerador é em memória (volta a "ainda não correu" depois de reiniciar o backend); com alertas truncados o risco fica sinalizado. Detalhes em [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) e [`docs/API.md`](docs/API.md).
 
 ---
 
@@ -309,7 +324,7 @@ Ver [`QUICKSTART.md`](QUICKSTART.md).
 
 ## Testes
 
-38 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
+45 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
 
 ```bash
 cd scripts
@@ -319,6 +334,7 @@ python test_compliance.py       # motor RGPD/NIS2/AI Act
 python test_ml_anomalies.py     # /api/ml-anomalies
 python test_redblue.py          # correlação Red vs Blue
 python test_network_detections.py
+python test_vaccines_api.py     # vaccines: rotas, ciclo e garantias negativas
 # ... e os restantes test_*.py
 ```
 
@@ -344,6 +360,8 @@ Todos os endpoints `/api/*` exigem o header `X-API-Key` e devolvem JSON (exceto 
 | GET | `/api/incidents` | Incidentes (rotas `/api/incidents/*`) |
 | GET | `/api/attacks` | Registo de ataques, esperado vs. real |
 | GET | `/api/attack-library` | Catálogo de cenários de ataque |
+| GET | `/api/vaccines` | Vaccines propostas (R11), filtros e estado do gerador |
+| GET | `/api/vaccines/{id}` | Detalhe de uma vaccine: regra proposta e origem |
 | GET | `/api/network/live-traffic` \| `detections` \| `evidence` | Resumos dedicados de rede |
 | GET | `/api/siem/health` | Saúde do SIEM |
 | GET | `/api/history/query` | Consulta ao histórico (índice SQLite) |
@@ -380,10 +398,11 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 │   ├── model_registry.py, ml_evaluation.py, export_raw_events.py   registo, avaliação e exportação
 │   ├── attack_scenarios.py / redblue_correlator.py  Red vs Blue
 │   ├── incident_*.py, attack_registry.py, attack_library.py/.yaml   incidentes, registo e biblioteca de ataques
+│   ├── vaccine_engine.py / vaccine_store.py / vaccine_ingest.py   vaccines propostas (R11)
 │   ├── detection_event.py, network_soc.py, siem_health.py   deteções unificadas, painéis de rede, saúde do SIEM
 │   ├── history_store.py / history_index.py      histórico JSONL e índice SQLite
 │   ├── deploy/                                  serviço tshark e logrotate da VM
-│   └── test_*.py                                38 testes standalone
+│   └── test_*.py                                45 testes standalone
 └── docs/                                        API, ML e guia do laboratório
 ```
 
