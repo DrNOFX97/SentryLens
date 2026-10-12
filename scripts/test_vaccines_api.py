@@ -189,8 +189,11 @@ def run_tracer() -> None:
         check("2.º ciclo: total continua 2 e há 2 linhas no ficheiro",
               client.get("/api/vaccines", headers=HEADERS).json()["total"] == 2 and count_rows(vaccines_path) == 2)
         main.vaccine_store = VaccineStore(vaccines_path)
+        after_restart = client.get("/api/vaccines", headers=HEADERS).json()
+        # `generator` é estado do loop em memória (13-02): fora da comparação do que está no ficheiro.
         check("reinício: nova instância sobre o mesmo ficheiro devolve o mesmo JSON",
-              client.get("/api/vaccines", headers=HEADERS).json() == before)
+              {k: v for k, v in after_restart.items() if k != "generator"}
+              == {k: v for k, v in before.items() if k != "generator"})
 
         # --- paginação ---
         r = client.get("/api/vaccines?limit=1&offset=1", headers=HEADERS)
