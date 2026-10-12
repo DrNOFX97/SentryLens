@@ -135,22 +135,46 @@ class VaccineStore:
                     v["id"], origin["attack_id"], origin["scenario"], origin["mitre_technique"], v["verdict"],
                     json.dumps(v, ensure_ascii=False, sort_keys=True), now_iso))
                 counts["inserted" if cur.rowcount == 1 else "existing"] += 1
+                # D-06: "a atual" de um ataque e sempre a ultima que o motor emitiu
+                # (cobre partial <-> not_detected e o vaivem A-B-A). So superseded_by
+                # muda; state nunca e tocado. Idempotente: sem mudanca, nao toca em linhas.
+                conn.execute(
+                    "UPDATE vaccines SET superseded_by = ? WHERE attack_id = ? AND id != ? "
+                    "AND (superseded_by IS NULL OR superseded_by != ?)",
+                    (v["id"], origin["attack_id"], v["id"], v["id"]))
+                conn.execute("UPDATE vaccines SET superseded_by = NULL WHERE id = ? AND superseded_by IS NOT NULL",
+                             (v["id"],))
         return counts
 
     # --- leitura (só-leitura, nunca cria o ficheiro) ---
 
-    def list_vaccines(self, *, limit: int = 200, offset: int = 0) -> tuple[list[dict], int, int]:
+    def list_vaccines(self, *, attack_id: int | None = None, technique: str | None = None,
+                      include_superseded: bool = False, limit: int = 200,
+                      offset: int = 0) -> tuple[list[dict], int, int]:
         """(linhas da página, total com os mesmos filtros, total de linhas do
-        store). Parâmetros só por nome, de propósito: o bug de list_incidents foi
-        um desalinhamento posicional."""
+        store sem filtros; este decide o `no_data` da rota). Parâmetros só por
+        nome, de propósito: o bug de list_incidents foi um desalinhamento
+        posicional. As cláusulas WHERE são fixas, escolhidas pelo código; os
+        valores vão sempre por `?`, nunca interpolados."""
+        clauses: list[str] = []
+        params: list = []
+        if attack_id is not None:
+            clauses.append("attack_id = ?")
+            params.append(attack_id)
+        if technique is not None:
+            clauses.append("mitre_technique = ?")
+            params.append(technique)
+        if not include_superseded:
+            clauses.append("superseded_by IS NULL")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         with self._read() as conn:
             if conn is None:
                 return [], 0, 0
             store_total = conn.execute("SELECT COUNT(*) FROM vaccines").fetchone()[0]
-            total = store_total
+            total = conn.execute("SELECT COUNT(*) FROM vaccines" + where, params).fetchone()[0]
             rows = conn.execute(
-                "SELECT * FROM vaccines ORDER BY attack_id DESC, created_at DESC, id ASC LIMIT ? OFFSET ?",
-                (limit, offset)).fetchall()
+                "SELECT * FROM vaccines" + where + " ORDER BY attack_id DESC, created_at DESC, id ASC LIMIT ? OFFSET ?",
+                [*params, limit, offset]).fetchall()
             return [self._to_vaccine(r) for r in rows], total, store_total
 
     def get_vaccine(self, vaccine_id: str) -> dict | None:
