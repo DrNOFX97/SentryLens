@@ -170,6 +170,59 @@ def real_api_keys() -> tuple[set, dict]:
         tmp.cleanup()
 
 
+# --- varrimentos do ficheiro inteiro ----------------------------------------
+
+_DECL_RE = re.compile(r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)", re.M)
+# Um helper vac* só conta como chamada (vacCell(...)): um identificador que
+# apenas começa por "vac", como vaccine, é um dado cru da API.
+_SAFE_INTERPOLATION_RE = re.compile(r"escapeHtml\(|vac[A-Za-z0-9_$]*\(|VAC_[A-Z_]+\b")
+_INNERHTML_RE = re.compile(r"\.innerHTML\s*(\+?=)\s*(\S{0,40})")
+_MESSAGE_RE = re.compile(r"\.message\b")
+_MESSAGE_SINKS = ("vacErrorText", "vacRenderError", "vacRenderDetailError")
+
+
+def top_level_decls(js: str) -> list[str]:
+    """Identificadores declarados na coluna 0 (os globais que o ficheiro cria)."""
+    return _DECL_RE.findall(js)
+
+
+def interpolation_violations(js: str) -> list[str]:
+    """Cada `${` tem de começar por escapeHtml(, por um helper vac* ou por uma
+    constante VAC_*. Um identificador que só começa por vac (vaccine) não conta. Devolve o início das que não começam."""
+    found = []
+    for m in re.finditer(r"\$\{", js):
+        resto = js[m.end():].lstrip()
+        if not _SAFE_INTERPOLATION_RE.match(resto):
+            found.append(resto[:40])
+    return found
+
+
+def innerhtml_violations(js: str) -> list[str]:
+    """`.innerHTML =` só com um template (crase), uma chamada vac...( ou "";
+    `.innerHTML +=` é sempre violação."""
+    found = []
+    for m in _INNERHTML_RE.finditer(js):
+        operador, valor = m.group(1), m.group(2)
+        if operador == "+=" or not (valor.startswith("`") or valor.startswith('""')
+                                    or re.match(r"vac[A-Za-z0-9_$]*\(", valor)):
+            found.append(m.group(0))
+    return found
+
+
+def message_violations(js: str) -> list[str]:
+    """Cada `.message` tem de ser o argumento direto de vacErrorText(,
+    vacRenderError( ou vacRenderDetailError(. Devolve o contexto das outras."""
+    found = []
+    for m in _MESSAGE_RE.finditer(js):
+        antes = js[:m.start()]
+        depois = js[m.end():].lstrip()
+        ok = (re.search(r"(?:" + "|".join(_MESSAGE_SINKS) + r")\(\s*[A-Za-z_$][\w$]*$", antes)
+              and depois.startswith(")"))
+        if not ok:
+            found.append(js[max(0, m.start() - 30):m.end() + 10])
+    return found
+
+
 # --- run_tracer ------------------------------------------------------------
 
 def run_tracer() -> None:
@@ -269,8 +322,92 @@ def run_tracer() -> None:
         print(f"       em falta: {sorted(esperados - acessos)}")
 
 
+def run_guards() -> None:
+    files = served()
+    js = files["/vaccines.js"][2]
+    app_js = files["/app.js"][2]
+
+    # a) globais: os scripts clássicos partilham um só escopo global
+    decls = top_level_decls(js)
+    sem_prefixo = [n for n in decls if not n.startswith(("vac", "VAC_"))]
+    check("todos os identificadores de topo de vaccines.js têm prefixo vac/VAC_", bool(decls) and not sem_prefixo)
+    if sem_prefixo:
+        print(f"       nomes sem prefixo: {sem_prefixo}")
+    colisoes = {}
+    for caminho, nome in sorted(serve_frontend.ALLOWED_FILES.items()):
+        if not nome.endswith(".js") or nome == "vaccines.js":
+            continue
+        outras = set(top_level_decls((serve_frontend.PROJECT_ROOT / nome).read_text(encoding="utf-8")))
+        comuns = sorted(set(decls) & outras)
+        if comuns:
+            colisoes[nome] = comuns
+    check("vaccines.js não repete nenhum identificador de topo dos outros .js servidos", not colisoes)
+    if colisoes:
+        print(f"       colisões: {colisoes}")
+    check("vaccines.js não redeclara os globais de app.js",
+          not ({"API_BASE", "API_KEY", "escapeHtml", "renderPanelError"} & set(decls)))
+
+    # b) escape: cada varrimento tem de apanhar uma violação sintética conhecida
+    check("cada interpolação ${...} começa por escapeHtml(, vac* ou VAC_*", not interpolation_violations(js))
+    check("cada atribuição a innerHTML é um template, um helper vac* ou vazia", not innerhtml_violations(js))
+    check("vaccines.js não usa insertAdjacentHTML, outerHTML nem document.write",
+          not any(x in js for x in ("insertAdjacentHTML", "outerHTML", "document.write")))
+    check("o varrimento de interpolações apanha uma violação sintética",
+          len(interpolation_violations("x = `<td>${vaccine.id}</td>`;")) >= 1
+          and not interpolation_violations("x = `<td>${escapeHtml(a)}${vacCell(b)}${VAC_X}</td>`;"))
+    check("o varrimento de innerHTML apanha uma atribuição de variável sintética",
+          len(innerhtml_violations("body.innerHTML = texto;")) >= 1
+          and not innerhtml_violations('a.innerHTML = `<b></b>`; b.innerHTML = vacRowsHtml(l); c.innerHTML = "";'))
+    check("o varrimento de innerHTML apanha o operador += sintético",
+          len(innerhtml_violations("body.innerHTML += `<tr></tr>`;")) >= 1)
+    check("o varrimento de .message apanha um uso solto sintético",
+          len(message_violations("alert(err.message);")) >= 1
+          and not message_violations("vacRenderError(err.message);"))
+
+    # c) erros só por código
+    objeto = re.search(r"const VAC_ERROR_TEXT = \{(.*?)^\};", js, re.S | re.M)
+    chaves = set(re.findall(r"^\s{2}([A-Za-z_]\w*):", objeto.group(1), re.M)) if objeto else set()
+    esperadas = {"unauthorized", "network_error", "store_unavailable", "entry_not_found",
+                 "http_404", "http_422", "http_502", "http_503"}
+    check("VAC_ERROR_TEXT tem as 8 chaves pedidas", esperadas <= chaves)
+    check("nenhuma frase de erro diz que não há dados",
+          bool(objeto) and "Sem dados" not in objeto.group(1))
+    check("o único código aceite do servidor é /^[a-z_]{1,64}$/", "/^[a-z_]{1,64}$/" in js)
+    corpo = function_body(js, "vacCodeFromResponse")
+    check("vacCodeFromResponse trata o 401 como unauthorized", "401" in corpo and '"unauthorized"' in corpo)
+    corpo = function_body(js, "vacErrorText")
+    check("vacErrorText usa hasOwnProperty e cai em VAC_GENERIC_ERROR",
+          "hasOwnProperty" in corpo and "VAC_GENERIC_ERROR" in corpo)
+    check("cada .message é argumento direto de vacErrorText/vacRenderError/vacRenderDetailError",
+          not message_violations(js))
+    for violacao in message_violations(js):
+        print(f"       .message solto: {violacao!r}")
+
+    # d) honestidade: erro nunca é "Sem dados" nem lista vazia
+    check('o texto "Sem dados" aparece exatamente uma vez em vaccines.js', js.count("Sem dados") == 1)
+    corpo = function_body(js, "vacRenderList")
+    check("vacRenderList liga no_data a VAC_NO_DATA_TEXT e o filtro vazio a VAC_FILTER_EMPTY_TEXT",
+          '"no_data"' in corpo and "VAC_NO_DATA_TEXT" in corpo and "VAC_FILTER_EMPTY_TEXT" in corpo)
+    corpo = function_body(js, "vacRenderError")
+    check("vacRenderError não usa 'Sem dados' nem os textos de lista vazia",
+          bool(corpo) and not any(x in corpo for x in ("Sem dados", "VAC_NO_DATA_TEXT", "VAC_FILTER_EMPTY_TEXT")))
+    check("vacRenderError desenha o banner e a linha vac-error-state",
+          "renderPanelError" in corpo and "vac-error-state" in corpo)
+
+    # e) ciclo de vida (D-02)
+    check("a aba reage à ativação: MutationObserver, visibilitychange e guarda vacLoading",
+          all(x in js for x in ("MutationObserver", '"visibilitychange"', "vacLoading")))
+    check("sem polling, sem canal em tempo real e sem guarda de carregar uma só vez",
+          not any(x in js for x in ("setInterval", "WebSocket", "vacLoaded")))
+
+    # f) app.js intacto: nenhuma referência à aba nova
+    check("app.js não referencia vaccines.js, tab-vaccines nem /api/vaccines",
+          not any(x in app_js for x in ("vaccines.js", "tab-vaccines", "/api/vaccines")))
+
+
 if __name__ == "__main__":
     run_tracer()
+    run_guards()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:
