@@ -36,3 +36,10 @@ scripts/attack_log_round*.jsonl
 # Lixo local de ferramentas / pasta partilhada com a VM Kali
 .playwright-mcp/
 kali-share/
+
+# Ambientes virtuais locais (scripts/.venv, .venv2, ...)
+scripts/.venv*/
+
+# Estado de runtime (dados do PC, locks do GSD) — não são código-fonte
+scripts/system_alerts_history*.json
+.planning/milestone.lock
