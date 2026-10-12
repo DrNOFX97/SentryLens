@@ -846,6 +846,15 @@ tr.rb-stale td { font-style: italic; }
 .alib-replayable-yes { background: #d4efdf; }
 .alib-replayable-no { background: #e0e0e0; color: #666; }
 
+/* ===== Vaccines (Roadmap v2, R11) — vaccines.js ===== */
+.vac-verdict { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e0e6ea; color: var(--ink-900); }
+.vac-verdict-not_detected { background: #f8d7da; }
+.vac-verdict-partial { background: #fdecc8; }
+.vac-row-superseded { opacity: .55; }
+.vac-superseded-note { display: block; font-size: 12px; color: #666; }
+.vac-generator-error { color: #8a1f2b; font-weight: 600; }
+.vac-error-state { text-align: center; padding: 30px 10px; font-size: 13px; color: #8a1f2b; }
+
 /* ===== Registo de modelos (Roadmap v2, R9) — ml_models.js ===== */
 .mlm-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
 .mlm-badge-active { background: #d4efdf; }

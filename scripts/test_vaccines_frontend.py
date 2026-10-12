@@ -471,10 +471,95 @@ def run_filters() -> None:
           estado == 200 and vazio["vaccines"] == [] and vazio["reason"] is None and vazio["available"] is True)
 
 
+def run_states() -> None:
+    files = served()
+    index_html = files["/index.html"][2]
+    js = files["/vaccines.js"][2]
+    css = files["/style.css"][2]
+
+    # a) linha de estado do gerador no markup, a seguir à filter-row
+    gerador = re.search(r'<div\s+id="vac-generator"\s+class="panel-note"\s+role="status"\s*>\s*</div>', index_html)
+    fila = index_html.find('class="filter-row"', index_html.find('id="vaccines-panel"'))
+    aviso = index_html.find('id="vac-notice"')
+    check('index.html tem div#vac-generator.panel-note[role="status"] entre a filter-row e #vac-notice',
+          gerador is not None and fila != -1 and fila < gerador.start() < aviso)
+
+    # b) frases e estados do gerador
+    objeto = re.search(r"const VAC_ERROR_TEXT = \{(.*?)^\};", js, re.S | re.M)
+    chaves = set(re.findall(r"^\s{2}([A-Za-z_]\w*):", objeto.group(1), re.M)) if objeto else set()
+    em_falta = [c for c in vaccine_ingest.GENERATOR_ERROR_CODES if c not in chaves]
+    check("VAC_ERROR_TEXT tem uma frase para cada código de vaccine_ingest.GENERATOR_ERROR_CODES", not em_falta)
+    if em_falta:
+        print(f"       códigos sem frase: {em_falta}")
+    check('nenhuma frase de VAC_ERROR_TEXT diz "Sem dados"', bool(objeto) and "Sem dados" not in objeto.group(1))
+    check("vaccines.js tem cada estado de GENERATOR_STATUSES como literal de string",
+          all(f'"{estado}"' in js for estado in vaccine_ingest.GENERATOR_STATUSES))
+
+    # c) campos do gerador lidos, todos dentro das chaves reais
+    real, respostas = real_api_keys()
+    acessos = data_accesses(js)
+    esperados = {("envelope", "generator"), ("generator", "status"), ("generator", "error_code"),
+                 ("generator", "last_run_at"), ("generator", "last_success_at"), ("generator", "alerts_truncated"),
+                 ("generator", "counts"), ("counts", "pending_settle"), ("vaccine", "superseded_by")}
+    check("vaccines.js lê os campos do gerador e superseded_by", esperados <= acessos)
+    if not esperados <= acessos:
+        print(f"       em falta: {sorted(esperados - acessos)}")
+    desconhecidos = sorted(a for a in acessos if a[1] not in real and a[1] != "length")
+    check("cada campo lido de um objeto da API existe na resposta real", not desconhecidos)
+    if desconhecidos:
+        print(f"       campos que a API não tem: {desconhecidos}")
+    lidos_do_gerador = {p for v, p in acessos if v == "generator"}
+    check("os campos lidos do gerador são chaves de vaccine_ingest.GENERATOR_KEYS",
+          lidos_do_gerador <= vaccine_ingest.GENERATOR_KEYS)
+
+    # d) funções do gerador
+    check('vacRenderGenerator usa a classe "vac-generator-error"',
+          "vac-generator-error" in function_body(js, "vacRenderGenerator"))
+    check("vacGeneratorText traduz o código de erro só por vacErrorText",
+          "vacErrorText" in function_body(js, "vacGeneratorText"))
+    check("vacRefresh passa envelope.generator a vacRenderGenerator",
+          "vacRenderGenerator(envelope.generator)" in function_body(js, "vacRefresh"))
+    texto = function_body(js, "vacGeneratorText")
+    check("a linha do gerador diz 'Última execução' e a frase própria de never_run",
+          "Última execução" in texto and "ainda não correu" in texto)
+    check("a linha do gerador explica pending_settle e o teto de alertas (alerts_truncated)",
+          "pending_settle" in texto and "alerts_truncated" in texto and "1000 alertas" in texto)
+    check("vacAgo cobre data inválida, minutos, horas e dias",
+          all(x in function_body(js, "vacAgo") for x in ("Date.parse", "menos de 1 min", " min", " h", " dias")))
+
+    # e) rota real: o erro do gerador chega como código estável com frase própria
+    gerador_real = respostas["com_erro"]["generator"]
+    check("rota real: o gerador com erro tem status error e error_code indexer_unavailable",
+          gerador_real["status"] == "error" and gerador_real["error_code"] == "indexer_unavailable")
+    check("rota real: o error_code do gerador tem frase em VAC_ERROR_TEXT",
+          gerador_real["error_code"] in chaves)
+    check("rota real: o gerador ok tem as chaves de GENERATOR_KEYS",
+          set(respostas["lista"]["generator"]) == set(vaccine_ingest.GENERATOR_KEYS))
+
+    # f) badges de veredito e substituídas esbatidas
+    check("vaccines.js tem 'Substituída por', vac-row-superseded e vac-verdict",
+          all(x in js for x in ("Substituída por", "vac-row-superseded", "vac-verdict")))
+    linhas = function_body(js, "vacRowsHtml")
+    check("vacRowsHtml usa vacVerdictBadge, vacRowClass e vacSupersededNote",
+          all(x in linhas for x in ("vacVerdictBadge", "vacRowClass", "vacSupersededNote")))
+    check("os rótulos de veredito mantêm Não detetado e Parcial",
+          re.search(r'VAC_VERDICT_LABELS = \{[^}]*not_detected: "Não detetado"[^}]*partial: "Parcial"', js) is not None)
+    check("vacVerdictBadge escapa o veredito e o rótulo",
+          function_body(js, "vacVerdictBadge").count("escapeHtml(") >= 2)
+    check("vacSupersededNote desenha o id substituto por vacCell",
+          "vacCell(vaccine.superseded_by)" in function_body(js, "vacSupersededNote"))
+
+    # g) estilos
+    for classe in ("vac-verdict", "vac-verdict-not_detected", "vac-verdict-partial", "vac-row-superseded",
+                   "vac-superseded-note", "vac-generator-error", "vac-error-state"):
+        check(f"style.css servido define .{classe}", re.search(r"\." + re.escape(classe) + r"\s*\{", css) is not None)
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
     run_filters()
+    run_states()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:

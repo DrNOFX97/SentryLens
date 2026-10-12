@@ -34,6 +34,14 @@ const VAC_ERROR_TEXT = {
   unauthorized: "API key inválida ou em falta — confirma SENTRYLENS_API_KEY em scripts/.env e recarrega a página.",
   network_error: "Sem ligação ao backend (localhost:8001) — confirma que está a correr com scripts/start-backend.ps1.",
   store_unavailable: "O store de vaccines (scripts/vaccines.sqlite3) não pôde ser lido nem escrito — vê o backend.log.",
+  // Códigos do gerador (vaccine_ingest.GENERATOR_ERROR_CODES); store_unavailable serve os dois casos.
+  indexer_unavailable: "O Wazuh Indexer não respondeu — sem alertas não é possível avaliar os ataques.",
+  ml_model_unavailable: "O modelo de ML não está disponível — o veredito por ML não pôde ser medido.",
+  attack_outside_alert_window: "Há ataques mais antigos do que a janela de alertas consultada.",
+  source_unavailable: "Uma fonte de dados do Red vs Blue esteve indisponível.",
+  attack_log_unreadable: "O attack log (attack_log.jsonl) não pôde ser lido.",
+  incidents_unavailable: "A base de incidentes não pôde ser lida — nada foi gravado para não perder a ligação aos incidentes.",
+  unexpected_error: "Erro inesperado no gerador — vê o backend.log.",
   entry_not_found: "Esta vaccine não existe no store (o ficheiro pode ter sido trocado ou apagado).",
   http_404: "O backend não tem a rota de vaccines — reinicia-o com a versão atual.",
   http_422: "Filtro recusado pelo backend (valor fora do formato aceite).",
@@ -105,16 +113,33 @@ async function vacRequest(path) {
   return response.json();
 }
 
+// Veredito em badge: classe pelo valor escapado, rótulo escapado (ou o valor).
+function vacVerdictBadge(verdict) {
+  const label = VAC_VERDICT_LABELS[verdict] || verdict;
+  return '<span class="vac-verdict vac-verdict-' + escapeHtml(String(verdict)) + '">' +
+    escapeHtml(String(label)) + "</span>";
+}
+
+// A condição fica em helpers: cada interpolação do template começa por vac*.
+function vacRowClass(vaccine) {
+  return vaccine.superseded_by === null || vaccine.superseded_by === undefined ? "" : " vac-row-superseded";
+}
+
+function vacSupersededNote(vaccine) {
+  if (vaccine.superseded_by === null || vaccine.superseded_by === undefined) return "";
+  return '<span class="vac-superseded-note">Substituída por ' + vacCell(vaccine.superseded_by) + "</span>";
+}
+
 function vacRowsHtml(vaccines) {
   return vaccines.map((vaccine) => {
     const origin = vaccine.origin || {};
     const attack = origin.attack_id === null || origin.attack_id === undefined ? "" : "#" + origin.attack_id;
-    return `<tr class="atk-row" data-id="${escapeHtml(vaccine.id)}" tabindex="0">
-    <td>${vacCell(vaccine.id)}</td>
+    return `<tr class="atk-row${vacRowClass(vaccine)}" data-id="${escapeHtml(vaccine.id)}" tabindex="0">
+    <td>${vacCell(vaccine.id)}${vacSupersededNote(vaccine)}</td>
     <td>${vacCell(attack)}</td>
     <td>${vacCell(origin.scenario)}</td>
     <td>${vacCell(origin.mitre_technique)}</td>
-    <td>${vacCell(VAC_VERDICT_LABELS[vaccine.verdict] || vaccine.verdict)}</td>
+    <td>${vacVerdictBadge(vaccine.verdict)}</td>
     <td>${vacCell(vacSensors(vaccine.missing_sensors))}</td>
     <td>${vacCell(VAC_STATE_LABELS[vaccine.state] || vaccine.state)}</td>
     <td>${vacCell(vacDate(vaccine.created_at))}</td>
@@ -148,6 +173,57 @@ function vacRenderError(code) {
   document.getElementById("vac-body").innerHTML =
     `<tr><td colspan="8" class="vac-error-state">${escapeHtml(text)}</td></tr>`;
   document.getElementById("vac-notice").textContent = "";
+}
+
+// Há quanto tempo, em texto simples (vai para textContent).
+function vacAgo(iso, nowMs) {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "em data desconhecida";
+  const minutes = Math.floor((nowMs - ms) / 60000);
+  if (minutes < 1) return "há menos de 1 min";
+  if (minutes < 60) return "há " + minutes + " min";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return "há " + hours + " h";
+  return "há " + Math.floor(hours / 24) + " dias";
+}
+
+// Linha de estado do gerador, em texto simples. O código de erro do servidor
+// só serve de chave de vacErrorText; nunca é desenhado como veio.
+function vacGeneratorText(generator, nowMs) {
+  if (!generator || typeof generator !== "object") {
+    return { text: "Estado do gerador indisponível.", isError: true };
+  }
+  if (generator.status === "never_run") {
+    return { text: "O gerador de vaccines ainda não correu desde o arranque do backend.", isError: false };
+  }
+  if (generator.status !== "error" && generator.status !== "ok" && generator.status !== "no_data") {
+    return { text: "Estado do gerador desconhecido.", isError: true };
+  }
+  let text = "Última execução " + vacAgo(generator.last_run_at, nowMs);
+  let isError = false;
+  if (generator.status === "error") {
+    isError = true;
+    text += ": falhou — " + vacErrorText(generator.error_code);
+    if (generator.last_success_at) text += " Último sucesso " + vacAgo(generator.last_success_at, nowMs) + ".";
+  } else {
+    text += ".";
+    if (generator.status === "no_data") text += " Sem ataques no attack log.";
+  }
+  const counts = generator.counts;
+  if (counts && counts.pending_settle > 0) {
+    text += " " + counts.pending_settle + " ataque(s) recente(s) ainda a assentar — a vaccine só é proposta depois do tempo de estabilização.";
+  }
+  if (generator.alerts_truncated === true) {
+    text += " Aviso: a última execução atingiu o teto de 1000 alertas; ataques sem correspondência ficam por avaliar.";
+  }
+  return { text, isError };
+}
+
+function vacRenderGenerator(generator) {
+  const line = document.getElementById("vac-generator");
+  const state = vacGeneratorText(generator, Date.now());
+  line.textContent = state.text;
+  line.classList.toggle("vac-generator-error", state.isError);
 }
 
 // Query string dos filtros visíveis: "" sem filtros, "?..." com filtros, ou
@@ -200,8 +276,12 @@ async function vacRefresh() {
     renderPanelError("#vaccines-panel", "");
     vacRenderList(envelope);
     vacAddTechniques(envelope.vaccines || []);
+    vacRenderGenerator(envelope.generator);
   } catch (err) {
     vacRenderError(err.message);
+    const line = document.getElementById("vac-generator");
+    line.textContent = "";
+    line.classList.remove("vac-generator-error");
   } finally {
     vacLoading = false;
     // Filtros mudados a meio do pedido: um (e só um) novo pedido, depois deste.
