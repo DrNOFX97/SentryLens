@@ -1653,7 +1653,11 @@ async def _vaccine_cycle_body() -> dict:
                 truncated: bool | None = None) -> dict:
         return {"status": status, "error_code": error_code, "counts": counts, "alerts_truncated": truncated}
 
-    attack_log = await run_in_threadpool(load_attack_log, ATTACK_LOG_PATH)
+    try:
+        attack_log = await run_in_threadpool(load_attack_log, ATTACK_LOG_PATH)
+    except (OSError, UnicodeDecodeError):
+        logger.exception("Vaccines: attack log ilegível")
+        return outcome("error", "attack_log_unreadable")
     if not attack_log:
         return outcome("no_data")
     registry, correlation, incidents_available = await _build_attack_registry(attack_log, VACCINE_WINDOW_HOURS)
@@ -1667,8 +1671,12 @@ async def _vaccine_cycle_body() -> dict:
     now = datetime.now(timezone.utc)
     attack_ids = vaccine_ingest.select_attack_ids(
         registry["attacks"], now, VACCINE_WINDOW_HOURS, VACCINE_SETTLE_SECONDS, incident_engine_parse)
-    counts = await run_in_threadpool(
-        vaccine_ingest.persist_vaccines, vaccine_store, result["vaccines"], attack_ids, now.isoformat())
+    try:
+        counts = await run_in_threadpool(
+            vaccine_ingest.persist_vaccines, vaccine_store, result["vaccines"], attack_ids, now.isoformat())
+    except sqlite3.Error:
+        logger.exception("Vaccines: escrita no store falhou")
+        return outcome("error", "store_unavailable")
     return outcome("ok", None, counts, correlation["alerts_truncated"])
 
 
