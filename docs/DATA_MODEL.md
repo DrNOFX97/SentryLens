@@ -1,8 +1,8 @@
-# Modelo de dados (estado em 2026-10-10)
+# Modelo de dados (estado em 2026-10-12)
 
-Só o que já existe. Entidades do Roadmap v2 já definidas: Vaccine,
-Replay, Model (R9). `DetectionEvent` (R7) já está definido — ver
-abaixo.
+Só o que já existe. Entidades do Roadmap v2 já definidas: `DetectionEvent`
+(R7), o registo de modelo (R9) e a Vaccine (R11), todas abaixo; o Replay
+(R13) ainda não existe.
 
 ## `DetectionEvent` (R7) — `scripts/detection_event.py`
 
@@ -199,6 +199,150 @@ no YAML → aviso não-bloqueante (stderr), o arranque continua. Incoerências
 risco/replayable/cleanup (decisão do utilizador, R5): `risk: low` com
 `replayable: false`, ou `risk: low` com `cleanup_steps` vazio, são erros de
 validação — o risco em si continua decidido à mão por entrada, não calculado.
+
+## Vaccine (R11) — `vaccine_engine.py` + `vaccine_store.py` + `vaccine_ingest.py`
+
+Uma vaccine é uma **proposta** de regra de deteção, gerada a partir de um ataque
+do Red vs Blue que ficou `not_detected` ou `partial`. Nunca é aplicada no Wazuh,
+nunca traz comandos e o estado é sempre `proposed` (aprovar ou rejeitar é o R12).
+Persistida em SQLite (`scripts/vaccines.sqlite3`), gerada em segundo plano pelo
+backend, servida só por leitura (`GET /api/vaccines[/{id}]`, ver
+[API.md](API.md) (secção Vaccines (R11))). Exemplo de `GET /api/vaccines/{id}` (a vaccine
+não guarda IPs, ferramentas nem alvos, só referências ao ataque):
+
+```json
+{"vaccine": {
+  "id": "vac-bd617cce8054", "verdict": "partial",
+  "expected": ["rule", "ml"], "expected_source": "scenario_default",
+  "achieved": ["rule"], "missing_sensors": ["ml"],
+  "proposals": [{"sensor": "ml", "rule": null, "events": null,
+    "recommendation": "Rever o treino do modelo de anomalias: incluir este ataque e eventos semelhantes no conjunto de treino e reavaliar a versão antes de a ativar."}],
+  "origin": {"attack_id": 3, "scenario": "lateral_movement_schtasks",
+    "mitre_tactic": "Lateral Movement", "mitre_technique": "T1053",
+    "incident_ids": ["INC-20261012-1"],
+    "evidence": {"matched_event_ids": [4672, 4698], "matched_alert_count": 2, "network_detection_types": []}},
+  "state": "proposed", "superseded_by": null, "created_at": "2026-10-12T10:41:07+00:00"}}
+```
+
+### Campos
+
+Contrato fechado (`validate_vaccine` recusa chaves a mais ou a menos) e cada
+texto vem de uma allowlist, por isso nenhum campo pode transportar um comando.
+
+- **Vaccine** (`VACCINE_KEYS`): `id` (regra abaixo); `verdict` (`not_detected` ou
+  `partial`); `expected` (sensores esperados, subconjunto de `rule|ml|network`);
+  `expected_source` (`log` ou `scenario_default`, ou `null`); `achieved`
+  (sensores que viram o ataque); `missing_sensors` (esperados menos
+  alcançados, pela ordem `rule`, `ml`, `network`); `proposals` (uma por sensor
+  em falta); `origin`.
+- **`origin`** (`ORIGIN_KEYS`): `attack_id`; `scenario`; `mitre_tactic` e
+  `mitre_technique` (podem ser `null`); `incident_ids` (só os ids `INC-AAAAMMDD-n`,
+  nunca os incidentes completos); `evidence`.
+- **`origin.evidence`** (`EVIDENCE_KEYS`): `matched_event_ids` (Event IDs que
+  casaram); `matched_alert_count` (pode ser `null`); `network_detection_types`.
+- **Proposta** (`PROPOSAL_KEYS`): `sensor`; `rule` (só na proposta `rule`,
+  `null` nas outras); `events` (só na proposta `rule`, `null` nas outras);
+  `recommendation` (texto em PT-PT nas propostas `ml` e `network`, `null` na `rule`).
+- **`rule`** (`RULE_KEYS`): `event_ids` (os do cenário); `min_count` (sempre 1);
+  `window_seconds` (300, a janela de correlação do Red vs Blue).
+- **Evento** (`EVENT_KEYS`, em `events[]`): `event_id`; `name` e `severity`
+  vêm de `event_catalog.classify_alert`.
+- **Campos do store** (`STORE_FIELDS`, acrescentados ao ler): `state` (sempre
+  `proposed`); `superseded_by` (id da vaccine que a substituiu, ou `null`);
+  `created_at` (ISO-8601, quando o ciclo a gravou).
+
+### Regras
+
+- **Quem gera:** só ataques `not_detected` ou `partial`. `detected` e `unknown`
+  nunca geram, incluindo o `unknown` por alertas truncados (nada falhou, só
+  não se sabe) e o `unknown` por fonte indisponível. Sem id de ataque, id
+  duplicado, sensores em falta vazios ou sem Event IDs numa proposta `rule`: não
+  gera e conta em `skipped`.
+- **Uma vaccine por ataque**, com uma proposta por sensor em falta. Só a
+  proposta `rule` tem regra: `{event_ids do cenário, min_count 1, window_seconds 300}`.
+  As propostas `ml` e `network` só têm a recomendação em texto.
+- **O id** é `vac-` mais 12 hex de sha256 de `<attack_id>:<sensores em falta
+  pela ordem rule, ml, network, unidos por vírgula>`. É determinístico:
+  reprocessar o mesmo ataque com o mesmo veredito não duplica. Deteta troca ou
+  duplicação mas **não autentica**: quem consegue editar o `attack_log` ou o
+  ficheiro SQLite também consegue forjar um id coerente.
+- **`superseded_by`:** a vaccine atual de um ataque é a última que o motor emitiu.
+  Quando o veredito muda, a anterior fica guardada com `superseded_by` a apontar
+  para a nova (vaivém A, B, A repõe A). Um ataque que passa a `detected` não mexe
+  nas suas vaccines. A lista só mostra as atuais; as substituídas aparecem com
+  `include_superseded=true` e no detalhe.
+- **O store impõe as regras no próprio ficheiro:** `CHECK (state = 'proposed')`,
+  `CHECK (json_valid(payload))`, trigger que recusa DELETE e trigger que recusa
+  UPDATE de tudo menos `superseded_by`. A escrita é `INSERT ... ON CONFLICT(id)
+  DO NOTHING` e não `INSERT OR IGNORE`: este também engole em silêncio uma
+  violação de CHECK (sem erro), o que anularia a garantia do estado; o
+  `ON CONFLICT` só ignora a chave repetida e deixa um CHECK violado levantar erro.
+- **O GET nunca escreve:** abre o ficheiro em modo só-leitura e, se ele ainda não
+  existir, não o cria (responde vazio). Só o ciclo do gerador escreve. Caminho
+  em `SENTRYLENS_VACCINES_DB_PATH` (relativo resolve-se contra a pasta do
+  módulo, nunca contra o cwd); o ficheiro e o `-journal` estão no `.gitignore`.
+
+### Gerador
+
+O backend corre um ciclo no arranque e depois a cada
+`SENTRYLENS_VACCINE_INTERVAL_SECONDS` (omissão 300; aceita 30 a 86400).
+Cada ciclo olha para os ataques dos últimos `SENTRYLENS_VACCINE_WINDOW_HOURS`
+(omissão 168; 1 a 720) e só grava vaccines de ataques mais velhos que
+`SENTRYLENS_VACCINE_SETTLE_SECONDS` (omissão 600; 300 a 86400): um ataque
+avaliado segundos depois de lançado sai `not_detected` só porque os alertas
+ainda não chegaram, e essa vaccine falsa ficaria para sempre. Um valor inválido
+volta à omissão com aviso. Na prática, uma vaccine só aparece cerca de 10 min
+depois do ataque, mais até 5 min do intervalo. Com a base de incidentes
+indisponível nada é gravado. Com alertas truncados (teto de 1000 do Indexer)
+grava na mesma e sinaliza em `alerts_truncated`.
+
+Contagens por ciclo (`COUNT_KEYS`): `inserted` (novas), `existing` (já existiam),
+`rejected` (recusadas por `validate_vaccine`), `pending_settle` (ataques ainda a
+assentar), `outside_window` (mais velhos que a janela).
+
+O bloco `generator` do envelope (`GENERATOR_KEYS`): `status`, `error_code`,
+`last_run_at`, `last_success_at` (preservado quando um ciclo falha),
+`alerts_truncated` (`null` em erro e antes do 1.º ciclo) e `counts` (`null` se
+nunca correu). `status` (`GENERATOR_STATUSES`): `never_run` (ainda sem ciclo,
+incluindo depois de reiniciar), `ok`, `no_data` (attack log vazio, sem chamar o
+Indexer) e `error`. `error_code` (`GENERATOR_ERROR_CODES`, ou `null`):
+
+| `error_code` | Falha |
+|---|---|
+| `indexer_unavailable` | Wazuh Indexer em baixo |
+| `ml_model_unavailable` | modelo ML em falta ou corrompido |
+| `attack_outside_alert_window` | a correlação não cobre os ataques do log (mais antigos que os alertas obtidos) |
+| `source_unavailable` | o motor não conseguiu confirmar a fonte e a correlação não deu um código mais específico |
+| `attack_log_unreadable` | attack log ilegível |
+| `incidents_unavailable` | base de incidentes em baixo (nada gravado) |
+| `store_unavailable` | escrita no store falhou |
+| `unexpected_error` | qualquer outra exceção |
+
+O estado do gerador vive em memória: depois de reiniciar o backend volta a
+`never_run` até ao primeiro ciclo. Nunca leva texto de exceção, só o código.
+
+### Envelope de `GET /api/vaccines`
+
+`{available, reason, total, limit, offset, vaccines[], generator}`. `reason:
+"no_data"` (e `available: false`) só quando o store não tem nenhuma linha; um
+filtro sem resultados com o store não vazio dá `reason: null`, `available: true`
+e lista vazia. `GET /api/vaccines/{id}` dá 404 `entry_not_found` para um id
+válido que não existe. Falha a ler o store dá 503 `store_unavailable`, sem texto
+de exceção nem caminho. Qualquer escrita (POST, PUT, PATCH, DELETE) dá 405: não
+há rota de escrita.
+
+### Limites conhecidos
+
+- **A7:** a leitura não volta a correr `validate_vaccine`; uma linha adulterada
+  diretamente no ficheiro seria servida (o mesmo limite dos `.pkl`).
+- **A8:** as deteções de rede estão em memória e ficam vazias depois de um
+  reinício; um ataque com `network` esperado, avaliado logo a seguir, pode gerar
+  uma proposta `network` falsa.
+- **A3:** com alertas truncados as vaccines gravam-se na mesma; o risco fica
+  sinalizado em `generator.alerts_truncated`.
+- **A5:** o estado do gerador é em memória (ver acima).
+- O id não autentica (ver Regras). Uma vaccine é só uma proposta: nunca aplicada,
+  aprovada nem validada; escrever, aprovar e rejeitar é o R12.
 
 ## Alerta enriquecido — `main._enrich_alert`
 

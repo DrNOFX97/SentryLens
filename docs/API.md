@@ -359,6 +359,33 @@ agora a biblioteca).
 
 **Testes:** `scripts/test_attack_library.py`.
 
+## 💉 Vaccines (R11)
+
+Vaccines **propostas** a partir de ataques do Red vs Blue que ficaram
+`not_detected` ou `partial`: a regra de deteção que faltou, com a origem
+(ataque, cenário, MITRE, incidentes). Só leitura. São geradas pelo backend em
+segundo plano (no arranque e a cada 5 min), nunca aplicadas no Wazuh e nunca
+levam comandos. Não existe rota de escrita: POST, PUT, PATCH e DELETE dão `405`.
+As duas rotas exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/vaccines` | `attack_id` (1–999999999), `technique` (`^T\d{4}(\.\d{3})?$`), `include_superseded` (default `false`), `limit` (1–500, default 200), `offset` (>= 0) | `{available, reason, total, limit, offset, vaccines[], generator}` | 401, 422, 503 (`store_unavailable`) |
+| GET | `/api/vaccines/{id}` | `id`: `^vac-[0-9a-f]{12}$` | `{vaccine}` (inclui as substituídas) | 401, 404 (`entry_not_found`), 422 (id malformado), 503 (`store_unavailable`) |
+
+`reason: "no_data"` (com `available: false`) só quando o store não tem nenhuma
+vaccine; um filtro sem resultados dá `200`, lista vazia e `reason: null`. Por
+omissão a lista só traz a vaccine atual de cada ataque; as substituídas
+(`superseded_by` preenchido) precisam de `include_superseded=true`. O bloco
+`generator` diz como correu o último ciclo de geração (`status`, `error_code`
+estável, `last_run_at`, `last_success_at`, `alerts_truncated`, `counts`): um
+Indexer em baixo chega aqui como código, nunca como lista vazia nem como texto de
+exceção. Campos de cada vaccine, regras do id e do store, gerador e limites
+conhecidos em [DATA_MODEL.md](DATA_MODEL.md) (secção Vaccine (R11)).
+
+**Testes:** `scripts/test_vaccine_engine.py`, `test_vaccine_store.py`,
+`test_vaccine_ingest.py`, `test_vaccines_api.py`, `test_vaccines_frontend.py`.
+
 ## 📡 Network SOC (R6)
 
 Três painéis dedicados de rede (sidebar: Live Traffic / Network Detections /
@@ -455,6 +482,8 @@ novo sai do browser). A nota de `docs/superpowers/specs/2026-10-07-r7-detection-
 | GET | `/api/detections` | `hours` (máx. 168), `limit` (≤200) | Vista unificada regra/ML/rede via `DetectionEvent` (R7) |
 | GET | `/api/attack-library` | — | Catálogo de referência dos cenários de ataque (R5) |
 | GET | `/api/attack-library/{id}` | — | Detalhe de uma entrada da biblioteca (R5) |
+| GET | `/api/vaccines` | `attack_id`, `technique`, `include_superseded`, `limit`, `offset` | Vaccines propostas (R11), só leitura, com o estado do gerador |
+| GET | `/api/vaccines/{id}` | — | Detalhe de uma vaccine: regra proposta e origem (R11) |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | `cae_principal` (obrig.), `cae_secundarios`, `nipc`, `colaboradores`, `faturacao_eur`, `excecao_conhecida` | Classificação NIS2 sugerida |
 | GET | `/api/history/query` | `date_from`, `date_to`, `severity`, `rgpd_estado`, `nis2_estado`, `ai_act_estado`, `limit` (máx. 1000) | Consulta o histórico via índice SQLite |
