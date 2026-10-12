@@ -17,6 +17,10 @@
 const VAC_VERDICT_LABELS = { not_detected: "Não detetado", partial: "Parcial" };
 const VAC_SENSOR_LABELS = { rule: "Regra", ml: "ML", network: "Rede" };
 const VAC_STATE_LABELS = { proposed: "Proposta" };
+const VAC_EXPECTED_SOURCE_LABELS = { log: "attack log", scenario_default: "omissão do cenário (Attack Library)" };
+
+// Mesmo formato que a rota de detalhe aceita (a rota volta a validar).
+const VAC_ID_RE = /^vac-[0-9a-f]{12}$/;
 
 // Os dois textos de lista sem linhas são DISTINTOS de propósito: o primeiro é
 // o store sem nada (reason no_data), o segundo é um filtro sem resultados.
@@ -57,6 +61,9 @@ const VAC_INVALID_ATTACK_TEXT = "ID de ataque inválido: usa um número inteiro 
 const vacTab = document.getElementById("tab-vaccines");
 let vacLoading = false;
 let vacWasActive = false;
+// Vaccine aberta no detalhe e contador que descarta respostas fora de ordem.
+let vacSelectedId = null;
+let vacSelectSeq = 0;
 // União das técnicas MITRE vistas nas respostas da sessão: alimenta o select
 // sem nunca encolher por causa do próprio filtro.
 const vacTechniques = new Set();
@@ -113,6 +120,16 @@ async function vacRequest(path) {
   return response.json();
 }
 
+// Texto cru de uma lista, ou o travessão quando está vazia.
+function vacList(list) {
+  return list && list.length ? list.join(", ") : "—";
+}
+
+// Rótulo de um mapa fixo; uma chave desconhecida (ou herdada) fica como veio.
+function vacLabel(labels, key) {
+  return Object.prototype.hasOwnProperty.call(labels, key) ? labels[key] : key;
+}
+
 // Veredito em badge: classe pelo valor escapado, rótulo escapado (ou o valor).
 function vacVerdictBadge(verdict) {
   const label = VAC_VERDICT_LABELS[verdict] || verdict;
@@ -122,7 +139,9 @@ function vacVerdictBadge(verdict) {
 
 // A condição fica em helpers: cada interpolação do template começa por vac*.
 function vacRowClass(vaccine) {
-  return vaccine.superseded_by === null || vaccine.superseded_by === undefined ? "" : " vac-row-superseded";
+  let classes = vaccine.superseded_by === null || vaccine.superseded_by === undefined ? "" : " vac-row-superseded";
+  if (vaccine.id === vacSelectedId) classes += " selected";
+  return classes;
 }
 
 function vacSupersededNote(vaccine) {
@@ -289,6 +308,116 @@ async function vacRefresh() {
     if (current !== null && current !== query) vacRefresh();
   }
 }
+
+// Detalhe da vaccine (D-06): Origem, Propostas e Cadeia. Só texto: sem
+// ligações para outras abas (D-07). Cada valor passa por vacCell.
+function vacAttackLabel(attackId) {
+  return attackId === null || attackId === undefined ? "" : "#" + attackId;
+}
+
+function vacSourceNote(source) {
+  if (typeof source !== "string") return "";
+  return " (fonte: " + vacCell(vacLabel(VAC_EXPECTED_SOURCE_LABELS, source)) + ")";
+}
+
+function vacOriginHtml(vaccine) {
+  const origin = vaccine.origin;
+  const evidence = origin.evidence || {};
+  const incidents = origin.incident_ids && origin.incident_ids.length ? vacList(origin.incident_ids) : "nenhum incidente ligado";
+  return `<span>Veredito: ${vacVerdictBadge(vaccine.verdict)}</span>
+    <span>Ataque: <strong>${vacCell(vacAttackLabel(origin.attack_id))}</strong></span>
+    <span>Cenário: <strong>${vacCell(origin.scenario)}</strong></span>
+    <span>MITRE: ${vacCell(origin.mitre_technique)} (${vacCell(origin.mitre_tactic)})</span>
+    <span>Incidentes: ${vacCell(incidents)}</span>
+    <span>Sensores esperados: ${vacCell(vacSensors(vaccine.expected))}${vacSourceNote(vaccine.expected_source)}</span>
+    <span>Sensores alcançados: ${vacCell(vacSensors(vaccine.achieved))}</span>
+    <span>Evidência (por referência): Event IDs ${vacCell(vacList(evidence.matched_event_ids))};
+      alertas correspondentes ${vacCell(evidence.matched_alert_count)};
+      deteções de rede ${vacCell(vacList(evidence.network_detection_types))}</span>`;
+}
+
+function vacEventRowsHtml(events) {
+  return (events || []).map((catalogEvent) => `<tr>
+    <td>${vacCell(catalogEvent.event_id)}</td>
+    <td>${vacCell(catalogEvent.name)}</td>
+    <td>${vacCell(catalogEvent.severity)}</td>
+  </tr>`).join("");
+}
+
+function vacRuleHtml(proposal) {
+  const rule = proposal.rule;
+  if (!rule) return "";
+  return `<p>Regra proposta: Event IDs <strong>${vacCell(vacList(rule.event_ids))}</strong> — pelo menos
+    ${vacCell(rule.min_count)} ocorrência(s) em ${vacCell(rule.window_seconds)} s</p>
+    <table><thead><tr><th>Event ID</th><th>Nome</th><th>Severidade</th></tr></thead>
+    <tbody>${vacEventRowsHtml(proposal.events)}</tbody></table>`;
+}
+
+function vacRecommendationHtml(proposal) {
+  if (!proposal.recommendation) return "";
+  return `<p>Recomendação: ${vacCell(proposal.recommendation)}</p>`;
+}
+
+function vacProposalsHtml(vaccine) {
+  const proposals = vaccine.proposals || [];
+  if (!proposals.length) return "<p>Nenhuma proposta registada.</p>";
+  return proposals.map((proposal) => `<div class="vac-proposal">
+    <h4>${vacCell(vacLabel(VAC_SENSOR_LABELS, proposal.sensor))}</h4>
+    ${vacRuleHtml(proposal)}
+    ${vacRecommendationHtml(proposal)}
+  </div>`).join("");
+}
+
+function vacChainHtml(vaccine) {
+  if (vaccine.superseded_by) return "<p>Substituída por <strong>" + vacCell(vaccine.superseded_by) + "</strong></p>";
+  return "<p>Atual — é a proposta em vigor para este ataque.</p>";
+}
+
+function vacRenderDetail(vaccine) {
+  document.getElementById("vaccine-detail-panel").hidden = false;
+  document.getElementById("vac-detail-title").textContent = vaccine.id;
+  document.getElementById("vac-detail-origin").innerHTML = vacOriginHtml(vaccine);
+  document.getElementById("vac-detail-proposals").innerHTML = vacProposalsHtml(vaccine);
+  document.getElementById("vac-detail-chain").innerHTML = vacChainHtml(vaccine);
+}
+
+function vacRenderDetailError(code) {
+  document.getElementById("vaccine-detail-panel").hidden = false;
+  renderPanelError("#vaccine-detail-panel", vacErrorText(code));
+  document.getElementById("vac-detail-title").textContent = "Vaccine";
+  document.getElementById("vac-detail-origin").innerHTML = "";
+  document.getElementById("vac-detail-proposals").innerHTML = "";
+  document.getElementById("vac-detail-chain").innerHTML = "";
+}
+
+async function vacSelect(id) {
+  if (!VAC_ID_RE.test(id)) return;
+  const seq = ++vacSelectSeq;
+  vacSelectedId = id;
+  document.querySelectorAll("#vac-body tr[data-id]").forEach((tr) =>
+    tr.classList.toggle("selected", tr.dataset.id === id));
+  try {
+    const envelope = await vacRequest("/api/vaccines/" + encodeURIComponent(id));
+    if (seq !== vacSelectSeq) return;
+    renderPanelError("#vaccine-detail-panel", "");
+    vacRenderDetail(envelope.vaccine);
+  } catch (err) {
+    if (seq !== vacSelectSeq) return;
+    vacRenderDetailError(err.message);
+  }
+}
+
+document.getElementById("vac-body").addEventListener("click", (event) => {
+  const tr = event.target.closest("tr[data-id]");
+  if (tr) vacSelect(tr.dataset.id);
+});
+document.getElementById("vac-body").addEventListener("keydown", (event) => {
+  const tr = event.target.closest("tr[data-id]");
+  if (tr && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    vacSelect(tr.dataset.id);
+  }
+});
 
 for (const id of ["vac-attack-filter", "vac-technique-filter", "vac-superseded-filter"]) {
   document.getElementById(id).addEventListener("change", vacRefresh);

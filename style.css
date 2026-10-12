@@ -854,6 +854,8 @@ tr.rb-stale td { font-style: italic; }
 .vac-superseded-note { display: block; font-size: 12px; color: #666; }
 .vac-generator-error { color: #8a1f2b; font-weight: 600; }
 .vac-error-state { text-align: center; padding: 30px 10px; font-size: 13px; color: #8a1f2b; }
+.vac-not-applied { background: #fff4e5; border-left: 4px solid #e0a800; padding: 8px 12px; font-weight: 600; margin: 0 0 12px; }
+.vac-proposal { border: 1px solid #dde3e8; border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
 
 /* ===== Registo de modelos (Roadmap v2, R9) — ml_models.js ===== */
 .mlm-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }

@@ -555,11 +555,117 @@ def run_states() -> None:
         check(f"style.css servido define .{classe}", re.search(r"\." + re.escape(classe) + r"\s*\{", css) is not None)
 
 
+def run_detail() -> None:
+    files = served()
+    index_html = files["/index.html"][2]
+    js = files["/vaccines.js"][2]
+    css = files["/style.css"][2]
+
+    # a) markup: o painel de detalhe fica em #tab-vaccines, depois de #vaccines-panel
+    aba = index_html.find('id="tab-vaccines"')
+    painel_lista = index_html.find('id="vaccines-panel"')
+    abertura = '<section class="panel" id="vaccine-detail-panel" hidden>'
+    painel = index_html.find(abertura)
+    proxima_aba = index_html.find('<div class="tab-content"', aba + 1)
+    check("o painel de detalhe está dentro de #tab-vaccines, depois de #vaccines-panel, com hidden",
+          aba != -1 and painel_lista != -1 and aba < painel_lista < painel < proxima_aba
+          and index_html.count('id="vaccine-detail-panel"') == 1)
+    fim = index_html.find("</section>", painel)
+    bloco = index_html[painel:fim] if painel != -1 and fim != -1 else ""
+    check('o painel tem #vac-detail-title',
+          re.search(r'<h2[^>]*id="vac-detail-title"', bloco) is not None)
+    aviso = re.search(r'<p[^>]*id="vac-detail-warning"[^>]*>(.*?)</p>', bloco, re.S)
+    check('o aviso fixo #vac-detail-warning tem class="vac-not-applied" e o texto exato',
+          aviso is not None and "vac-not-applied" in aviso.group(0)
+          and aviso.group(1).strip() == "Proposta — não aplicada no Wazuh")
+    check("os h3 do painel são Origem, Propostas e Cadeia, por esta ordem",
+          re.findall(r"<h3>(.*?)</h3>", bloco) == ["Origem", "Propostas", "Cadeia"])
+    check("o painel tem #vac-detail-origin, #vac-detail-proposals e #vac-detail-chain",
+          all(f'id="{i}"' in bloco for i in ("vac-detail-origin", "vac-detail-proposals", "vac-detail-chain")))
+
+    # b) vaccines.js: pedido, validação, anti-corrida, listeners
+    check("vaccines.js tem o literal da expressão do id de vaccine", r"/^vac-[0-9a-f]{12}$/" in js)
+    check('o pedido de detalhe é "/api/vaccines/" + encodeURIComponent(',
+          '"/api/vaccines/" + encodeURIComponent(' in js)
+    corpo = function_body(js, "vacSelect")
+    check("vacSelect valida com VAC_ID_RE e ignora respostas fora de ordem (seq !== vacSelectSeq, 2 vezes)",
+          "VAC_ID_RE" in corpo and corpo.count("seq !== vacSelectSeq") >= 2)
+    check("vacSelect é async e é a única chamada a /api/vaccines/ com o id",
+          "async function vacSelect(" in js and js.count('"/api/vaccines/"') == 1)
+    check('há listeners "click" e "keydown" em #vac-body, com "Enter" e " "',
+          re.search(r'getElementById\("vac-body"\)\.addEventListener\("click"', js) is not None
+          and re.search(r'getElementById\("vac-body"\)\.addEventListener\("keydown"', js) is not None
+          and '"Enter"' in js and '" "' in js and "preventDefault" in js)
+
+    # c) contrato de campos do detalhe
+    acessos = data_accesses(js)
+    esperados = {("envelope", "vaccine"), ("origin", "mitre_tactic"), ("origin", "incident_ids"),
+                 ("origin", "evidence"), ("evidence", "matched_event_ids"), ("evidence", "matched_alert_count"),
+                 ("evidence", "network_detection_types"), ("vaccine", "proposals"), ("vaccine", "expected"),
+                 ("vaccine", "achieved"), ("vaccine", "expected_source"), ("proposal", "sensor"),
+                 ("proposal", "rule"), ("proposal", "events"), ("proposal", "recommendation"),
+                 ("rule", "event_ids"), ("rule", "min_count"), ("rule", "window_seconds"),
+                 ("catalogEvent", "event_id"), ("catalogEvent", "name"), ("catalogEvent", "severity")}
+    check("vaccines.js lê os campos do detalhe (origem, evidência, propostas, regra, eventos)",
+          esperados <= acessos)
+    if not esperados <= acessos:
+        print(f"       em falta: {sorted(esperados - acessos)}")
+    caminhos = (f"/api/vaccines/{ID_A}", f"/api/vaccines/{ID_B}", f"/api/vaccines/{ID_C}",
+                "/api/vaccines/vac-000000000000")
+    real, respostas = real_api_keys(caminhos)
+    desconhecidos = sorted(a for a in acessos if a[1] not in real and a[1] != "length")
+    check("cada campo lido de um objeto da API existe na resposta real (incluindo o detalhe)", not desconhecidos)
+    if desconhecidos:
+        print(f"       campos que a API não tem: {desconhecidos}")
+    proibidas = {"command", "argv", "build_command", "tool", "target", "source", "operator"}
+    check("as respostas reais do detalhe não têm chave de comando, ferramenta, alvo nem operador",
+          not (proibidas & real))
+
+    # d) erros no detalhe
+    corpo = function_body(js, "vacRenderDetailError")
+    check("vacRenderDetailError mostra o banner do painel de detalhe e nunca 'Sem dados'",
+          "renderPanelError" in corpo and "#vaccine-detail-panel" in corpo
+          and "Sem dados" not in corpo and "VAC_NO_DATA_TEXT" not in corpo)
+
+    # e) rota real sobre o store semeado
+    extra = respostas["extra"]
+    estado, a = extra[caminhos[0]]
+    check("rota real: a vaccine A (substituída) abre com 200 e superseded_by = B",
+          estado == 200 and a["vaccine"]["superseded_by"] == ID_B)
+    estado, c = extra[caminhos[2]]
+    vc = c.get("vaccine", {})
+    propostas = vc.get("proposals", [])
+    check("rota real: C tem o incidente INC-20261012-1 e a técnica T1053",
+          estado == 200 and vc.get("origin", {}).get("incident_ids") == ["INC-20261012-1"]
+          and vc["origin"].get("mitre_technique") == "T1053")
+    check("rota real: C tem uma só proposta ml, sem regra, com recomendação em texto",
+          len(propostas) == 1 and propostas[0]["sensor"] == "ml" and propostas[0]["rule"] is None
+          and isinstance(propostas[0]["recommendation"], str) and propostas[0]["recommendation"] != "")
+    estado, b = extra[caminhos[1]]
+    regra = b["vaccine"]["proposals"][0] if estado == 200 and b["vaccine"]["proposals"] else {}
+    check("rota real: a primeira proposta de B tem a regra [5140, 5145], 1 ocorrência, 300 s",
+          regra.get("sensor") == "rule" and regra["rule"]["event_ids"] == [5140, 5145]
+          and regra["rule"]["min_count"] == 1 and regra["rule"]["window_seconds"] == 300)
+    check("rota real: os eventos da regra têm nome e severidade",
+          bool(regra.get("events")) and all(e.get("name") and e.get("severity") for e in regra["events"]))
+    estado, nao_existe = extra[caminhos[3]]
+    check("rota real: vac-000000000000 -> 404 com entry_not_found",
+          estado == 404 and nao_existe == {"detail": "entry_not_found"})
+    objeto = re.search(r"const VAC_ERROR_TEXT = \{(.*?)^\};", js, re.S | re.M)
+    chaves = set(re.findall(r"^\s{2}([A-Za-z_]\w*):", objeto.group(1), re.M)) if objeto else set()
+    check("entry_not_found tem frase em VAC_ERROR_TEXT", "entry_not_found" in chaves)
+
+    # f) estilos novos
+    for classe in ("vac-not-applied", "vac-proposal"):
+        check(f"style.css servido define .{classe}", re.search(r"\." + re.escape(classe) + r"\s*\{", css) is not None)
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
     run_filters()
     run_states()
+    run_detail()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:
