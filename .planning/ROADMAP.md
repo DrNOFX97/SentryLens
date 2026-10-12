@@ -45,7 +45,7 @@ Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
 - Decimal phases (12.1, 12.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 12: Motor de vaccines** - Motor puro: que ataques geram vaccine, regra proposta, origem rastreável, id determinístico e "Sem dados" honesto (completed 2026-10-12)
-- [ ] **Phase 13: Store e API de leitura** - Vaccines persistidas com estado fixo `proposed`, `GET /api/vaccines[/{id}]` com API key e códigos de erro estáveis
+- [x] **Phase 13: Store e API de leitura** - Vaccines persistidas com estado fixo `proposed`, `GET /api/vaccines[/{id}]` com API key e códigos de erro estáveis (completed 2026-10-12)
 - [ ] **Phase 14: Aba Vaccines, testes e documentação** - `vaccines.js` com filtros e detalhe, suite completa verde e docs a refletir o R11
 
 ## Phase Details
@@ -90,7 +90,7 @@ Plans:
   3. Não existe rota de escrita em `/api/vaccines`: um POST/PUT/PATCH/DELETE a qualquer das duas rotas não altera nada, e o estado só pode ser `proposed`.
   4. Falhas de leitura (Indexer indisponível, store ilegível) chegam como códigos estáveis, nunca como texto de exceção, traceback ou caminho de ficheiro; cada rota tem a API key aplicada individualmente.
 
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -129,5 +129,5 @@ Phases execute in numeric order: 12 → 13 → 14
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 12. Motor de vaccines | v1.1 | 3/3 | Complete    | 2026-10-12 |
-| 13. Store e API de leitura | v1.1 | 3/3 | In Progress|  |
+| 13. Store e API de leitura | v1.1 | 3/3 | Complete    | 2026-10-12 |
 | 14. Aba Vaccines, testes e documentação | v1.1 | 0/TBD | Not started | - |
