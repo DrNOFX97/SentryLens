@@ -92,9 +92,9 @@
     </details>
     <details class="nav-group" open>
       <summary>Vaccines</summary>
-      <button class="nav-item is-planned" data-planned="R11" data-label="Candidates">💉 Candidates<span class="nav-badge">R11</span></button>
+      <button class="nav-item" data-tab="vaccines">💉 Candidates</button>
       <button class="nav-item is-planned" data-planned="R12" data-label="Validation">✅ Validation<span class="nav-badge">R12</span></button>
-      <button class="nav-item is-planned" data-planned="R11" data-label="Approved">🏷️ Approved<span class="nav-badge">R11</span></button>
+      <button class="nav-item is-planned" data-planned="R14" data-label="Approved">🏷️ Approved<span class="nav-badge">R14</span></button>
       <button class="nav-item is-planned" data-planned="R14" data-label="Regression">🔁 Regression<span class="nav-badge">R14</span></button>
     </details>
     <details class="nav-group" open>
@@ -1351,6 +1351,32 @@
       </section>
     </div>
 
+    <!-- ===== Vaccines (Roadmap v2, R11) ===== -->
+    <div class="tab-content" id="tab-vaccines">
+      <section class="panel" id="vaccines-panel">
+        <h2>💉 Vaccines — candidatas</h2>
+        <p class="panel-note">
+          Regras de deteção PROPOSTAS a partir de ataques não detetados ou só parcialmente detetados no
+          Red vs Blue, geradas pelo backend em segundo plano. Só leitura: nenhuma é aplicada no Wazuh
+          (todas em estado proposta).
+        </p>
+        <div id="vac-notice" class="panel-note" role="status"></div>
+        <div class="table-scroll">
+          <table id="vac-table">
+            <thead>
+              <tr>
+                <th>Vaccine</th><th>Ataque</th><th>Cenário</th><th>Técnica</th>
+                <th>Veredito</th><th>Sensores em falta</th><th>Estado</th><th>Criada</th>
+              </tr>
+            </thead>
+            <tbody id="vac-body">
+              <tr><td colspan="8" class="empty-state">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
     <!-- ===== Attack Registry / Attack Timeline (Roadmap v2, R4) ===== -->
     <div class="tab-content" id="tab-attack-registry">
       <section class="panel" id="attack-registry-panel">
@@ -1670,5 +1696,6 @@
   <!-- Depois de ml_models.js: a Evaluation reutiliza mlmErrorText e
        mlmCodeFromResponse (mesmo escopo global, D-09). -->
   <script src="ml_evaluation.js"></script>
+  <script src="vaccines.js"></script>
 </body>
 </html>

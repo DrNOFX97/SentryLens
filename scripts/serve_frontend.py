@@ -50,6 +50,7 @@ ALLOWED_FILES = {
     "/metrics.js": "metrics.js",
     "/ml_models.js": "ml_models.js",
     "/ml_evaluation.js": "ml_evaluation.js",
+    "/vaccines.js": "vaccines.js",
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",
