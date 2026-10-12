@@ -41,9 +41,17 @@ const VAC_ERROR_TEXT = {
   http_503: "O backend está indisponível (503) — tenta Atualizar daqui a pouco.",
 };
 
+// Os mesmos formatos que a rota GET /api/vaccines aceita (a rota volta a validar).
+const VAC_ATTACK_ID_RE = /^[1-9]\d{0,8}$/;
+const VAC_TECHNIQUE_RE = /^T\d{4}(\.\d{3})?$/;
+const VAC_INVALID_ATTACK_TEXT = "ID de ataque inválido: usa um número inteiro de 1 a 999999999.";
+
 const vacTab = document.getElementById("tab-vaccines");
 let vacLoading = false;
 let vacWasActive = false;
+// União das técnicas MITRE vistas nas respostas da sessão: alimenta o select
+// sem nunca encolher por causa do próprio filtro.
+const vacTechniques = new Set();
 
 function vacIsActive() {
   return vacTab.classList.contains("active") && document.visibilityState === "visible";
@@ -142,19 +150,70 @@ function vacRenderError(code) {
   document.getElementById("vac-notice").textContent = "";
 }
 
+// Query string dos filtros visíveis: "" sem filtros, "?..." com filtros, ou
+// null quando o id de ataque escrito é inválido (nesse caso não há pedido).
+function vacBuildQuery() {
+  const attackId = document.getElementById("vac-attack-filter").value.trim();
+  const technique = document.getElementById("vac-technique-filter").value;
+  const superseded = document.getElementById("vac-superseded-filter").checked;
+  if (attackId !== "" && !VAC_ATTACK_ID_RE.test(attackId)) return null;
+  const params = new URLSearchParams();
+  if (attackId !== "") params.set("attack_id", attackId);
+  if (VAC_TECHNIQUE_RE.test(technique)) params.set("technique", technique);
+  if (superseded) params.set("include_superseded", "true");
+  const text = params.toString();
+  return text ? "?" + text : "";
+}
+
+// Cada option é escapada; só entram técnicas que casam VAC_TECHNIQUE_RE.
+function vacTechniqueOptionsHtml() {
+  const options = ['<option value="">Todas</option>'];
+  for (const technique of Array.from(vacTechniques).sort()) {
+    options.push(`<option value="${escapeHtml(technique)}">${escapeHtml(technique)}</option>`);
+  }
+  return options.join("");
+}
+
+function vacAddTechniques(vaccines) {
+  const select = document.getElementById("vac-technique-filter");
+  const selected = select.value;
+  for (const vaccine of vaccines) {
+    const origin = vaccine.origin || {};
+    if (typeof origin.mitre_technique === "string" && VAC_TECHNIQUE_RE.test(origin.mitre_technique)) {
+      vacTechniques.add(origin.mitre_technique);
+    }
+  }
+  select.innerHTML = vacTechniqueOptionsHtml();
+  select.value = selected;
+}
+
 async function vacRefresh() {
   if (vacLoading) return;
+  const query = vacBuildQuery();
+  if (query === null) {
+    document.getElementById("vac-notice").textContent = VAC_INVALID_ATTACK_TEXT;
+    return;
+  }
   vacLoading = true;
   try {
-    const envelope = await vacRequest("/api/vaccines");
+    const envelope = await vacRequest("/api/vaccines" + query);
     renderPanelError("#vaccines-panel", "");
     vacRenderList(envelope);
+    vacAddTechniques(envelope.vaccines || []);
   } catch (err) {
     vacRenderError(err.message);
   } finally {
     vacLoading = false;
+    // Filtros mudados a meio do pedido: um (e só um) novo pedido, depois deste.
+    const current = vacBuildQuery();
+    if (current !== null && current !== query) vacRefresh();
   }
 }
+
+for (const id of ["vac-attack-filter", "vac-technique-filter", "vac-superseded-filter"]) {
+  document.getElementById(id).addEventListener("change", vacRefresh);
+}
+document.getElementById("vac-refresh-btn").addEventListener("click", vacRefresh);
 
 // Ciclo de vida: recarrega só na passagem de inativa a ativa.
 function vacOnShow() {

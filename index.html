@@ -1360,6 +1360,16 @@
           Red vs Blue, geradas pelo backend em segundo plano. Só leitura: nenhuma é aplicada no Wazuh
           (todas em estado proposta).
         </p>
+        <div class="filter-row">
+          <label for="vac-attack-filter">Ataque (id):</label>
+          <input type="text" id="vac-attack-filter" inputmode="numeric" maxlength="9" placeholder="todos">
+          <label for="vac-technique-filter">Técnica MITRE:</label>
+          <select id="vac-technique-filter">
+            <option value="">Todas</option>
+          </select>
+          <label><input type="checkbox" id="vac-superseded-filter"> Incluir substituídas</label>
+          <button type="button" id="vac-refresh-btn">🔄 Atualizar</button>
+        </div>
         <div id="vac-notice" class="panel-note" role="status"></div>
         <div class="table-scroll">
           <table id="vac-table">

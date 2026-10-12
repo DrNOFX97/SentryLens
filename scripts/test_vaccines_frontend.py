@@ -140,10 +140,12 @@ def all_keys(value, found: set | None = None) -> set:
 ID_A, ID_B, ID_C = "vac-ed793c0b3437", "vac-5fe3861aa2a3", "vac-bd617cce8054"
 
 
-def real_api_keys() -> tuple[set, dict]:
+def real_api_keys(extra_paths=()) -> tuple[set, dict]:
     """Semeia um store temporário com vaccines do motor (a A é substituída pela
     B) e chama as duas rotas reais. Devolve (todas as chaves das respostas,
-    as respostas por nome)."""
+    as respostas por nome). Os caminhos extra são pedidos com o mesmo
+    TestClient sobre o mesmo store e devolvidos em respostas["extra"], por
+    caminho, como (estado HTTP, corpo JSON); não entram nas chaves."""
     v_a = engine_vaccine(make_attack(2, "partial", ["rule", "ml"], ["rule"]))
     v_b = engine_vaccine(make_attack(2, "not_detected", ["rule", "ml"], []))
     v_c = engine_vaccine(make_attack(3, "partial", ["rule", "ml"], ["rule"], scenario="lateral_movement_schtasks",
@@ -164,7 +166,12 @@ def real_api_keys() -> tuple[set, dict]:
         state.record(iso2, "error", "indexer_unavailable")
         com_erro = client.get("/api/vaccines", headers=HEADERS)
         respostas = {"lista": lista.json(), "detalhe": detalhe.json(), "com_erro": com_erro.json()}
-        return all_keys(list(respostas.values())), respostas
+        chaves = all_keys(list(respostas.values()))
+        respostas["extra"] = {}
+        for caminho in extra_paths:
+            resposta = client.get(caminho, headers=HEADERS)
+            respostas["extra"][caminho] = (resposta.status_code, resposta.json())
+        return chaves, respostas
     finally:
         main.vaccine_store, main.vaccine_loop_state = original_store, original_state
         tmp.cleanup()
@@ -405,9 +412,69 @@ def run_guards() -> None:
           not any(x in app_js for x in ("vaccines.js", "tab-vaccines", "/api/vaccines")))
 
 
+def run_filters() -> None:
+    files = served()
+    index_html = files["/index.html"][2]
+    js = files["/vaccines.js"][2]
+
+    # a) markup: filter-row dentro de #vaccines-panel, antes de #vac-notice
+    painel = index_html.find('id="vaccines-panel"')
+    aviso = index_html.find('id="vac-notice"')
+    fila = index_html.find('class="filter-row"', painel) if painel != -1 else -1
+    check("há uma div.filter-row dentro de #vaccines-panel, antes de #vac-notice",
+          painel != -1 and aviso != -1 and painel < fila < aviso)
+    bloco = index_html[fila:aviso] if fila != -1 and aviso != -1 else ""
+    check("a filter-row tem label[for=vac-attack-filter] e input#vac-attack-filter",
+          'for="vac-attack-filter"' in bloco and re.search(r'<input[^>]*id="vac-attack-filter"', bloco) is not None)
+    check("a filter-row tem label[for=vac-technique-filter] e select#vac-technique-filter",
+          'for="vac-technique-filter"' in bloco and re.search(r'<select[^>]*id="vac-technique-filter"', bloco) is not None)
+    primeira = re.search(r'<select[^>]*id="vac-technique-filter"[^>]*>\s*<option([^>]*)>(.*?)</option>', bloco, re.S)
+    check('a primeira option do select de técnica tem value="" e o texto "Todas"',
+          primeira is not None and 'value=""' in primeira.group(1) and primeira.group(2).strip() == "Todas")
+    caixa = re.search(r'<input[^>]*id="vac-superseded-filter"[^>]*>', bloco)
+    check('#vac-superseded-filter é um checkbox com o label "Incluir substituídas"',
+          caixa is not None and 'type="checkbox"' in caixa.group(0) and "Incluir substituídas" in bloco)
+    botao = re.search(r'<button[^>]*id="vac-refresh-btn"[^>]*>', bloco)
+    check('#vac-refresh-btn é um button type="button"', botao is not None and 'type="button"' in botao.group(0))
+
+    # b) vaccines.js
+    check("vaccines.js tem attack_id, technique, include_superseded e URLSearchParams",
+          all(x in js for x in ("attack_id", "technique", "include_superseded", "URLSearchParams")))
+    check("vaccines.js tem os literais das expressões de attack_id e de técnica",
+          r"/^[1-9]\d{0,8}$/" in js and r"/^T\d{4}(\.\d{3})?$/" in js)
+    corpo = function_body(js, "vacBuildQuery")
+    check("vacBuildQuery usa VAC_ATTACK_ID_RE e VAC_TECHNIQUE_RE",
+          "VAC_ATTACK_ID_RE" in corpo and "VAC_TECHNIQUE_RE" in corpo)
+    corpo = function_body(js, "vacRefresh")
+    check("vacRefresh usa vacBuildQuery pelo menos 2 vezes (a query usada e a comparação no fim)",
+          corpo.count("vacBuildQuery") >= 2)
+    check('vaccines.js liga "vac-refresh-btn" aos eventos "click" e "change"',
+          '"vac-refresh-btn"' in js and '"click"' in js and '"change"' in js)
+
+    # c) rota real
+    caminhos = ("/api/vaccines?attack_id=3&technique=T1053", "/api/vaccines?attack_id=2",
+                "/api/vaccines?attack_id=2&include_superseded=true", "/api/vaccines?technique=T9999")
+    _, respostas = real_api_keys(caminhos)
+    extra = respostas["extra"]
+
+    def ids_de(caminho):
+        estado, corpo_json = extra[caminho]
+        return estado, [v["id"] for v in corpo_json["vaccines"]]
+
+    check("rota real: attack_id=3&technique=T1053 -> 200 e só a vaccine C",
+          ids_de(caminhos[0]) == (200, [ID_C]))
+    check("rota real: attack_id=2 -> só a vaccine B (a A está substituída)", ids_de(caminhos[1]) == (200, [ID_B]))
+    estado, ids = ids_de(caminhos[2])
+    check("rota real: attack_id=2&include_superseded=true -> B e A", estado == 200 and sorted(ids) == sorted([ID_B, ID_A]))
+    estado, vazio = extra[caminhos[3]]
+    check("rota real: technique=T9999 -> 200, vaccines [], reason None, available True (filtro vazio, não no_data)",
+          estado == 200 and vazio["vaccines"] == [] and vazio["reason"] is None and vazio["available"] is True)
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
+    run_filters()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:
