@@ -4,13 +4,19 @@ verified: 2026-10-12T09:10:00Z
 status: passed
 score: 4/4 must-haves verified
 covered_files:
+  - .planning/phases/13-store-e-api-de-leitura/13-01-PLAN.md
+  - .planning/phases/13-store-e-api-de-leitura/13-01-SUMMARY.md
+  - .planning/phases/13-store-e-api-de-leitura/13-02-PLAN.md
+  - .planning/phases/13-store-e-api-de-leitura/13-02-SUMMARY.md
+  - .planning/phases/13-store-e-api-de-leitura/13-03-PLAN.md
+  - .planning/phases/13-store-e-api-de-leitura/13-03-SUMMARY.md
   - scripts/main.py
   - scripts/test_vaccine_ingest.py
   - scripts/test_vaccine_store.py
   - scripts/test_vaccines_api.py
   - scripts/vaccine_ingest.py
   - scripts/vaccine_store.py
-covered_digest: "v2:sha256:d6f785e1043057531ebb92239d8d5240ec813c96c1cda720b44c2285dd0cb862"
+covered_digest: "v2:sha256:b129e61595e64ec0d1165ac6be34257b42cf5eabf9a6a3fe178f3573b4da81c6"
 behavior_unverified: 0
 overrides_applied: 0
 ---
