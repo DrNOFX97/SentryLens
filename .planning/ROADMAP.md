@@ -116,7 +116,21 @@ Plans:
   3. `python run_all_tests.py` termina verde sem o Wazuh ligado, com testes standalone novos para motor, store e rotas, incluindo as garantias negativas (sem rota de escrita, sem comando executável, sem texto de exceção, sem duplicados após reprocessar ou reiniciar).
   4. `docs/DATA_MODEL.md` define a entidade Vaccine, `docs/ROADMAP_STATUS.md` marca o R11 como concluído (✅) e `README.md` e `CLAUDE.md` descrevem o motor, o store e a rota.
 
-**Plans:** TBD
+**Plans:** 4 plans
+
+Plans:
+**Wave 1**
+- [ ] 14-01-PLAN.md — Tracer: Candidates abre a aba Vaccines (vaccines.js servido pelo serve_frontend.py, sem editar app.js) que lista GET /api/vaccines lendo só campos da resposta real; guardas do contrato estático (escape, erros só por código, "Sem dados" honesto, sem polling, app.js intacto) (VAC-07, VAC-08)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 14-02-PLAN.md — Tracer: filtros (ataque, técnica, substituídas) e Atualizar enviados ao servidor; linha de estado do gerador, badges de veredito e substituídas esbatidas (VAC-07, VAC-08)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 14-03-PLAN.md — Tracer: clicar numa vaccine abre o detalhe com Origem, Propostas e o aviso "Proposta — não aplicada no Wazuh"; Cadeia substituída por / substitui, sem links (VAC-07, VAC-08)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 14-04-PLAN.md — Tracer: entidade Vaccine e rotas documentadas contra o código (DATA_MODEL, API); R11 ✅ no Roadmap v2, README e CLAUDE.md atualizados com as contagens reais; suite completa verde sem o Wazuh numa única execução, flake da suite paralela registado como dívida (VAC-08)
+
 **UI hint**: yes
 
 > **Testes por fase:** os testes do âmbito de cada fase escrevem-se com o respetivo código (como no v1.0); esta fase fecha a cobertura completa da suite e a documentação, e é por isso que VAC-08 mapeia aqui.
@@ -130,4 +144,4 @@ Phases execute in numeric order: 12 → 13 → 14
 |-------|-----------|----------------|--------|-----------|
 | 12. Motor de vaccines | v1.1 | 3/3 | Complete    | 2026-10-12 |
 | 13. Store e API de leitura | v1.1 | 3/3 | Complete    | 2026-10-12 |
-| 14. Aba Vaccines, testes e documentação | v1.1 | 0/TBD | Not started | - |
+| 14. Aba Vaccines, testes e documentação | v1.1 | 0/4 | Planned | - |
