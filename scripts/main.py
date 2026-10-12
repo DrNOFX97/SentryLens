@@ -51,6 +51,7 @@ import model_registry
 # não pouparia nada e só mudaria o sítio do erro. Não trocar por `importlib`.
 import ml_training
 import soc_metrics
+import vaccine_ingest
 from admin_activity import build_admin_activity_report
 from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
 from attack_registry import build_attack_registry, summarize as summarize_attacks
@@ -90,6 +91,8 @@ from system_monitor import (
     measure_network_speed,
     record_usage_sample,
 )
+from vaccine_engine import VACCINE_ID_RE, build_vaccine_candidates
+from vaccine_store import VaccineStore, resolve_db_path as resolve_vaccines_db_path
 from wazuh_client import WazuhIndexerClient, WazuhManagerClient
 from websocket_alerts import ConnectionManager, alert_poll_loop
 
@@ -1506,7 +1509,7 @@ async def _build_attack_registry(attack_log: list, hours: int | None) -> tuple[d
     incidents_available = True
     incidents: list[dict] = []
     try:
-        incidents = await run_in_threadpool(incident_store.list_incidents, None, None, None, 100000, 0)
+        incidents = await run_in_threadpool(incident_store.list_incidents, limit=100000, offset=0)
     except sqlite3.Error:
         logger.exception("Attack Registry: base de incidentes indisponível")
         incidents_available = False
@@ -1609,6 +1612,87 @@ async def get_attack_library_item(
     if entry is None:
         raise HTTPException(status_code=404, detail="entry_not_found")
     return entry
+
+
+# ---------------------------------------------------------------------------
+# Vaccines (Roadmap v2, R11, Phase 13)
+# O ciclo do backend escreve (attack log -> registo -> motor -> validate_vaccine
+# -> store); as rotas GET só leem. Nenhuma rota de escrita nesta fase.
+# ---------------------------------------------------------------------------
+
+VACCINES_DB_PATH = resolve_vaccines_db_path(os.getenv("SENTRYLENS_VACCINES_DB_PATH"))
+VACCINE_WINDOW_HOURS = vaccine_ingest.env_int(
+    os.environ, "SENTRYLENS_VACCINE_WINDOW_HOURS", vaccine_ingest.DEFAULT_WINDOW_HOURS, 1, ATTACK_MAX_HOURS)
+VACCINE_SETTLE_SECONDS = vaccine_ingest.env_int(
+    os.environ, "SENTRYLENS_VACCINE_SETTLE_SECONDS", vaccine_ingest.DEFAULT_SETTLE_SECONDS,
+    vaccine_ingest.MIN_SETTLE_SECONDS, vaccine_ingest.MAX_SETTLE_SECONDS)
+vaccine_store = VaccineStore(VACCINES_DB_PATH)
+
+
+async def _run_vaccine_cycle() -> dict:
+    """Um ciclo (D-01): lê o attack log, constrói o registo, corre o motor e
+    grava as vaccines validadas de ataques já assentes. Devolve sempre
+    {status, error_code, counts, alerts_truncated}; exceções propagam (o loop
+    do plano seguinte converte-as em códigos estáveis)."""
+    counts = dict.fromkeys(vaccine_ingest.COUNT_KEYS, 0)
+
+    def outcome(status: str, error_code: str | None = None, truncated: bool = False) -> dict:
+        return {"status": status, "error_code": error_code, "counts": counts, "alerts_truncated": truncated}
+
+    attack_log = await run_in_threadpool(load_attack_log, ATTACK_LOG_PATH)
+    if not attack_log:
+        return outcome("no_data")
+    registry, correlation, incidents_available = await _build_attack_registry(attack_log, VACCINE_WINDOW_HOURS)
+    result = build_vaccine_candidates(registry, correlation)
+    if result["reason"] == "source_unavailable":
+        return outcome("error", correlation["error_code"] or "source_unavailable")
+    if not incidents_available:  # gravar agora congelaria incident_ids vazios (Pitfall 6)
+        return outcome("error", "incidents_unavailable")
+    if result["reason"] == "no_data":
+        return outcome("no_data")
+    now = datetime.now(timezone.utc)
+    attack_ids = vaccine_ingest.select_attack_ids(
+        registry["attacks"], now, VACCINE_WINDOW_HOURS, VACCINE_SETTLE_SECONDS, incident_engine_parse)
+    counts = await run_in_threadpool(
+        vaccine_ingest.persist_vaccines, vaccine_store, result["vaccines"], attack_ids, now.isoformat())
+    return outcome("ok", None, correlation["alerts_truncated"])
+
+
+@app.get("/api/vaccines", dependencies=_REQUIRE_API_KEY)
+async def list_vaccines(
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Vaccines propostas, das mais recentes (attack_id mais alto) para as mais
+    antigas. Só leitura. 200 com `no_data` se o store está vazio; 503 estável
+    se não for possível lê-lo."""
+    try:
+        rows, total, store_total = await run_in_threadpool(vaccine_store.list_vaccines, limit=limit, offset=offset)
+    except (sqlite3.Error, ValueError):
+        logger.exception("Vaccines: store ilegível")
+        raise HTTPException(status_code=503, detail="store_unavailable")
+    return {
+        "available": store_total > 0,
+        "reason": None if store_total > 0 else "no_data",
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "vaccines": rows,
+    }
+
+
+@app.get("/api/vaccines/{vaccine_id}", dependencies=_REQUIRE_API_KEY)
+async def get_vaccine(vaccine_id: Annotated[str, Path(pattern=VACCINE_ID_RE)]):
+    """Detalhe de uma vaccine pelo id (inclui as substituídas). 404 com código
+    estável se não existir; 503 estável se o store não for legível."""
+    try:
+        vaccine = await run_in_threadpool(vaccine_store.get_vaccine, vaccine_id)
+    except (sqlite3.Error, ValueError):
+        logger.exception("Vaccines: store ilegível")
+        raise HTTPException(status_code=503, detail="store_unavailable")
+    if vaccine is None:
+        raise HTTPException(status_code=404, detail="entry_not_found")
+    return {"vaccine": vaccine}
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)

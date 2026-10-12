@@ -20,6 +20,8 @@ scripts/models/
 scripts/historico/
 scripts/incidents.sqlite3
 scripts/incidents.sqlite3-journal
+scripts/vaccines.sqlite3
+scripts/vaccines.sqlite3-journal
 
 # Estado local do Claude Code (não é conteúdo do projeto)
 .claude/
