@@ -9,6 +9,7 @@ sempre, D-07).
 """
 
 import logging
+import threading
 from datetime import timedelta
 
 from attack_registry import normalize_attack_id
@@ -22,6 +23,16 @@ DEFAULT_SETTLE_SECONDS = 600  # A2: 2x a janela de correlação (300 s); valor n
 MIN_SETTLE_SECONDS = DEFAULT_WINDOW_SECONDS
 MAX_SETTLE_SECONDS = 86400
 COUNT_KEYS = ("inserted", "existing", "rejected", "pending_settle", "outside_window")
+
+DEFAULT_INTERVAL_SECONDS = 300  # D-02: um ciclo a cada 5 min
+MIN_INTERVAL_SECONDS = 30  # evita um ciclo apertado por configuração errada
+MAX_INTERVAL_SECONDS = 86400
+GENERATOR_STATUSES = ("never_run", "ok", "no_data", "error")
+GENERATOR_ERROR_CODES = (
+    "indexer_unavailable", "ml_model_unavailable", "attack_outside_alert_window", "source_unavailable",
+    "attack_log_unreadable", "incidents_unavailable", "store_unavailable", "unexpected_error",
+)
+GENERATOR_KEYS = frozenset({"status", "error_code", "last_run_at", "last_success_at", "alerts_truncated", "counts"})
 
 
 def env_int(environ, name: str, default: int, minimum: int, maximum: int) -> int:
@@ -89,3 +100,40 @@ def persist_vaccines(store, vaccines, attack_ids: dict, now_iso: str) -> dict:
         counts["inserted"] = written["inserted"]
         counts["existing"] = written["existing"]
     return counts
+
+
+class VaccineLoopState:
+    """Estado da última execução do ciclo, em memória (A5). Só guarda códigos
+    estáveis: nunca texto de exceção, traceback ou caminho (D-03)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state = self._initial()
+
+    @staticmethod
+    def _initial() -> dict:
+        return {"status": "never_run", "error_code": None, "last_run_at": None,
+                "last_success_at": None, "alerts_truncated": None, "counts": None}
+
+    def record(self, now_iso, status, error_code=None, counts=None, alerts_truncated=None) -> None:
+        if status not in ("ok", "no_data", "error"):
+            status, error_code = "error", "unexpected_error"
+        with self._lock:
+            state = self._state
+            state["last_run_at"] = now_iso
+            if status == "error":
+                state["status"] = "error"
+                state["error_code"] = error_code if error_code in GENERATOR_ERROR_CODES else "unexpected_error"
+                state["counts"] = None
+            else:
+                state["status"] = status
+                state["error_code"] = None
+                state["last_success_at"] = now_iso
+                state["counts"] = ({k: counts.get(k) for k in COUNT_KEYS} if isinstance(counts, dict) else None)
+            state["alerts_truncated"] = alerts_truncated if isinstance(alerts_truncated, bool) else None
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            copy = dict(self._state)
+            copy["counts"] = dict(copy["counts"]) if copy["counts"] is not None else None
+            return copy

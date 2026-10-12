@@ -1627,16 +1627,30 @@ VACCINE_SETTLE_SECONDS = vaccine_ingest.env_int(
     os.environ, "SENTRYLENS_VACCINE_SETTLE_SECONDS", vaccine_ingest.DEFAULT_SETTLE_SECONDS,
     vaccine_ingest.MIN_SETTLE_SECONDS, vaccine_ingest.MAX_SETTLE_SECONDS)
 vaccine_store = VaccineStore(VACCINES_DB_PATH)
+VACCINE_INTERVAL_SECONDS = vaccine_ingest.env_int(
+    os.environ, "SENTRYLENS_VACCINE_INTERVAL_SECONDS", vaccine_ingest.DEFAULT_INTERVAL_SECONDS,
+    vaccine_ingest.MIN_INTERVAL_SECONDS, vaccine_ingest.MAX_INTERVAL_SECONDS)
+vaccine_loop_state = vaccine_ingest.VaccineLoopState()
 
 
 async def _run_vaccine_cycle() -> dict:
     """Um ciclo (D-01): lê o attack log, constrói o registo, corre o motor e
     grava as vaccines validadas de ataques já assentes. Devolve sempre
-    {status, error_code, counts, alerts_truncated}; exceções propagam (o loop
-    do plano seguinte converte-as em códigos estáveis)."""
-    counts = dict.fromkeys(vaccine_ingest.COUNT_KEYS, 0)
+    {status, error_code, counts, alerts_truncated} e deixa o resultado em
+    vaccine_loop_state. Nunca levanta (salvo cancelamento): o detalhe de uma
+    falha fica só no log, o estado leva um código estável (D-03)."""
+    try:
+        result = await _vaccine_cycle_body()
+    except Exception:
+        logger.exception("Vaccines: ciclo falhou")
+        result = {"status": "error", "error_code": "unexpected_error", "counts": None, "alerts_truncated": None}
+    vaccine_loop_state.record(_now_iso(), **result)
+    return result
 
-    def outcome(status: str, error_code: str | None = None, truncated: bool = False) -> dict:
+
+async def _vaccine_cycle_body() -> dict:
+    def outcome(status: str, error_code: str | None = None, counts: dict | None = None,
+                truncated: bool | None = None) -> dict:
         return {"status": status, "error_code": error_code, "counts": counts, "alerts_truncated": truncated}
 
     attack_log = await run_in_threadpool(load_attack_log, ATTACK_LOG_PATH)
@@ -1655,7 +1669,26 @@ async def _run_vaccine_cycle() -> dict:
         registry["attacks"], now, VACCINE_WINDOW_HOURS, VACCINE_SETTLE_SECONDS, incident_engine_parse)
     counts = await run_in_threadpool(
         vaccine_ingest.persist_vaccines, vaccine_store, result["vaccines"], attack_ids, now.isoformat())
-    return outcome("ok", None, correlation["alerts_truncated"])
+    return outcome("ok", None, counts, correlation["alerts_truncated"])
+
+
+async def _vaccine_loop() -> None:
+    """Corre para sempre em background (D-01): um ciclo logo no arranque e
+    depois um a cada VACCINE_INTERVAL_SECONDS (D-02). Uma falha nunca sai do
+    loop; CancelledError (BaseException) propaga e termina-o."""
+    while True:
+        try:
+            await _run_vaccine_cycle()
+        except Exception:
+            logger.exception("Vaccines: falha inesperada no loop")
+            vaccine_loop_state.record(_now_iso(), "error", "unexpected_error")
+        await asyncio.sleep(VACCINE_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_vaccine_loop() -> None:
+    """Lança o loop de geração de vaccines em background."""
+    app.state.vaccine_task = asyncio.create_task(_vaccine_loop())
 
 
 @app.get("/api/vaccines", dependencies=_REQUIRE_API_KEY)
@@ -1678,6 +1711,7 @@ async def list_vaccines(
         "limit": limit,
         "offset": offset,
         "vaccines": rows,
+        "generator": vaccine_loop_state.snapshot(),
     }
 
 
