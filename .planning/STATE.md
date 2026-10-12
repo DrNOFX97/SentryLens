@@ -5,16 +5,16 @@ milestone_name: R11 Vaccine Engine
 current_phase: 14
 current_phase_name: Aba Vaccines, testes e documentação
 status: executing
-stopped_at: Completed 14-02-PLAN.md
-last_updated: "2026-10-12T09:55:17.800Z"
+stopped_at: Completed 14-03-PLAN.md
+last_updated: "2026-10-12T10:01:43.086Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 14 execution started
-state_head: d7c102d40b0df59e11769c67150ec17f6ec1945f
+state_head: 802b8fb862177c1d121ae03e17cfb0b5c90513db
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
   percent: 67
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-11)
 ## Current Position
 
 Phase: 14 (Aba Vaccines, testes e documentação) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 14 execution started
 
@@ -62,6 +62,7 @@ Progress: [███████░░░] 67%
 | Phase 13 P03 | 10min | 2 tasks | 2 files |
 | Phase 14 P01 | 20min | 2 tasks | 5 files |
 | Phase 14 P02 | 25min | 2 tasks | 4 files |
+| Phase 14 P03 | 8 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,7 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-03: filtro sem resultados com store nao vazio da 200 com reason null; reason no_data so com store sem linhas (D-09)
 - [Phase 14]: 14-01: Approved passa a planeado R14 (D-01 literal); guarda de interpolacao so aceita helper vac*( chamado, nunca identificador cru como vaccine
 - [Phase 14]: 14-02: select de tecnica por uniao das tecnicas vistas na sessao; re-pedido unico quando os filtros mudam a meio
+- [Phase 14]: 14-03: cadeia (Substitui) calculada no cliente por um GET attack_id + include_superseded; falha mostra 'Cadeia indisponível', nunca 'não substitui nenhuma'
 
 ### Pending Todos
 
@@ -105,8 +107,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-12T09:55:16.964Z
-Stopped at: Completed 14-02-PLAN.md
+Last session: 2026-10-12T10:01:43.000Z
+Stopped at: Completed 14-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
