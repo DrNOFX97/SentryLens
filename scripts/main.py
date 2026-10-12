@@ -33,7 +33,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -1305,6 +1305,49 @@ class IncidentNote(BaseModel):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 
 
+class IncidentAssignment(BaseModel):
+    analyst: str | None = Field(default=None, max_length=128, description="Nome do analista (null para desatribuir)")
+
+
+# --- SOC Team Models ---
+class AnalystCreate(BaseModel):
+    id: str = Field(..., pattern=r"^analyst-[a-z0-9-]{1,64}$", description="ID do analista (ex: analyst-joao)")
+    name: str = Field(..., max_length=128)
+    tier: int = Field(..., ge=1, le=3, description="Tier SOC: 1=Triagem, 2=Investigação, 3=Caça")
+    email: str | None = Field(default=None, max_length=256)
+
+
+class AnalystUpdate(BaseModel):
+    tier: int | None = Field(default=None, ge=1, le=3)
+    email: str | None = Field(default=None, max_length=256)
+    active: int | None = Field(default=None, ge=0, le=1)
+
+
+class ShiftCreate(BaseModel):
+    analyst_id: str = Field(..., max_length=128)
+    start_ts: str = Field(..., description="ISO 8601 com timezone")
+    end_ts: str = Field(..., description="ISO 8601 com timezone")
+    role: str = Field(..., pattern=r"^(primary|secondary|on_call)$", description="primary, secondary, ou on_call")
+
+
+class EscalationRuleCreate(BaseModel):
+    from_tier: int = Field(..., ge=1, le=3)
+    to_tier: int | None = Field(default=None, ge=1, le=3)
+    severity: str = Field(..., pattern=r"^(critical|high|medium|low|info)$")
+    auto_escalate: int = Field(default=0, ge=0, le=1)
+    sla_minutes: int | None = Field(default=None, ge=1)
+
+
+class TeamAssign(BaseModel):
+    tier: int = Field(..., ge=1, le=3)
+    analyst: str | None = Field(default=None, max_length=128)
+
+
+class EscalateRequest(BaseModel):
+    to_tier: int = Field(..., ge=1, le=3)
+    analyst: str | None = Field(default=None, max_length=128)
+
+
 class BackfillRequest(BaseModel):
     days: int = Field(default=7, ge=1, le=90)
 
@@ -1342,11 +1385,13 @@ async def list_incidents(
     status: IncidentStatus | None = Query(None),
     severity: IncidentSeverity | None = Query(None),
     hours: int = Query(168, ge=1, le=720, description="Janela temporal (última evidência), em horas"),
+    assigned_to: str | None = Query(None, max_length=128, description="Filtrar por analista atribuído"),
+    assigned_team_tier: int | None = Query(None, ge=1, le=3, description="Filtrar por tier da equipa (1, 2, ou 3)"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    incidents = await _incidents_call(incident_store.list_incidents, status, severity, since, limit, offset)
+    incidents = await _incidents_call(incident_store.list_incidents, status, severity, since, assigned_to, assigned_team_tier, limit, offset)
     summary = await _incidents_call(incident_store.summary, since)
     return {"window_hours": hours, "incidents": incidents, "summary": summary}
 
@@ -1440,18 +1485,29 @@ async def change_incident_status(incident_id: str, body: StatusChange):
 
 
 @app.post("/api/incidents/{incident_id}/triage", dependencies=_REQUIRE_API_KEY)
-async def triage_incident(incident_id: str):
+async def triage_incident(incident_id: str, force: bool = False):
     """Triagem EXPERIMENTAL via JEV (TypeSafe AI), opt-in. Consultiva: não
     altera o incidente. Envia ao serviço externo só um resumo agregado e
-    anonimizado (ver jev_client.build_state)."""
+    anonimizado (ver jev_client.build_state). Salva resultado em cache."""
     if not jev_client.jev_enabled():
         raise HTTPException(status_code=503, detail="jev_disabled")
     incident = await _incidents_call(incident_store.get_incident, incident_id)
     if incident is None:
         raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    
+    # Check cache first (unless force=true)
+    if not force:
+        cached = await _incidents_call(incident_store.get_triage, incident_id)
+        if cached:
+            return {"incident_id": incident_id, "advisory": True, "cached": True, **cached}
+    
     result = await jev_client.triage(incident)
     if not result["ok"]:
         raise HTTPException(status_code=502, detail=result["error"])
+    
+    # Save to cache
+    await _incidents_call(incident_store.save_triage, incident_id, result, _now_iso())
+    
     return {"incident_id": incident_id, "advisory": True, **{k: v for k, v in result.items() if k != "ok"}}
 
 
@@ -1462,6 +1518,188 @@ async def add_incident_note(incident_id: str, body: IncidentNote):
     except IncidentNotFound:
         raise HTTPException(status_code=404, detail="Incidente não encontrado")
     return await _incident_detail(incident_id)
+
+
+@app.patch("/api/incidents/{incident_id}/assignment", dependencies=_REQUIRE_API_KEY)
+async def assign_incident_analyst(incident_id: str, body: IncidentAssignment):
+    """Assign or unassign an analyst to an incident."""
+    try:
+        await _incidents_call(incident_store.assign_analyst, incident_id, body.analyst, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return await _incident_detail(incident_id)
+
+
+# ============================================================
+# SOC Team Management (Tier 1/2/3)
+# ============================================================
+
+# --- Analysts ---
+@app.post("/api/soc/analysts", dependencies=_REQUIRE_API_KEY)
+async def create_analyst(body: AnalystCreate):
+    """Create a new SOC analyst."""
+    try:
+        await _incidents_call(incident_store.create_analyst, body.id, body.name, body.tier, body.email, _now_iso())
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail="Analyst ID or name already exists")
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"ok": True, "id": body.id}
+
+
+@app.get("/api/soc/analysts", dependencies=_REQUIRE_API_KEY)
+async def list_analysts(tier: int | None = Query(None, ge=1, le=3), active_only: bool = True):
+    """List SOC analysts, optionally filtered by tier."""
+    analysts = await _incidents_call(incident_store.list_analysts, tier, active_only)
+    return {"analysts": analysts}
+
+
+@app.get("/api/soc/analysts/{analyst_id}", dependencies=_REQUIRE_API_KEY)
+async def get_analyst(analyst_id: str):
+    """Get a specific analyst by ID."""
+    analyst = await _incidents_call(incident_store.get_analyst, analyst_id)
+    if analyst is None:
+        raise HTTPException(status_code=404, detail="Analista não encontrado")
+    return analyst
+
+
+@app.patch("/api/soc/analysts/{analyst_id}", dependencies=_REQUIRE_API_KEY)
+async def update_analyst(analyst_id: str, body: AnalystUpdate):
+    """Update an analyst's tier, email, or active status."""
+    try:
+        await _incidents_call(incident_store.update_analyst, analyst_id, body.tier, body.email, body.active)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    analyst = await _incidents_call(incident_store.get_analyst, analyst_id)
+    if analyst is None:
+        raise HTTPException(status_code=404, detail="Analista não encontrado")
+    return analyst
+
+
+@app.post("/api/soc/analysts/{analyst_id}/deactivate", dependencies=_REQUIRE_API_KEY)
+async def deactivate_analyst(analyst_id: str):
+    """Deactivate an analyst (soft delete)."""
+    await _incidents_call(incident_store.deactivate_analyst, analyst_id)
+    return {"ok": True}
+
+
+# --- Shifts ---
+@app.post("/api/soc/shifts", dependencies=_REQUIRE_API_KEY)
+async def create_shift(body: ShiftCreate):
+    """Create a shift for an analyst."""
+    try:
+        shift_id = await _incidents_call(incident_store.create_shift, body.analyst_id, body.start_ts, body.end_ts, body.role, _now_iso())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=404, detail="Analista não encontrado")
+    return {"ok": True, "shift_id": shift_id}
+
+
+@app.get("/api/soc/shifts", dependencies=_REQUIRE_API_KEY)
+async def get_shifts(analyst_id: str = Query(...), since: str | None = None, until: str | None = None):
+    """Get shifts for an analyst."""
+    shifts = await _incidents_call(incident_store.get_shifts_for_analyst, analyst_id, since, until)
+    return {"shifts": shifts}
+
+
+@app.get("/api/soc/on-call", dependencies=_REQUIRE_API_KEY)
+async def get_on_call(tier: int = Query(..., ge=1, le=3)):
+    """Get analysts currently on-call for a tier."""
+    now = _now_iso()
+    analysts = await _incidents_call(incident_store.get_current_on_call, tier, now)
+    return {"tier": tier, "on_call": analysts}
+
+
+@app.get("/api/soc/primary", dependencies=_REQUIRE_API_KEY)
+async def get_primary(tier: int = Query(..., ge=1, le=3)):
+    """Get analysts currently on primary shift for a tier."""
+    now = _now_iso()
+    analysts = await _incidents_call(incident_store.get_current_primary, tier, now)
+    return {"tier": tier, "primary": analysts}
+
+
+# --- Escalation Rules ---
+@app.post("/api/soc/escalation-rules", dependencies=_REQUIRE_API_KEY)
+async def create_escalation_rule(body: EscalationRuleCreate):
+    """Create an escalation rule."""
+    try:
+        rule_id = await _incidents_call(
+            incident_store.create_escalation_rule,
+            body.from_tier, body.to_tier, body.severity,
+            body.auto_escalate, body.sla_minutes, _now_iso()
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"ok": True, "rule_id": rule_id}
+
+
+@app.get("/api/soc/escalation-rules", dependencies=_REQUIRE_API_KEY)
+async def list_escalation_rules(from_tier: int | None = Query(None, ge=1, le=3), severity: str | None = Query(None)):
+    """List escalation rules."""
+    rules = await _incidents_call(incident_store.get_escalation_rules, from_tier, severity)
+    return {"rules": rules}
+
+
+@app.get("/api/soc/escalation-rules/{from_tier}/{severity}", dependencies=_REQUIRE_API_KEY)
+async def get_escalation_rule(from_tier: int, severity: str):
+    """Get a specific escalation rule."""
+    rule = await _incidents_call(incident_store.get_escalation_rule, from_tier, severity)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Regra não encontrada")
+    return rule
+
+
+# --- Team-based Incident Operations ---
+@app.patch("/api/incidents/{incident_id}/team", dependencies=_REQUIRE_API_KEY)
+async def assign_incident_team(incident_id: str, body: TeamAssign):
+    """Assign incident to a team tier (and optionally an analyst)."""
+    try:
+        await _incidents_call(incident_store.assign_to_tier, incident_id, body.tier, body.analyst, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return await _incident_detail(incident_id)
+
+
+@app.post("/api/incidents/{incident_id}/escalate", dependencies=_REQUIRE_API_KEY)
+async def escalate_incident(incident_id: str, body: EscalateRequest):
+    """Escalate incident to a higher tier."""
+    try:
+        await _incidents_call(incident_store.escalate_incident, incident_id, body.to_tier, body.analyst, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return await _incident_detail(incident_id)
+
+
+@app.patch("/api/incidents/{incident_id}/sla", dependencies=_REQUIRE_API_KEY)
+async def set_incident_sla(incident_id: str, deadline_iso: str = Body(..., embed=True)):
+    """Set SLA deadline for an incident."""
+    try:
+        await _incidents_call(incident_store.set_sla_deadline, incident_id, deadline_iso, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return await _incident_detail(incident_id)
+
+
+@app.get("/api/soc/sla-breaches", dependencies=_REQUIRE_API_KEY)
+async def get_sla_breaches():
+    """Get incidents with breached SLA."""
+    breaches = await _incidents_call(incident_store.get_sla_breaches, _now_iso())
+    return {"breaches": breaches, "count": len(breaches)}
+
+
+@app.get("/api/soc/summary-by-tier", dependencies=_REQUIRE_API_KEY)
+async def get_summary_by_tier(hours: int = Query(168, ge=1, le=720)):
+    """Summary of incidents grouped by team tier."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    summary = await _incidents_call(incident_store.summary_by_tier, since)
+    return {"window_hours": hours, "by_tier": summary}
 
 
 # ---------------------------------------------------------------------------

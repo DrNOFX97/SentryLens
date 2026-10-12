@@ -50,6 +50,7 @@
       <summary>SOC</summary>
       <button class="nav-item" data-tab="alerts">🚨 Alertas</button>
       <button class="nav-item" data-tab="incidents">🧩 Incidentes</button>
+      <button class="nav-item" data-tab="soc-team">👥 Equipa SOC</button>
       <button class="nav-item is-planned" data-planned="R3" data-label="Investigações">🔎 Investigações<span class="nav-badge">R3</span></button>
     </details>
     <details class="nav-group" open>
@@ -967,6 +968,11 @@
             <option value="low">Baixo</option>
             <option value="info">Info</option>
           </select>
+          <label for="inc-assigned-filter">Analista:</label>
+          <select id="inc-assigned-filter">
+            <option value="">Todos</option>
+            <option value="__mine__">👤 Meus incidentes</option>
+          </select>
           <button id="inc-backfill-btn" type="button">📥 Importar histórico</button>
         </div>
         <div id="inc-notice" class="panel-note" role="status"></div>
@@ -993,6 +999,20 @@
         <label for="inc-note-input" class="inc-note-label">Nota (obrigatória para fechar um incidente novo):</label>
         <textarea id="inc-note-input" rows="2" maxlength="2000"></textarea>
         <button id="inc-note-btn" type="button">➕ Adicionar nota</button>
+        <div id="inc-assignment-section" class="inc-assignment-section">
+          <h3>👤 Atribuição</h3>
+          <label for="inc-assignment-input" class="inc-assignment-label">Analista responsável:</label>
+          <input type="text" id="inc-assignment-input" maxlength="128" placeholder="Nome do analista (deixe vazio para desatribuir)">
+          <button id="inc-assignment-btn" type="button">✅ Atribuir</button>
+          <span id="inc-assignment-status" class="panel-note" role="status"></span>
+        </div>
+        <div id="inc-triage-section" class="inc-triage-section" hidden>
+          <h3>🔮 Triagem JEV (Experimental)</h3>
+          <p class="panel-note">Consulta TypeSafe AI — consultiva, não altera o incidente. Requer <code>SENTRYLENS_JEV_ENABLED=1</code> + <code>TYPESAFE_API_KEY</code>.</p>
+          <button id="inc-triage-btn" type="button" class="btn-primary">🔮 Triar com JEV</button>
+          <span id="inc-triage-status" class="panel-note" role="status"></span>
+          <div id="inc-triage-result" hidden></div>
+        </div>
         <h3>Evidências</h3>
         <div class="table-scroll">
           <table id="inc-evidence-table">
@@ -1002,6 +1022,279 @@
         </div>
         <h3>Timeline</h3>
         <ol class="inc-timeline" id="inc-timeline"></ol>
+      </section>
+    </div>
+
+    <!-- ===== SOC Team (Tier 1/2/3) ===== -->
+    <div class="tab-content" id="tab-soc-team">
+      <section class="panel" id="soc-team-panel">
+        <h2>👥 Equipa SOC — Tier 1/2/3</h2>
+        <p class="panel-note">
+          Gestão de analistas, turnos, regras de escalamento e atribuição de incidentes por tier.
+          <br>Tier 1 = Triagem | Tier 2 = Investigação | Tier 3 = Caça/Especialista
+        </p>
+
+        <!-- Analysts -->
+        <section class="panel" id="analysts-section">
+          <h3>👤 Analistas</h3>
+          <div class="filter-row">
+            <label for="analyst-tier-filter">Tier:</label>
+            <select id="analyst-tier-filter">
+              <option value="">Todos</option>
+              <option value="1">Tier 1 — Triagem</option>
+              <option value="2">Tier 2 — Investigação</option>
+              <option value="3">Tier 3 — Caça</option>
+            </select>
+            <label for="analyst-active-filter">Estado:</label>
+            <select id="analyst-active-filter">
+              <option value="1">Ativos</option>
+              <option value="0">Inativos</option>
+              <option value="">Todos</option>
+            </select>
+            <button id="analyst-create-btn" type="button">➕ Novo Analista</button>
+          </div>
+          <div id="analyst-notice" class="panel-note" role="status"></div>
+          <div class="table-scroll">
+            <table id="analysts-table">
+              <thead>
+                <tr><th>ID</th><th>Nome</th><th>Tier</th><th>Email</th><th>Estado</th><th>Ações</th></tr>
+              </thead>
+              <tbody id="analysts-body">
+                <tr><td colspan="6" class="empty-state">A carregar...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Create/Edit Analyst Modal -->
+        <div id="analyst-modal" class="modal" hidden>
+          <div class="modal-content">
+            <h3 id="analyst-modal-title">Novo Analista</h3>
+            <form id="analyst-form">
+              <input type="hidden" id="analyst-modal-id">
+              <div class="form-row">
+                <label for="analyst-id">ID *</label>
+                <input type="text" id="analyst-id" pattern="^analyst-[a-z0-9-]{1,64}$" placeholder="analyst-joao" required maxlength="128">
+                <small>Formato: analyst-<nome> (letras minúsculas, números, hífen)</small>
+              </div>
+              <div class="form-row">
+                <label for="analyst-name">Nome *</label>
+                <input type="text" id="analyst-name" required maxlength="128" placeholder="João Silva">
+              </div>
+              <div class="form-row">
+                <label for="analyst-tier">Tier *</label>
+                <select id="analyst-tier" required>
+                  <option value="1">1 — Triagem</option>
+                  <option value="2">2 — Investigação</option>
+                  <option value="3">3 — Caça/Especialista</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="analyst-email">Email</label>
+                <input type="email" id="analyst-email" maxlength="256" placeholder="joao@empresa.com">
+              </div>
+              <div class="form-row" id="analyst-active-row" hidden>
+                <label for="analyst-active">Ativo</label>
+                <select id="analyst-active">
+                  <option value="1">Sim</option>
+                  <option value="0">Não</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" id="analyst-cancel-btn">Cancelar</button>
+                <button type="submit" class="btn-primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Shifts -->
+        <section class="panel" id="shifts-section">
+          <h3>🕐 Turnos</h3>
+          <div class="filter-row">
+            <label for="shift-analyst-filter">Analista:</label>
+            <select id="shift-analyst-filter">
+              <option value="">Todos</option>
+            </select>
+            <button id="shift-create-btn" type="button">➕ Novo Turno</button>
+          </div>
+          <div id="shift-notice" class="panel-note" role="status"></div>
+          <div class="table-scroll">
+            <table id="shifts-table">
+              <thead>
+                <tr><th>Analista</th><th>Tier</th><th>Início</th><th>Fim</th><th>Papel</th><th>Ações</th></tr>
+              </thead>
+              <tbody id="shifts-body">
+                <tr><td colspan="6" class="empty-state">A carregar...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Shift Modal -->
+        <div id="shift-modal" class="modal" hidden>
+          <div class="modal-content">
+            <h3 id="shift-modal-title">Novo Turno</h3>
+            <form id="shift-form">
+              <input type="hidden" id="shift-modal-id">
+              <div class="form-row">
+                <label for="shift-analyst">Analista *</label>
+                <select id="shift-analyst" required>
+                  <option value="">Selecione...</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="shift-start">Início *</label>
+                <input type="datetime-local" id="shift-start" required>
+              </div>
+              <div class="form-row">
+                <label for="shift-end">Fim *</label>
+                <input type="datetime-local" id="shift-end" required>
+              </div>
+              <div class="form-row">
+                <label for="shift-role">Papel *</label>
+                <select id="shift-role" required>
+                  <option value="primary">Principal</option>
+                  <option value="secondary">Secundário</option>
+                  <option value="on_call">De prevenção (on-call)</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" id="shift-cancel-btn">Cancelar</button>
+                <button type="submit" class="btn-primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Escalation Rules -->
+        <section class="panel" id="escalation-section">
+          <h3>📋 Regras de Escalamento</h3>
+          <p class="panel-note">Define como incidentes escalam entre tiers por severidade.</p>
+          <div class="filter-row">
+            <button id="escalation-create-btn" type="button">➕ Nova Regra</button>
+          </div>
+          <div id="escalation-notice" class="panel-note" role="status"></div>
+          <div class="table-scroll">
+            <table id="escalation-table">
+              <thead>
+                <tr><th>De Tier</th><th>Para Tier</th><th>Severidade</th><th>Auto-escalamento</th><th>SLA (min)</th><th>Ações</th></tr>
+              </thead>
+              <tbody id="escalation-body">
+                <tr><td colspan="6" class="empty-state">A carregar...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Escalation Modal -->
+        <div id="escalation-modal" class="modal" hidden>
+          <div class="modal-content">
+            <h3 id="escalation-modal-title">Nova Regra de Escalamento</h3>
+            <form id="escalation-form">
+              <input type="hidden" id="escalation-modal-id">
+              <div class="form-row">
+                <label for="escalation-from-tier">De Tier *</label>
+                <select id="escalation-from-tier" required>
+                  <option value="1">1 — Triagem</option>
+                  <option value="2">2 — Investigação</option>
+                  <option value="3">3 — Caça</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="escalation-to-tier">Para Tier</label>
+                <select id="escalation-to-tier">
+                  <option value="">(sem escalamento — tier final)</option>
+                  <option value="2">2 — Investigação</option>
+                  <option value="3">3 — Caça</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="escalation-severity">Severidade *</label>
+                <select id="escalation-severity" required>
+                  <option value="critical">Crítico</option>
+                  <option value="high">Alto</option>
+                  <option value="medium">Médio</option>
+                  <option value="low">Baixo</option>
+                  <option value="info">Info</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="escalation-auto">Auto-escalamento</label>
+                <select id="escalation-auto">
+                  <option value="0">Não</option>
+                  <option value="1">Sim (SLA breach → escala automaticamente)</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="escalation-sla">SLA (minutos)</label>
+                <input type="number" id="escalation-sla" min="1" placeholder="Ex: 60">
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" id="escalation-cancel-btn">Cancelar</button>
+                <button type="submit" class="btn-primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- On-Call / Primary View -->
+        <section class="panel" id="oncall-section">
+          <h3>📞 De Prevenção / Turno Atual</h3>
+          <div class="filter-row">
+            <label for="oncall-tier-filter">Tier:</label>
+            <select id="oncall-tier-filter">
+              <option value="1">Tier 1</option>
+              <option value="2">Tier 2</option>
+              <option value="3">Tier 3</option>
+            </select>
+            <button id="oncall-refresh-btn" type="button">🔄 Atualizar</button>
+          </div>
+          <div id="oncall-notice" class="panel-note" role="status"></div>
+          <div class="oncall-grid">
+            <div class="oncall-card">
+              <h4>🔔 De Prevenção (on-call)</h4>
+              <ul id="oncall-list" class="oncall-list"></ul>
+            </div>
+            <div class="oncall-card">
+              <h4>⭐ Turno Principal (primary)</h4>
+              <ul id="primary-list" class="oncall-list"></ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- SLA Breaches -->
+        <section class="panel" id="sla-breaches-section">
+          <h3>⚠️ SLA Breaches</h3>
+          <p class="panel-note">Incidentes com deadline de SLA ultrapassado e não resolvidos.</p>
+          <div id="sla-breaches-notice" class="panel-note" role="status"></div>
+          <div class="table-scroll">
+            <table id="sla-breaches-table">
+              <thead>
+                <tr><th>ID</th><th>Severidade</th><th>Ativo</th><th>Tier</th><th>Analista</th><th>Deadline</th><th>Estado</th></tr>
+              </thead>
+              <tbody id="sla-breaches-body">
+                <tr><td colspan="7" class="empty-state">A carregar...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Summary by Tier -->
+        <section class="panel" id="tier-summary-section">
+          <h3>📊 Resumo por Tier</h3>
+          <div id="tier-summary-notice" class="panel-note" role="status"></div>
+          <div class="table-scroll">
+            <table id="tier-summary-table">
+              <thead>
+                <tr><th>Tier</th><th>Total</th><th>Abertos</th><th>Por Estado</th><th>Por Severidade</th></tr>
+              </thead>
+              <tbody id="tier-summary-body">
+                <tr><td colspan="5" class="empty-state">A carregar...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </div>
 
@@ -1366,6 +1659,7 @@
   <script src="app.js"></script>
   <script src="redblue.js"></script>
   <script src="incidents.js"></script>
+  <script src="soc_team.js"></script>
   <script src="live_soc.js"></script>
   <script src="attack_registry.js"></script>
   <script src="attack_library.js"></script>

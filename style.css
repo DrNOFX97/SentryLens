@@ -765,6 +765,38 @@ tr.rb-stale td { font-style: italic; }
 .inc-timeline { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
 .inc-timeline li { padding: 6px 0; border-bottom: 1px solid #eee; }
 .inc-timeline time { font-family: var(--font-mono); color: #888; margin-right: 6px; }
+
+.inc-triage-section { margin-top: 16px; padding: 16px; border: 1px solid #e0e6ea; border-radius: 8px; background: #fafbfc; }
+.inc-triage-section h3 { font-size: 16px; margin-bottom: 8px; color: var(--ink-900); }
+.inc-triage-section .panel-note { font-size: 12px; margin-bottom: 12px; color: #666; }
+.inc-triage-section .panel-note code { background: #eef7f9; padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); font-size: 11px; }
+#inc-triage-btn { background: #6366f1; color: white; }
+#inc-triage-btn:hover { background: #4f46e5; }
+#inc-triage-btn:disabled { opacity: 0.5; cursor: wait; background: #6366f1; }
+#inc-triage-result { margin-top: 16px; padding: 12px; border: 1px solid #e0e6ea; border-radius: 6px; background: white; font-size: 13px; }
+
+.inc-assignment-section { margin-top: 16px; padding: 16px; border: 1px solid #e0e6ea; border-radius: 8px; background: #fafbfc; }
+.inc-assignment-section h3 { font-size: 16px; margin-bottom: 8px; color: var(--ink-900); }
+.inc-assignment-label { display: block; margin: 8px 0 4px; font-size: 13px; color: #666; }
+#inc-assignment-input { width: 100%; max-width: 300px; padding: 8px; border: 1px solid #ccd3d8; border-radius: 6px; font: inherit; margin-bottom: 8px; }
+#inc-assignment-btn { background: #8b5cf6; color: white; }
+#inc-assignment-btn:hover { background: #7c3aed; }
+#inc-assignment-btn:disabled { opacity: 0.5; cursor: wait; }
+.inc-assignment-section .panel-note { font-size: 12px; margin-top: 8px; color: #666; }
+.inc-triage-question { margin-bottom: 16px; }
+.inc-triage-question:last-child { margin-bottom: 0; }
+.inc-triage-question h4 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--ink-900); }
+.inc-triage-prob { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.inc-triage-prob-bar { flex: 1; height: 8px; background: #eef7f9; border-radius: 4px; overflow: hidden; }
+.inc-triage-prob-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+.inc-triage-prob-fill.yes { background: #10b981; }
+.inc-triage-prob-fill.no { background: #ef4444; }
+.inc-triage-prob-fill.choice { background: var(--cyan-600); }
+.inc-triage-prob-label { min-width: 80px; font-family: var(--font-mono); font-size: 12px; }
+.inc-triage-prob-value { min-width: 50px; text-align: right; font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
+.inc-triage-choice { font-weight: 600; color: var(--cyan-700); }
+.inc-triage-confidence { font-size: 12px; color: #666; margin-top: 4px; }
+.inc-triage-model { font-size: 11px; color: #888; margin-top: 12px; font-family: var(--font-mono); }
 /* Em coluna (mobile) a margin auto do .container desliga o stretch e a pagina
    crescia ate à largura das tabelas; assim as tabelas fazem scroll no painel. */
 @media (max-width: 900px) { .app-shell > .container { width: 100%; } }
@@ -844,3 +876,63 @@ tr.rb-stale td { font-style: italic; }
    A distinção que importa é "é preciso reiniciar" vs "falhou". */
 .mlm-train-reiniciar { background: #fdecc8; color: var(--ink-900); font-size: 12px; padding: 4px 8px; }
 .mlm-train-erro { background: #f8d7da; }
+
+/* ===== Modal (genérico) ===== */
+.modal { position: fixed; inset: 0; background: rgba(10,22,34,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal.hidden { display: none; }
+.modal-content { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 480px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto; }
+.modal-content h3 { margin: 0 0 16px; font-size: 18px; color: var(--ink-900); }
+.form-row { margin-bottom: 12px; }
+.form-row label { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--ink-900); }
+.form-row input, .form-row select, .form-row textarea { width: 100%; padding: 10px 12px; border: 1px solid #ccd3d8; border-radius: 6px; font: inherit; font-size: 14px; }
+.form-row small { display: block; margin-top: 4px; font-size: 11px; color: #888; }
+.form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn-primary { background: var(--cyan-600); color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+.btn-primary:hover { background: var(--cyan-700); }
+.btn-primary:disabled { opacity: 0.5; cursor: wait; }
+.btn-secondary { background: #e0e6ea; color: var(--ink-900); border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+.btn-secondary:hover { background: #cfd9e0; }
+.btn-sm { padding: 4px 8px; font-size: 12px; }
+.btn-danger { background: #e74c3c; color: #fff; }
+.btn-danger:hover { background: #c0392b; }
+
+/* ===== SOC Team (Tier 1/2/3) ===== */
+.oncall-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 12px; }
+.oncall-card { background: #fafbfc; border: 1px solid #e0e6ea; border-radius: 8px; padding: 16px; }
+.oncall-card h4 { margin: 0 0 12px; font-size: 14px; color: var(--ink-900); }
+.oncall-list { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.oncall-list li { padding: 6px 0; border-bottom: 1px solid #eee; }
+.oncall-list li:last-child { border-bottom: none; }
+.oncall-list .empty-state { color: #888; font-style: italic; }
+
+/* Tier summary table */
+#tier-summary-table td, #tier-summary-table th { vertical-align: top; }
+
+/* SLA breaches */
+#sla-breaches-table td { vertical-align: top; }
+
+/* Analyst table */
+#analysts-table td { vertical-align: middle; }
+
+/* Shift table */
+#shifts-table td { vertical-align: middle; }
+
+/* Escalation table */
+#escalation-table td { vertical-align: middle; }
+
+/* Tier badge inline in tables */
+.tier-badge-inline { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.tier-badge-inline.t1 { background: #fdecc8; }
+.tier-badge-inline.t2 { background: #d6ebf5; }
+.tier-badge-inline.t3 { background: #e3d9f3; }
+
+/* Role badge inline */
+.role-badge-inline { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.role-badge-inline.primary { background: #e3d9f3; }
+.role-badge-inline.secondary { background: #d6ebf5; }
+.role-badge-inline.on_call { background: #fdecc8; }
+
+/* Status badges for active/inactive */
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.status-badge.active { background: #d4efdf; }
+.status-badge.inactive { background: #e0e0e0; color: #666; }

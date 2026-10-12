@@ -18,6 +18,40 @@ from contextlib import contextmanager
 from incident_engine import OPEN_STATUSES, can_transition, max_severity, parse_timestamp
 
 SCHEMA = """
+-- SOC Team tables
+CREATE TABLE IF NOT EXISTS soc_analysts (
+    id TEXT PRIMARY KEY,           -- e.g., "analyst-001"
+    name TEXT NOT NULL UNIQUE,     -- display name
+    tier INTEGER NOT NULL,         -- 1, 2, or 3
+    email TEXT,
+    active INTEGER DEFAULT 1,      -- 1 = active, 0 = inactive
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_analysts_tier ON soc_analysts(tier);
+CREATE INDEX IF NOT EXISTS idx_analysts_active ON soc_analysts(active);
+
+CREATE TABLE IF NOT EXISTS soc_shifts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analyst_id TEXT NOT NULL REFERENCES soc_analysts(id),
+    start_ts TEXT NOT NULL,        -- ISO 8601 with timezone
+    end_ts TEXT NOT NULL,
+    role TEXT NOT NULL,            -- 'primary', 'secondary', 'on_call'
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_shifts_analyst ON soc_shifts(analyst_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_time ON soc_shifts(start_ts, end_ts);
+
+CREATE TABLE IF NOT EXISTS soc_escalation_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_tier INTEGER NOT NULL,    -- 1, 2, or 3
+    to_tier INTEGER NOT NULL,      -- 2, 3, or null (no escalation)
+    severity TEXT NOT NULL,        -- 'critical', 'high', 'medium', 'low', 'info'
+    auto_escalate INTEGER DEFAULT 0, -- 1 = auto-escalate on SLA breach
+    sla_minutes INTEGER,           -- SLA in minutes for this tier/severity
+    created_at TEXT NOT NULL
+);
+
+-- Incidents table (extended with team fields)
 CREATE TABLE IF NOT EXISTS incidents (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL,
@@ -26,10 +60,20 @@ CREATE TABLE IF NOT EXISTS incidents (
     created_at TEXT NOT NULL,
     first_evidence_at TEXT NOT NULL,
     last_evidence_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    triage_json TEXT,              -- cached JEV triage result
+    assigned_to TEXT,              -- analyst assigned to this incident
+    assigned_team_tier INTEGER,    -- team tier responsible (1, 2, or 3)
+    escalated_from_tier INTEGER,   -- tier this was escalated from (null if none)
+    escalated_at TEXT,             -- when escalated
+    sla_deadline TEXT              -- SLA deadline based on severity/tier
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_asset_last ON incidents(asset, last_evidence_at);
+CREATE INDEX IF NOT EXISTS idx_incidents_assigned ON incidents(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_incidents_team_tier ON incidents(assigned_team_tier);
+CREATE INDEX IF NOT EXISTS idx_incidents_sla ON incidents(sla_deadline);
+
 CREATE TABLE IF NOT EXISTS incident_evidence (
     rowid_ INTEGER PRIMARY KEY AUTOINCREMENT,
     incident_id TEXT NOT NULL REFERENCES incidents(id),
@@ -191,6 +235,37 @@ class IncidentStore:
             self._add_event(conn, incident_id, now_iso, "note_added", "analyst", {"text": text})
             conn.execute("UPDATE incidents SET updated_at = ? WHERE id = ?", (now_iso, incident_id))
 
+    def save_triage(self, incident_id: str, triage_result: dict, now_iso: str) -> None:
+        """Save JEV triage result to incident (cached)."""
+        with self.lock, self._tx() as conn:
+            if conn.execute("SELECT 1 FROM incidents WHERE id = ?", (incident_id,)).fetchone() is None:
+                raise IncidentNotFound(incident_id)
+            conn.execute(
+                "UPDATE incidents SET triage_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(triage_result, ensure_ascii=False), now_iso, incident_id),
+            )
+            self._add_event(conn, incident_id, now_iso, "triage_performed", "jev", triage_result)
+
+    def get_triage(self, incident_id: str) -> dict | None:
+        """Get cached JEV triage result for incident."""
+        with self._tx() as conn:
+            row = conn.execute("SELECT triage_json FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is None or row["triage_json"] is None:
+                return None
+            return json.loads(row["triage_json"])
+
+    def assign_analyst(self, incident_id: str, analyst: str | None, now_iso: str) -> None:
+        """Assign or unassign an analyst to an incident."""
+        with self.lock, self._tx() as conn:
+            row = conn.execute("SELECT assigned_to FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is None:
+                raise IncidentNotFound(incident_id)
+            old_assignee = row["assigned_to"]
+            conn.execute("UPDATE incidents SET assigned_to = ?, updated_at = ? WHERE id = ?",
+                         (analyst, now_iso, incident_id))
+            self._add_event(conn, incident_id, now_iso, "assignment_changed", "analyst",
+                            {"from": old_assignee, "to": analyst})
+
     def set_status(self, incident_id: str, new_status: str, note: str | None, now_iso: str) -> None:
         with self.lock, self._tx() as conn:
             row = conn.execute("SELECT status FROM incidents WHERE id = ?", (incident_id,)).fetchone()
@@ -251,10 +326,15 @@ class IncidentStore:
                                  "payload": json.loads(r["payload"])} for r in evidence_rows]
         incident["timeline"] = timeline
         incident.update(self._derived(incident, timeline))
+        # Include cached triage if available
+        if incident.get("triage_json"):
+            incident["triage"] = json.loads(incident["triage_json"])
         return incident
 
     def list_incidents(self, status: str | None = None, severity: str | None = None,
-                       since_iso: str | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
+                       since_iso: str | None = None, assigned_to: str | None = None,
+                       assigned_team_tier: int | None = None,
+                       limit: int = 100, offset: int = 0) -> list[dict]:
         clauses, params = [], []
         if status:
             clauses.append("i.status = ?")
@@ -265,6 +345,12 @@ class IncidentStore:
         if since_iso:
             clauses.append("i.last_evidence_at >= ?")
             params.append(since_iso)
+        if assigned_to:
+            clauses.append("i.assigned_to = ?")
+            params.append(assigned_to)
+        if assigned_team_tier is not None:
+            clauses.append("i.assigned_team_tier = ?")
+            params.append(assigned_team_tier)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._tx() as conn:
             rows = conn.execute(
@@ -310,3 +396,235 @@ class IncidentStore:
                     e for e in self._timeline(conn, incident["id"]) if e["kind"] == "status_changed"
                 ]
         return incidents
+
+    # ============================================================
+    # SOC Team Management
+    # ============================================================
+
+    # --- Analysts ---
+    def create_analyst(self, analyst_id: str, name: str, tier: int, email: str | None, now_iso: str) -> None:
+        """Create a new SOC analyst."""
+        if tier not in (1, 2, 3):
+            raise ValueError("tier must be 1, 2, or 3")
+        with self.lock, self._tx() as conn:
+            conn.execute(
+                "INSERT INTO soc_analysts (id, name, tier, email, active, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+                (analyst_id, name, tier, email, now_iso),
+            )
+
+    def get_analyst(self, analyst_id: str) -> dict | None:
+        with self._tx() as conn:
+            row = conn.execute("SELECT * FROM soc_analysts WHERE id = ?", (analyst_id,)).fetchone()
+            return dict(row) if row else None
+
+    def get_analyst_by_name(self, name: str) -> dict | None:
+        with self._tx() as conn:
+            row = conn.execute("SELECT * FROM soc_analysts WHERE name = ?", (name,)).fetchone()
+            return dict(row) if row else None
+
+    def list_analysts(self, tier: int | None = None, active_only: bool = True) -> list[dict]:
+        with self._tx() as conn:
+            query = "SELECT * FROM soc_analysts"
+            params = []
+            clauses = []
+            if active_only:
+                clauses.append("active = 1")
+            if tier is not None:
+                clauses.append("tier = ?")
+                params.append(tier)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY tier, name"
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_analyst(self, analyst_id: str, tier: int | None = None, email: str | None = None, active: int | None = None) -> None:
+        with self.lock, self._tx() as conn:
+            updates = []
+            params = []
+            if tier is not None:
+                if tier not in (1, 2, 3):
+                    raise ValueError("tier must be 1, 2, or 3")
+                updates.append("tier = ?")
+                params.append(tier)
+            if email is not None:
+                updates.append("email = ?")
+                params.append(email)
+            if active is not None:
+                updates.append("active = ?")
+                params.append(active)
+            if not updates:
+                return
+            params.append(analyst_id)
+            conn.execute(f"UPDATE soc_analysts SET {', '.join(updates)} WHERE id = ?", params)
+
+    def deactivate_analyst(self, analyst_id: str) -> None:
+        self.update_analyst(analyst_id, active=0)
+
+    # --- Shifts ---
+    def create_shift(self, analyst_id: str, start_ts: str, end_ts: str, role: str, now_iso: str) -> int:
+        """Create a shift for an analyst. role: 'primary', 'secondary', 'on_call'."""
+        if role not in ("primary", "secondary", "on_call"):
+            raise ValueError("role must be 'primary', 'secondary', or 'on_call'")
+        with self.lock, self._tx() as conn:
+            cur = conn.execute(
+                "INSERT INTO soc_shifts (analyst_id, start_ts, end_ts, role, created_at) VALUES (?, ?, ?, ?, ?)",
+                (analyst_id, start_ts, end_ts, role, now_iso),
+            )
+            return cur.lastrowid
+
+    def get_shifts_for_analyst(self, analyst_id: str, since: str | None = None, until: str | None = None) -> list[dict]:
+        with self._tx() as conn:
+            query = "SELECT * FROM soc_shifts WHERE analyst_id = ?"
+            params = [analyst_id]
+            if since:
+                query += " AND end_ts >= ?"
+                params.append(since)
+            if until:
+                query += " AND start_ts <= ?"
+                params.append(until)
+            query += " ORDER BY start_ts"
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_current_on_call(self, tier: int, now_iso: str) -> list[dict]:
+        """Get analysts currently on-call for a tier."""
+        with self._tx() as conn:
+            rows = conn.execute(
+                """SELECT a.* FROM soc_analysts a
+                   JOIN soc_shifts s ON s.analyst_id = a.id
+                   WHERE a.tier = ? AND a.active = 1
+                   AND s.role = 'on_call'
+                   AND s.start_ts <= ? AND s.end_ts >= ?""",
+                (tier, now_iso, now_iso),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_current_primary(self, tier: int, now_iso: str) -> list[dict]:
+        """Get analysts currently on primary shift for a tier."""
+        with self._tx() as conn:
+            rows = conn.execute(
+                """SELECT a.* FROM soc_analysts a
+                   JOIN soc_shifts s ON s.analyst_id = a.id
+                   WHERE a.tier = ? AND a.active = 1
+                   AND s.role = 'primary'
+                   AND s.start_ts <= ? AND s.end_ts >= ?""",
+                (tier, now_iso, now_iso),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # --- Escalation Rules ---
+    def create_escalation_rule(self, from_tier: int, to_tier: int | None, severity: str,
+                                auto_escalate: int, sla_minutes: int | None, now_iso: str) -> int:
+        if from_tier not in (1, 2, 3) or (to_tier is not None and to_tier not in (1, 2, 3)):
+            raise ValueError("tier must be 1, 2, or 3")
+        if severity not in ("critical", "high", "medium", "low", "info"):
+            raise ValueError("invalid severity")
+        with self.lock, self._tx() as conn:
+            cur = conn.execute(
+                """INSERT INTO soc_escalation_rules (from_tier, to_tier, severity, auto_escalate, sla_minutes, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (from_tier, to_tier, severity, auto_escalate, sla_minutes, now_iso),
+            )
+            return cur.lastrowid
+
+    def get_escalation_rules(self, from_tier: int | None = None, severity: str | None = None) -> list[dict]:
+        with self._tx() as conn:
+            query = "SELECT * FROM soc_escalation_rules"
+            params = []
+            clauses = []
+            if from_tier is not None:
+                clauses.append("from_tier = ?")
+                params.append(from_tier)
+            if severity is not None:
+                clauses.append("severity = ?")
+                params.append(severity)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY from_tier, severity"
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_escalation_rule(self, from_tier: int, severity: str) -> dict | None:
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM soc_escalation_rules WHERE from_tier = ? AND severity = ?",
+                (from_tier, severity),
+            ).fetchone()
+            return dict(row) if row else None
+
+    # --- Team-based Incident Operations ---
+    def assign_to_tier(self, incident_id: str, tier: int, analyst_id: str | None, now_iso: str) -> None:
+        """Assign incident to a team tier (and optionally an analyst)."""
+        if tier not in (1, 2, 3):
+            raise ValueError("tier must be 1, 2, or 3")
+        with self.lock, self._tx() as conn:
+            row = conn.execute("SELECT assigned_team_tier, assigned_to FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is None:
+                raise IncidentNotFound(incident_id)
+            old_tier = row["assigned_team_tier"]
+            old_analyst = row["assigned_to"]
+            conn.execute(
+                "UPDATE incidents SET assigned_team_tier = ?, assigned_to = ?, updated_at = ? WHERE id = ?",
+                (tier, analyst_id, now_iso, incident_id),
+            )
+            self._add_event(conn, incident_id, now_iso, "team_assigned", "analyst",
+                            {"from_tier": old_tier, "to_tier": tier, "from_analyst": old_analyst, "to_analyst": analyst_id})
+
+    def escalate_incident(self, incident_id: str, to_tier: int, analyst_id: str | None, now_iso: str) -> None:
+        """Escalate incident to a higher tier."""
+        with self.lock, self._tx() as conn:
+            row = conn.execute("SELECT assigned_team_tier, assigned_to FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is None:
+                raise IncidentNotFound(incident_id)
+            from_tier = row["assigned_team_tier"]
+            if from_tier is not None and to_tier <= from_tier:
+                raise ValueError("escalation must be to a higher tier")
+            conn.execute(
+                "UPDATE incidents SET assigned_team_tier = ?, assigned_to = ?, escalated_from_tier = ?, escalated_at = ?, updated_at = ? WHERE id = ?",
+                (to_tier, analyst_id, from_tier, now_iso, now_iso, incident_id),
+            )
+            self._add_event(conn, incident_id, now_iso, "escalated", "analyst",
+                            {"from_tier": from_tier, "to_tier": to_tier, "analyst": analyst_id})
+
+    def set_sla_deadline(self, incident_id: str, deadline_iso: str, now_iso: str) -> None:
+        with self.lock, self._tx() as conn:
+            if conn.execute("SELECT 1 FROM incidents WHERE id = ?", (incident_id,)).fetchone() is None:
+                raise IncidentNotFound(incident_id)
+            conn.execute("UPDATE incidents SET sla_deadline = ?, updated_at = ? WHERE id = ?",
+                         (deadline_iso, now_iso, incident_id))
+            self._add_event(conn, incident_id, now_iso, "sla_set", "system", {"deadline": deadline_iso})
+
+    def get_sla_breaches(self, now_iso: str) -> list[dict]:
+        """Get incidents with breached SLA (deadline passed, not resolved)."""
+        with self._tx() as conn:
+            rows = conn.execute(
+                """SELECT * FROM incidents
+                   WHERE sla_deadline IS NOT NULL
+                   AND sla_deadline < ?
+                   AND status NOT IN ('RESOLVED', 'CLOSED')""",
+                (now_iso,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def list_incidents_by_tier(self, tier: int, status: str | None = None, since_iso: str | None = None,
+                                limit: int = 100, offset: int = 0) -> list[dict]:
+        """List incidents assigned to a specific tier."""
+        return self.list_incidents(assigned_to=None, status=status, severity=None, since_iso=since_iso,
+                                   assigned_team_tier=tier, limit=limit, offset=offset)
+
+    def summary_by_tier(self, since_iso: str | None = None) -> dict:
+        """Summary grouped by team tier."""
+        incidents = self.list_incidents(since_iso=since_iso, limit=100000)
+        by_tier: dict[int, dict] = {}
+        for inc in incidents:
+            tier = inc.get("assigned_team_tier") or 0
+            if tier not in by_tier:
+                by_tier[tier] = {"total": 0, "by_status": {}, "by_severity": {}, "open": 0}
+            t = by_tier[tier]
+            t["total"] += 1
+            t["by_status"][inc["status"]] = t["by_status"].get(inc["status"], 0) + 1
+            t["by_severity"][inc["severity"]] = t["by_severity"].get(inc["severity"], 0) + 1
+            if inc["status"] in OPEN_STATUSES:
+                t["open"] += 1
+        return by_tier

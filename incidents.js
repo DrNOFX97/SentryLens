@@ -12,6 +12,7 @@ const INC_STATUS_LABELS = {
 const INC_EVENT_LABELS = {
   created: "Incidente criado", evidence_added: "Evidência adicionada", attack_linked: "Ataque ligado",
   severity_changed: "Severidade alterada", status_changed: "Estado alterado", note_added: "Nota",
+  triage_performed: "Triagem JEV", assignment_changed: "Atribuição alterada",
 };
 
 let incSelectedId = null;
@@ -112,6 +113,8 @@ function incTimelineText(ev) {
     case "severity_changed": return `${INC_EVENT_LABELS.severity_changed}: ${d.from} → ${d.to}`;
     case "status_changed": return `${INC_EVENT_LABELS.status_changed}: ${d.from} → ${d.to}${d.note ? ` — ${d.note}` : ""}`;
     case "note_added": return `${INC_EVENT_LABELS.note_added}: ${d.text || ""}`;
+    case "triage_performed": return `🔮 Triagem JEV: ${d.model || "jev-latest"} — compromisso: ${d.answers?.is_compromise?.probability !== undefined ? (d.answers.is_compromise.probability * 100).toFixed(0) + "%" : "—"}, severidade: ${d.answers?.severity?.choice || "—"}`;
+    case "assignment_changed": return `${INC_EVENT_LABELS.assignment_changed}: ${d.from || "—"} → ${d.to || "—"}`;
     default: return ev.kind;
   }
 }
@@ -124,9 +127,11 @@ function renderIncidentDetail(incident) {
   const ml = incident.ml_summary
     ? `${incident.ml_summary.ml_anomalies}/${incident.ml_summary.scored} anomalias ML · ${incident.ml_summary.rule_flagged} por regra`
     : "sem modelo ML";
+  const assigned = incident.assigned_to ? `👤 ${escapeHtml(incident.assigned_to)}` : "👤 Não atribuído";
   document.getElementById("inc-detail-meta").innerHTML = `
     <span>${severityBadge(incident.severity)}</span> <span>${incStatusBadge(incident.status)}</span>
     <span>Ativo: <strong>${incCell(incident.asset)}</strong></span>
+    <span>Analista: <strong>${assigned}</strong></span>
     <span>MITRE: ${incCell(incident.techniques.join(", "))}</span>
     <span>MTTD: ${escapeHtml(incFormatSeconds(incident.mttd_seconds))}</span>
     <span>1.ª resposta: ${escapeHtml(incFormatSeconds(incident.time_to_first_response_seconds))}</span>
@@ -143,6 +148,31 @@ function renderIncidentDetail(incident) {
   document.getElementById("inc-timeline").innerHTML = incident.timeline.map((ev) =>
     `<li><time>${escapeHtml(formatTimestamp(ev.ts))}</time> <em>${escapeHtml(ev.actor)}</em> — ${escapeHtml(incTimelineText(ev))}</li>`
   ).join("");
+
+  // Populate assignment input
+  const assignmentInput = document.getElementById("inc-assignment-input");
+  const assignmentStatus = document.getElementById("inc-assignment-status");
+  if (incident.assigned_to) {
+    assignmentInput.value = incident.assigned_to;
+    assignmentStatus.textContent = `Atribuído a ${escapeHtml(incident.assigned_to)}`;
+  } else {
+    assignmentInput.value = "";
+    assignmentStatus.textContent = "";
+  }
+
+  // Show triage section with cached result if available
+  const triageSection = document.getElementById("inc-triage-section");
+  const triageResult = document.getElementById("inc-triage-result");
+  const triageStatus = document.getElementById("inc-triage-status");
+  if (incident.triage) {
+    triageSection.hidden = false;
+    triageStatus.textContent = incident.triage.cached ? "📋 Resultado em cache (clique para re-executar)" : "✅ Triagem concluída";
+    incRenderTriageResult(triageResult, incident.triage);
+  } else {
+    triageSection.hidden = false;
+    triageStatus.textContent = "";
+    triageResult.hidden = true;
+  }
 }
 
 function incShowDetailError(message) {
@@ -181,8 +211,16 @@ async function refreshIncidentsTab() {
     const params = new URLSearchParams({ hours: String(incWindowHours()) });
     const status = document.getElementById("inc-status-filter").value;
     const severity = document.getElementById("inc-severity-filter").value;
+    const assigned = document.getElementById("inc-assigned-filter").value;
     if (status) params.set("status", status);
     if (severity) params.set("severity", severity);
+    if (assigned === "__mine__") {
+      // Special value: will be replaced with current user name from app.js
+      const me = typeof CURRENT_USER !== "undefined" ? CURRENT_USER : "";
+      if (me) params.set("assigned_to", me);
+    } else if (assigned) {
+      params.set("assigned_to", assigned);
+    }
     const data = await incRequest("GET", `/api/incidents?${params}`);
     renderPanelError("#incidents-panel", "");
     renderIncidentsKpis(data.summary);
@@ -246,11 +284,142 @@ document.getElementById("inc-note-btn").addEventListener("click", () => {
   incApply(incRequest("POST", `/api/incidents/${encodeURIComponent(incSelectedId)}/notes`, { text }));
 });
 
+document.getElementById("inc-triage-btn").addEventListener("click", () => incTriage(incSelectedId));
+
+document.getElementById("inc-assignment-btn").addEventListener("click", () => incAssign(incSelectedId));
+
 document.getElementById("inc-backfill-btn").addEventListener("click", backfillIncidents);
 document.getElementById("inc-status-filter").addEventListener("change", refreshIncidentsTab);
 document.getElementById("inc-severity-filter").addEventListener("change", refreshIncidentsTab);
+document.getElementById("inc-assigned-filter").addEventListener("change", refreshIncidentsTab);
 periodSelect.addEventListener("change", refreshIncidentsTab);
 document.addEventListener("sentrylens:new-alert", refreshIncidentsTab);
 
 refreshIncidentsTab();
 setInterval(refreshIncidentsTab, INC_REFRESH_MS);
+
+// --- JEV Triagem ---
+let incTriageCache = new Map();
+
+async function incTriage(incidentId) {
+  if (!incidentId) return;
+  const btn = document.getElementById("inc-triage-btn");
+  const statusEl = document.getElementById("inc-triage-status");
+  const resultEl = document.getElementById("inc-triage-result");
+  
+  // Check if we have cached result and user wants to re-run
+  const force = !incTriageCache.has(incidentId) || confirm("Já existe resultado em cache. Re-executar triagem?");
+  
+  btn.disabled = true;
+  btn.textContent = "🔮 A triar...";
+  statusEl.textContent = "A contactar TypeSafe AI...";
+  resultEl.hidden = true;
+  
+  try {
+    const response = await incRequest("POST", `/api/incidents/${encodeURIComponent(incidentId)}/triage${force ? "?force=1" : ""}`);
+    incTriageCache.set(incidentId, response);
+    incRenderTriageResult(resultEl, response);
+    statusEl.textContent = response.cached ? "📋 Resultado em cache" : "✅ Triagem concluída";
+  } catch (err) {
+    if (err.status === 503) {
+      statusEl.textContent = "⚠️ JEV desativado — configure SENTRYLENS_JEV_ENABLED=1 e TYPESAFE_API_KEY no backend";
+    } else if (err.status === 502) {
+      statusEl.textContent = `⚠️ Erro no JEV: ${err.message}`;
+    } else {
+      statusEl.textContent = `❌ Falha: ${err.message}`;
+    }
+    resultEl.hidden = true;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔮 Triar com JEV";
+  }
+}
+
+function incRenderTriageResult(container, data) {
+  container.hidden = false;
+  const answers = data.answers || {};
+  const model = data.model || "jev-latest";
+  
+  const questionLabels = {
+    is_compromise: "Compromisso bem-sucedido?",
+    is_brute_force: "Força bruta / password guessing?",
+    severity: "Severidade geral"
+  };
+  
+  let html = "";
+  
+  for (const [key, answer] of Object.entries(answers)) {
+    const label = questionLabels[key] || key;
+    
+    if (answer.probability !== undefined) {
+      // NOUL question (sim/não)
+      const prob = Math.round(answer.probability * 100);
+      const fillClass = prob >= 50 ? "yes" : "no";
+      html += `
+        <div class="inc-triage-question">
+          <h4>${escapeHtml(label)}</h4>
+          <div class="inc-triage-prob">
+            <span class="inc-triage-prob-label">Sim</span>
+            <div class="inc-triage-prob-bar"><div class="inc-triage-prob-fill ${fillClass}" style="width: ${prob}%"></div></div>
+            <span class="inc-triage-prob-value">${prob}%</span>
+          </div>
+          <div class="inc-triage-prob">
+            <span class="inc-triage-prob-label">Não</span>
+            <div class="inc-triage-prob-bar"><div class="inc-triage-prob-fill ${prob >= 50 ? "no" : "yes"}" style="width: ${100 - prob}%"></div></div>
+            <span class="inc-triage-prob-value">${100 - prob}%</span>
+          </div>
+        </div>`;
+    } else if (answer.choice) {
+      // CHOICE question
+      const probs = answer.probabilities || {};
+      const confidence = answer.confidence !== undefined ? Math.round(answer.confidence * 100) : null;
+      html += `
+        <div class="inc-triage-question">
+          <h4>${escapeHtml(label)}</h4>
+          <div class="inc-triage-choice">Classificação: ${escapeHtml(answer.choice)}</div>
+          ${confidence !== null ? `<div class="inc-triage-confidence">Confidence (concentração): ${confidence}%</div>` : ""}
+          <div style="margin-top: 8px;">Probabilidades:</div>
+          ${Object.entries(probs).map(([choice, p]) => {
+            const pct = Math.round(p * 100);
+            return `<div class="inc-triage-prob">
+              <span class="inc-triage-prob-label">${escapeHtml(choice)}</span>
+              <div class="inc-triage-prob-bar"><div class="inc-triage-prob-fill choice" style="width: ${pct}%"></div></div>
+              <span class="inc-triage-prob-value">${pct}%</span>
+            </div>`;
+          }).join("")}
+        </div>`;
+    }
+  }
+  
+  html += `<div class="inc-triage-model">Modelo: ${escapeHtml(model)} · <em>Confidence = concentração da distribuição, não probabilidade de acerto</em></div>`;
+  
+  container.innerHTML = html;
+}
+
+// --- Atribuição de analista ---
+async function incAssign(incidentId) {
+  if (!incidentId) return;
+  const btn = document.getElementById("inc-assignment-btn");
+  const input = document.getElementById("inc-assignment-input");
+  const statusEl = document.getElementById("inc-assignment-status");
+  
+  const analyst = input.value.trim() || null;
+  
+  btn.disabled = true;
+  btn.textContent = "⏳ A atribuir...";
+  statusEl.textContent = analyst ? `A atribuir a ${analyst}...` : "A desatribuir...";
+  
+  try {
+    await incRequest("PATCH", `/api/incidents/${encodeURIComponent(incidentId)}/assignment`, { analyst });
+    statusEl.textContent = analyst ? `✅ Atribuído a ${analyst}` : "✅ Desatribuído";
+    input.value = analyst || "";
+    await refreshIncidentsTab();
+    // Refresh detail to show updated assignment
+    selectIncident(incidentId);
+  } catch (err) {
+    statusEl.textContent = `❌ Falha: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✅ Atribuir";
+  }
+}

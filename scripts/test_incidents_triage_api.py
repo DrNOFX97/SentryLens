@@ -77,7 +77,8 @@ def run() -> None:
 
         before = client.get(f"/api/incidents/{inc_id}", headers=HEADERS).json()
         triage.return_value = {"ok": False, "error": "jev_unreachable"}
-        r = client.post(url, headers=HEADERS)
+        # Use force=1 to bypass cache and actually call JEV
+        r = client.post(f"{url}?force=1", headers=HEADERS)
         check("falha do JEV -> 502 com código estável", r.status_code == 502 and r.json()["detail"] == "jev_unreachable")
         after = client.get(f"/api/incidents/{inc_id}", headers=HEADERS).json()
         check("triagem nunca altera o incidente", before["status"] == after["status"] and before["timeline"] == after["timeline"])

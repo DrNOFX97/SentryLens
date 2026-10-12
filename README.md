@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/FASTAPI-0.115.0-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI 0.115.0">
   <img src="https://img.shields.io/badge/SQLITE-indice_de_historico-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
   <img src="https://img.shields.io/badge/WAZUH-integracao_SIEM-0B7D92?style=flat-square" alt="Integração com Wazuh">
+  <img src="https://img.shields.io/github/v/release/your-org/SentryLens?label=VM%20Release&style=flat-square&logo=virtualbox&logoColor=white" alt="VM Release">
 </p>
 
 O SentryLens liga-se a um laboratório [Wazuh](https://wazuh.com/) (SIEM open-source) e mostra, quase em tempo real, os alertas de segurança gerados pelos Windows Security Event Logs de uma máquina monitorizada. Cada evento aparece com nome legível, severidade e recomendação de ação, em vez de um Event ID numérico.
@@ -190,7 +191,41 @@ python model_registry.py train v1 --events <ficheiro.json> --dataset-origin real
 
 ## Início rápido
 
-### Pré-requisitos
+### Opção A: Usar VMs Pré-configuradas (Recomendado)
+
+A forma mais rápida de começar é usar as VMs já prontas com Wazuh e Kali pré-instalados:
+
+1. **Baixar as VMs** da [página de Releases](https://github.com/your-org/SentryLens/releases):
+   - `sentrylens-wazuh-manager-virtualbox.ova` — Wazuh Manager (Ubuntu 22.04 + Wazuh)
+   - `sentrylens-kali-attacker-virtualbox.ova` — Kali Attacker (opcional, para Red vs Blue)
+
+2. **Importar no VirtualBox**: File → Import Appliance → selecionar o `.ova`
+
+3. **Iniciar as VMs** e obter os IPs:
+   ```bash
+   # Dentro da VM Wazuh Manager
+   ip a
+   ```
+
+4. **Obter credenciais do Wazuh**:
+   ```bash
+   # Dentro da VM Wazuh Manager
+   wazuh-passwords
+   ```
+
+5. **Configurar o backend** (ver abaixo) com o IP da VM e as credenciais obtidas.
+
+> **Nota**: As VMs Hyper-V (`.vhdx`) também estão disponíveis para quem usa Hyper-V em vez de VirtualBox.
+
+Ver detalhes completos em [`packer/README.md`](packer/README.md).
+
+---
+
+### Opção B: Instalação Manual
+
+Se preferires montar o laboratório do zero:
+
+#### Pré-requisitos
 
 - Python 3.12 ou superior.
 - Um laboratório Wazuh acessível por rede: uma VM Ubuntu Server 22.04 com Wazuh instalado, em VirtualBox ou Hyper-V. O guia [`docs/LAB_WAZUH_HYPERV.md`](docs/LAB_WAZUH_HYPERV.md) descreve a montagem passo a passo.
