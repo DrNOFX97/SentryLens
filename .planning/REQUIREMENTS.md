@@ -21,11 +21,11 @@ Uma *vaccine* é uma regra de deteção **proposta** a partir de um ataque não 
 
 ### Dashboard
 
-- [ ] **VAC-07**: A aba "Vaccines" (`vaccines.js`, sem editar `app.js`, servido pelo `serve_frontend.py`) lista as vaccines com filtros e detalhe, e mostra "Sem dados" quando não há amostra.
+- [x] **VAC-07**: A aba "Vaccines" (`vaccines.js`, sem editar `app.js`, servido pelo `serve_frontend.py`) lista as vaccines com filtros e detalhe, e mostra "Sem dados" quando não há amostra.
 
 ### Qualidade
 
-- [ ] **VAC-08**: Testes standalone sem o Wazuh cobrem motor, store e rotas, a suite `run_all_tests.py` continua verde, e `DATA_MODEL.md`, `ROADMAP_STATUS.md`, `README.md` e `CLAUDE.md` refletem o R11.
+- [x] **VAC-08**: Testes standalone sem o Wazuh cobrem motor, store e rotas, a suite `run_all_tests.py` continua verde, e `DATA_MODEL.md`, `ROADMAP_STATUS.md`, `README.md` e `CLAUDE.md` refletem o R11.
 
 ## Future Requirements
 
@@ -56,8 +56,8 @@ Preenchido na criação do roadmap (2026-10-11).
 | VAC-04 | Phase 12 | Complete |
 | VAC-05 | Phase 13 | Complete |
 | VAC-06 | Phase 13 | Complete |
-| VAC-07 | Phase 14 | Pending |
-| VAC-08 | Phase 14 | Pending |
+| VAC-07 | Phase 14 | Complete |
+| VAC-08 | Phase 14 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 8 total

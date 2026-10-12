@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: R11 Vaccine Engine
 current_phase: 14
 current_phase_name: Aba Vaccines, testes e documentação
-status: executing
-stopped_at: Completed 14-03-PLAN.md
-last_updated: "2026-10-12T10:01:43.086Z"
+status: verifying
+stopped_at: Completed 14-04-PLAN.md
+last_updated: "2026-10-12T10:13:02.477Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 14 execution started
-state_head: 802b8fb862177c1d121ae03e17cfb0b5c90513db
+state_head: 6f2671eee883590c36a2a5a617c4a2c8277a6ed6
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 10
-  completed_plans: 9
+  completed_plans: 10
   percent: 67
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-11)
 
 Phase: 14 (Aba Vaccines, testes e documentação) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-12 — Phase 14 execution started
 
 Progress: [███████░░░] 67%
@@ -63,6 +63,7 @@ Progress: [███████░░░] 67%
 | Phase 14 P01 | 20min | 2 tasks | 5 files |
 | Phase 14 P02 | 25min | 2 tasks | 4 files |
 | Phase 14 P03 | 8 min | 2 tasks | 4 files |
+| Phase 14 P04 | 25 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,7 @@ Recent decisions affecting current work:
 - [Phase 14]: 14-01: Approved passa a planeado R14 (D-01 literal); guarda de interpolacao so aceita helper vac*( chamado, nunca identificador cru como vaccine
 - [Phase 14]: 14-02: select de tecnica por uniao das tecnicas vistas na sessao; re-pedido unico quando os filtros mudam a meio
 - [Phase 14]: 14-03: cadeia (Substitui) calculada no cliente por um GET attack_id + include_superseded; falha mostra 'Cadeia indisponível', nunca 'não substitui nenhuma'
+- [Phase 14]: 14-04: contagens de documentação medidas no momento (45 testes, 26 abas), nunca copiadas do plano; evidência da suite = uma única execução completa com código 0
 
 ### Pending Todos
 
@@ -107,8 +109,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-12T10:01:43.000Z
-Stopped at: Completed 14-03-PLAN.md
+Last session: 2026-10-12T10:13:02.395Z
+Stopped at: Completed 14-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
