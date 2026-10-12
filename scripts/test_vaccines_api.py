@@ -322,10 +322,112 @@ def run_history() -> None:
         tmp.cleanup()
 
 
+def snapshot_store(store: VaccineStore, path: str) -> tuple:
+    """Estado completo do store lido diretamente (não pela rota): linhas com payload,
+    superseded_by e state, mais um SELECT COUNT(*) ao ficheiro."""
+    rows, total, store_total = store.list_vaccines(include_superseded=True, limit=500)
+    return json.dumps(rows, sort_keys=True), total, store_total, count_rows(path)
+
+
+def run_guarantees() -> None:
+    """D-09/D-10: sem rota de escrita, API key em cada rota, estado sempre proposed,
+    503 estável sem fuga de texto de exceção nem de caminho, 422/401."""
+    original_load, original_build = main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report
+    original_indexer = main.indexer_client.get_recent_alerts
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        log_path, vaccines_path = wire(tmp.name)
+        incident_ingest.ingest_raw_alerts(main.incident_store, [raw_alert("a3", 970, 4672)], log_path, SCENARIOS)
+        set_ml(ML_RESULTS)
+        asyncio.run(main._run_vaccine_cycle())
+        set_ml(ML_RESULTS[:1])
+        asyncio.run(main._run_vaccine_cycle())
+        real_store = main.vaccine_store
+        check("garantias: o store de partida tem 3 linhas (uma substituída)", count_rows(vaccines_path) == 3)
+
+        # --- D-10: nenhum método de escrita ---
+        before = snapshot_store(real_store, vaccines_path)
+        for path in ("/api/vaccines", "/api/vaccines/vac-5fe3861aa2a3"):
+            for method in ("POST", "PUT", "PATCH", "DELETE"):
+                r = client.request(method, path, headers=HEADERS, json={"state": "applied"})
+                check(f"{method} {path} com chave -> 405", r.status_code == 405)
+                r = client.request(method, path, json={"state": "applied"})
+                check(f"{method} {path} sem chave -> 405 ou 401, nunca 2xx", r.status_code in (405, 401))
+        check("depois das tentativas de escrita o store está igual (ids, payloads, superseded_by, state, linhas)",
+              snapshot_store(real_store, vaccines_path) == before)
+
+        # --- D-10: só duas rotas, só GET, API key na própria rota ---
+        vaccine_routes = [r for r in main.app.routes if getattr(r, "path", "").startswith("/api/vaccines")]
+        check("main.app.routes tem exatamente as rotas /api/vaccines e /api/vaccines/{vaccine_id}",
+              sorted(r.path for r in vaccine_routes) == ["/api/vaccines", "/api/vaccines/{vaccine_id}"])
+        check("ambas as rotas só aceitam GET/HEAD",
+              all(r.methods <= {"GET", "HEAD"} and "GET" in r.methods for r in vaccine_routes))
+        check("ambas têm require_api_key nas dependencies da própria rota",
+              all(any(getattr(d, "dependency", None) is main.require_api_key for d in r.dependencies)
+                  for r in vaccine_routes))
+
+        # --- estado servido é sempre proposed ---
+        r = client.get("/api/vaccines?include_superseded=true&limit=500", headers=HEADERS)
+        served = r.json()["vaccines"]
+        check("todas as vaccines servidas (incl. substituídas) têm state proposed",
+              len(served) == 3 and all(v["state"] == "proposed" for v in served))
+
+        # --- 401 com filtros ---
+        for path in ("/api/vaccines?attack_id=3&include_superseded=true", "/api/vaccines/vac-5fe3861aa2a3"):
+            check(f"GET {path} sem chave -> 401", client.get(path).status_code == 401)
+            check(f"GET {path} com chave errada -> 401",
+                  client.get(path, headers={"X-API-Key": "errada"}).status_code == 401)
+
+        # --- 422 no detalhe ---
+        for bad in ("abc", "vac-XYZ", "vac-0123456789ab0", "VAC-0123456789ab", "vac-0123456789AB"):
+            r = client.get(f"/api/vaccines/{bad}", headers=HEADERS)
+            check(f"detalhe com id malformado ({bad}) -> 422", r.status_code == 422)
+        r = client.get("/api/vaccines/vac-0123456789ab/x", headers=HEADERS)
+        check("detalhe com sub-caminho -> 404 (não chega à rota)", r.status_code == 404)
+        check("id malformado sem chave -> 401 (a chave é verificada primeiro)",
+              client.get("/api/vaccines/abc").status_code == 401)
+
+        # --- 503 estável com store mockado ---
+        for exc in (sqlite3.OperationalError("db partida C:\\segredo\\vaccines.sqlite3"),
+                    ValueError("payload corrompido C:\\segredo")):
+            broken = MagicMock()
+            broken.list_vaccines.side_effect = exc
+            broken.get_vaccine.side_effect = exc
+            main.vaccine_store = broken
+            for path in ("/api/vaccines", "/api/vaccines/vac-5fe3861aa2a3"):
+                r = client.get(path, headers=HEADERS)
+                leaked = [w for w in ("db partida", "payload corrompido", "segredo", ".sqlite3", "Traceback")
+                          if w in r.text]
+                check(f"{type(exc).__name__}: {path} -> 503 {{'detail': 'store_unavailable'}} sem fuga",
+                      r.status_code == 503 and r.json() == {"detail": "store_unavailable"} and leaked == [])
+        main.vaccine_store = real_store
+
+        # --- 503 real: ficheiro que não é SQLite ---
+        bad_path = os.path.join(tmp.name, "nao_e_sqlite.sqlite3")
+        with open(bad_path, "wb") as handle:
+            handle.write(b"isto nao e sqlite" * 100)
+        main.vaccine_store = VaccineStore(bad_path)
+        for path in ("/api/vaccines", "/api/vaccines/vac-5fe3861aa2a3"):
+            r = client.get(path, headers=HEADERS)
+            check(f"ficheiro não-SQLite: {path} -> 503 store_unavailable sem caminho nem .sqlite3",
+                  r.status_code == 503 and r.json() == {"detail": "store_unavailable"}
+                  and ".sqlite3" not in r.text and tmp.name not in r.text and "nao_e_sqlite" not in r.text)
+        main.vaccine_store = real_store
+        check("o store real continua a servir depois dos casos de erro",
+              client.get("/api/vaccines", headers=HEADERS).status_code == 200)
+    finally:
+        main.vaccine_store = real_store if "real_store" in locals() else main.vaccine_store
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = original_load, original_build
+        main.indexer_client.get_recent_alerts = original_indexer
+        tmp.cleanup()
+
+
 if __name__ == "__main__":
     run_tracer()
     print()
     run_history()
+    print()
+    run_guarantees()
     print()
     if failures:
         print(f"{len(failures)} verificação(ões) falharam:")
