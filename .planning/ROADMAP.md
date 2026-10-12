@@ -116,14 +116,14 @@ Plans:
   3. `python run_all_tests.py` termina verde sem o Wazuh ligado, com testes standalone novos para motor, store e rotas, incluindo as garantias negativas (sem rota de escrita, sem comando executável, sem texto de exceção, sem duplicados após reprocessar ou reiniciar).
   4. `docs/DATA_MODEL.md` define a entidade Vaccine, `docs/ROADMAP_STATUS.md` marca o R11 como concluído (✅) e `README.md` e `CLAUDE.md` descrevem o motor, o store e a rota.
 
-**Plans:** 1/4 plans executed
+**Plans:** 2/4 plans executed
 
 Plans:
 **Wave 1**
 - [x] 14-01-PLAN.md — Tracer: Candidates abre a aba Vaccines (vaccines.js servido pelo serve_frontend.py, sem editar app.js) que lista GET /api/vaccines lendo só campos da resposta real; guardas do contrato estático (escape, erros só por código, "Sem dados" honesto, sem polling, app.js intacto) (VAC-07, VAC-08)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 14-02-PLAN.md — Tracer: filtros (ataque, técnica, substituídas) e Atualizar enviados ao servidor; linha de estado do gerador, badges de veredito e substituídas esbatidas (VAC-07, VAC-08)
+- [x] 14-02-PLAN.md — Tracer: filtros (ataque, técnica, substituídas) e Atualizar enviados ao servidor; linha de estado do gerador, badges de veredito e substituídas esbatidas (VAC-07, VAC-08)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 14-03-PLAN.md — Tracer: clicar numa vaccine abre o detalhe com Origem, Propostas e o aviso "Proposta — não aplicada no Wazuh"; Cadeia substituída por / substitui, sem links (VAC-07, VAC-08)
@@ -144,4 +144,4 @@ Phases execute in numeric order: 12 → 13 → 14
 |-------|-----------|----------------|--------|-----------|
 | 12. Motor de vaccines | v1.1 | 3/3 | Complete    | 2026-10-12 |
 | 13. Store e API de leitura | v1.1 | 3/3 | Complete    | 2026-10-12 |
-| 14. Aba Vaccines, testes e documentação | v1.1 | 1/4 | In Progress|  |
+| 14. Aba Vaccines, testes e documentação | v1.1 | 2/4 | In Progress|  |

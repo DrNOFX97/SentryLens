@@ -5,16 +5,16 @@ milestone_name: R11 Vaccine Engine
 current_phase: 14
 current_phase_name: Aba Vaccines, testes e documentação
 status: executing
-stopped_at: Completed 14-01-PLAN.md
-last_updated: "2026-10-12T09:46:08.490Z"
+stopped_at: Completed 14-02-PLAN.md
+last_updated: "2026-10-12T09:55:17.800Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 14 execution started
-state_head: 382cb2df626d68907d874639e461f1b2a6d4558f
+state_head: d7c102d40b0df59e11769c67150ec17f6ec1945f
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 10
-  completed_plans: 7
+  completed_plans: 8
   percent: 67
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-11)
 ## Current Position
 
 Phase: 14 (Aba Vaccines, testes e documentação) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 14 execution started
 
@@ -61,6 +61,7 @@ Progress: [███████░░░] 67%
 | Phase 13 P02 | 12min | 2 tasks | 4 files |
 | Phase 13 P03 | 10min | 2 tasks | 2 files |
 | Phase 14 P01 | 20min | 2 tasks | 5 files |
+| Phase 14 P02 | 25min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,7 @@ Recent decisions affecting current work:
 - [Phase 13]: 13-02: em erro alerts_truncated fica None (ciclo falhado nao mediu); A3 e A5 mantidas
 - [Phase 13]: 13-03: filtro sem resultados com store nao vazio da 200 com reason null; reason no_data so com store sem linhas (D-09)
 - [Phase 14]: 14-01: Approved passa a planeado R14 (D-01 literal); guarda de interpolacao so aceita helper vac*( chamado, nunca identificador cru como vaccine
+- [Phase 14]: 14-02: select de tecnica por uniao das tecnicas vistas na sessao; re-pedido unico quando os filtros mudam a meio
 
 ### Pending Todos
 
@@ -103,8 +105,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-12T09:46:08.402Z
-Stopped at: Completed 14-01-PLAN.md
+Last session: 2026-10-12T09:55:16.964Z
+Stopped at: Completed 14-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
