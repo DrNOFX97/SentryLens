@@ -90,11 +90,11 @@ Plans:
   3. Não existe rota de escrita em `/api/vaccines`: um POST/PUT/PATCH/DELETE a qualquer das duas rotas não altera nada, e o estado só pode ser `proposed`.
   4. Falhas de leitura (Indexer indisponível, store ilegível) chegam como códigos estáveis, nunca como texto de exceção, traceback ou caminho de ficheiro; cada rota tem a API key aplicada individualmente.
 
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 13-01-PLAN.md — Tracer: ciclo do backend (attack log -> registo -> motor -> validate_vaccine) grava vaccines assentes no SQLite (`proposed`, sem duplicados, sobrevive a reinício) e GET /api/vaccines[/{id}] com API key; fix de list_incidents por nome; store endurecido com superseded_by (VAC-05, VAC-06)
+- [x] 13-01-PLAN.md — Tracer: ciclo do backend (attack log -> registo -> motor -> validate_vaccine) grava vaccines assentes no SQLite (`proposed`, sem duplicados, sobrevive a reinício) e GET /api/vaccines[/{id}] com API key; fix de list_incidents por nome; store endurecido com superseded_by (VAC-05, VAC-06)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 13-02-PLAN.md — Loop de background no arranque com cadência configurável, estado do gerador com códigos estáveis em GET /api/vaccines (`generator`), matriz de falhas, truncagem e janela/estabilização (VAC-05, VAC-06)
@@ -129,5 +129,5 @@ Phases execute in numeric order: 12 → 13 → 14
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 12. Motor de vaccines | v1.1 | 3/3 | Complete    | 2026-10-12 |
-| 13. Store e API de leitura | v1.1 | 0/3 | Not started | - |
+| 13. Store e API de leitura | v1.1 | 1/3 | In Progress|  |
 | 14. Aba Vaccines, testes e documentação | v1.1 | 0/TBD | Not started | - |

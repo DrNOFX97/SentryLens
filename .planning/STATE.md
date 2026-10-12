@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.1
 milestone_name: R11 Vaccine Engine
 current_phase: 13
-current_phase_name: store-e-api-de-leitura
+current_phase_name: Store e API de leitura
 status: executing
-stopped_at: Phase 13 context gathered
-last_updated: "2026-10-12T02:21:07.509Z"
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-10-12T07:52:55.791Z"
 last_activity: 2026-10-12
-last_activity_desc: Phase 12 complete, transitioned to Phase 13
-state_head: 8341ed6f6cb30f376595071266abd980f56ca729
+last_activity_desc: Phase 13 execution started
+state_head: f8d03af8152bd2d06ef2bf38dd517364d66f46c3
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 6
-  completed_plans: 3
+  completed_plans: 4
   percent: 33
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-11)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** Phase 12 — Motor de vaccines
+**Current focus:** Phase 13 — Store e API de leitura
 
 ## Current Position
 
-Phase: 13 (store-e-api-de-leitura) — READY TO EXECUTE
-Plan: Not started
+Phase: 13 (Store e API de leitura) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-10-12 — Phase 12 complete, transitioned to Phase 13
+Last activity: 2026-10-12 — Phase 13 execution started
 
 Progress: [███░░░░░░░] 33%
 
@@ -56,6 +56,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 12 P01 | 4 min | 2 tasks | 2 files |
 | Phase 12 P02 | 5 min | 2 tasks | 2 files |
 | Phase 12 P03 | 6 min | 2 tasks | 2 files |
+| Phase 13 P01 | 7min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,9 @@ Recent decisions affecting current work:
 - [Phase 12]: D-07 refinado: uma vaccine por ataque com proposals[] por sensor em falta; so a proposta rule traz regra {event_ids,min_count=1,window_seconds=300}
 - [Phase 12]: 12-02: regex da origem com fullmatch; correlation sem available=True e source_unavailable (fail-closed); considered/skipped/alerts_truncated None quando nada foi medido
 - [Phase 12]: 12-03: id do attack log = int 1..999_999_999, max+1 sobre ids validos de qualquer status (nunca contagem+1); AttackIdUnavailable fail-closed antes de lancar e de escrever; sem backfill
+- [Phase 13]: A1: INSERT ... ON CONFLICT(id) DO NOTHING em vez de INSERT OR IGNORE (emenda a D-04, provada por teste)
+- [Phase 13]: A2: vaccines so gravadas para ataques mais velhos que SENTRYLENS_VACCINE_SETTLE_SECONDS (omissao 600)
+- [Phase 13]: GET /api/vaccines abre o SQLite so-leitura e nunca cria o ficheiro (no_data com store inexistente)
 
 ### Pending Todos
 
@@ -92,9 +96,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-11T23:27:45.726Z
-Stopped at: Phase 13 context gathered
-Resume file: .planning/phases/13-store-e-api-de-leitura/13-CONTEXT.md
+Last session: 2026-10-12T07:52:55.731Z
+Stopped at: Completed 13-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

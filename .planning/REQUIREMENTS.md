@@ -16,8 +16,8 @@ Uma *vaccine* é uma regra de deteção **proposta** a partir de um ataque não 
 
 ### Persistência e API
 
-- [ ] **VAC-05**: As vaccines persistem num store escrito só pelo backend, com estado fixo `proposed`; reiniciar o backend não as perde nem as duplica.
-- [ ] **VAC-06**: `GET /api/vaccines` e `GET /api/vaccines/{id}` (só leitura, API key por rota) devolvem a lista e o detalhe; id inexistente dá 404 com código estável `entry_not_found`; erros nunca expõem texto de exceção nem caminhos.
+- [x] **VAC-05**: As vaccines persistem num store escrito só pelo backend, com estado fixo `proposed`; reiniciar o backend não as perde nem as duplica.
+- [x] **VAC-06**: `GET /api/vaccines` e `GET /api/vaccines/{id}` (só leitura, API key por rota) devolvem a lista e o detalhe; id inexistente dá 404 com código estável `entry_not_found`; erros nunca expõem texto de exceção nem caminhos.
 
 ### Dashboard
 
@@ -54,8 +54,8 @@ Preenchido na criação do roadmap (2026-10-11).
 | VAC-02 | Phase 12 | Complete |
 | VAC-03 | Phase 12 | Complete |
 | VAC-04 | Phase 12 | Complete |
-| VAC-05 | Phase 13 | Pending |
-| VAC-06 | Phase 13 | Pending |
+| VAC-05 | Phase 13 | Complete |
+| VAC-06 | Phase 13 | Complete |
 | VAC-07 | Phase 14 | Pending |
 | VAC-08 | Phase 14 | Pending |
 
