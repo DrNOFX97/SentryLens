@@ -20,6 +20,7 @@ Persistir as vaccines geradas pelo motor da Fase 12 num store SQLite escrito só
 
 ### Tecnologia do store
 - **D-04:** SQLite, módulo novo estilo `incident_store.py` (uma ligação por operação, `RLock`). `PRIMARY KEY` no id e `INSERT OR IGNORE` garantem "sem duplicados"; `CHECK (state = 'proposed')` (e/ou trigger) impede qualquer outro estado. — **Reversibility:** costly — o formato do ficheiro e do id é a chave de `/api/vaccines/{id}` e da aba da Fase 14.
+  - **Emenda aprovada (2026-10-12, plan-phase):** `INSERT OR IGNORE` substituído por `INSERT ... ON CONFLICT(id) DO NOTHING` — mesma garantia de não duplicar, mas uma violação do `CHECK (state = 'proposed')` levanta `IntegrityError` em vez de ser engolida.
 - **D-05:** Ficheiro `scripts/vaccines.sqlite3`, gitignored, caminho sobrescrevível por variável `SENTRYLENS_*`, sempre resolvido relativamente ao ficheiro do módulo e nunca ao cwd.
 
 ### Id que evolui
