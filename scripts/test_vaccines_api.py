@@ -223,8 +223,109 @@ def run_tracer() -> None:
         tmp.cleanup()
 
 
+def set_ml(results: list) -> None:
+    main.ml_anomalies.build_ml_anomalies_report = lambda alerts, model, scaler: {"results": results}
+
+
+def ids_of(path: str) -> list[str]:
+    return [v["id"] for v in client.get(path, headers=HEADERS).json()["vaccines"]]
+
+
+def run_history() -> None:
+    """D-06/D-07/D-08 por HTTP, sobre ciclos reais com resultados ML trocados entre ciclos."""
+    original_load, original_build = main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report
+    original_indexer = main.indexer_client.get_recent_alerts
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        log_path, vaccines_path = wire(tmp.name)
+        incident_ingest.ingest_raw_alerts(main.incident_store, [raw_alert("a3", 970, 4672)], log_path, SCENARIOS)
+
+        # --- ML completo: ataque 3 partial ---
+        set_ml(ML_RESULTS)
+        asyncio.run(main._run_vaccine_cycle())
+        check("historico: ML completo -> lista por omissão [vac-bd617cce8054, vac-5fe3861aa2a3]",
+              ids_of("/api/vaccines") == ["vac-bd617cce8054", "vac-5fe3861aa2a3"])
+
+        # --- D-06: o ataque 3 passa a not_detected ---
+        set_ml(ML_RESULTS[:1])
+        result = asyncio.run(main._run_vaccine_cycle())
+        check("D-06: ciclo sem a linha do ataque 3 -> inserted 1 e existing 1",
+              result["counts"]["inserted"] == 1 and result["counts"]["existing"] == 1)
+        r = client.get("/api/vaccines", headers=HEADERS)
+        check("D-06: por omissão só a atual do ataque 3 (vac-3eb8018acb1c) + a do ataque 2, total 2",
+              [v["id"] for v in r.json()["vaccines"]] == ["vac-3eb8018acb1c", "vac-5fe3861aa2a3"]
+              and r.json()["total"] == 2)
+        r = client.get("/api/vaccines?include_superseded=true", headers=HEADERS)
+        body = r.json()
+        by_id = {v["id"]: v for v in body["vaccines"]}
+        check("D-06: include_superseded=true -> 3 vaccines, as do ataque 3 antes da do ataque 2, total 3",
+              r.status_code == 200 and body["total"] == 3
+              and [v["id"] for v in body["vaccines"]][2] == "vac-5fe3861aa2a3"
+              and {v["id"] for v in body["vaccines"][:2]} == {"vac-bd617cce8054", "vac-3eb8018acb1c"})
+        check("D-06: vac-bd617cce8054 tem superseded_by vac-3eb8018acb1c e state proposed",
+              by_id["vac-bd617cce8054"]["superseded_by"] == "vac-3eb8018acb1c"
+              and by_id["vac-bd617cce8054"]["state"] == "proposed")
+        r = client.get("/api/vaccines/vac-bd617cce8054", headers=HEADERS)
+        check("D-06: o detalhe da substituída continua a dar 200 com superseded_by",
+              r.status_code == 200 and r.json()["vaccine"]["superseded_by"] == "vac-3eb8018acb1c")
+
+        # --- filtros (D-08) ---
+        check("filtro attack_id=3 -> só vac-3eb8018acb1c", ids_of("/api/vaccines?attack_id=3") == ["vac-3eb8018acb1c"])
+        r = client.get("/api/vaccines?attack_id=3&include_superseded=true", headers=HEADERS)
+        check("filtro attack_id=3&include_superseded=true -> 2 vaccines do ataque 3",
+              r.json()["total"] == 2 and all(v["origin"]["attack_id"] == 3 for v in r.json()["vaccines"]))
+        check("filtro technique=T1087 -> só vac-5fe3861aa2a3", ids_of("/api/vaccines?technique=T1087") == ["vac-5fe3861aa2a3"])
+        r = client.get("/api/vaccines?technique=T1053&include_superseded=true", headers=HEADERS)
+        check("filtro technique=T1053&include_superseded=true -> total 2", r.json()["total"] == 2)
+        r = client.get("/api/vaccines?attack_id=999", headers=HEADERS)
+        body = r.json()
+        check("filtro sem resultados (store não vazio) -> 200, vaccines [], total 0, reason None, available True",
+              r.status_code == 200 and body["vaccines"] == [] and body["total"] == 0
+              and body["reason"] is None and body["available"] is True)
+        r = client.get("/api/vaccines?attack_id=3&limit=1&offset=0&include_superseded=true", headers=HEADERS)
+        check("o total conta com os mesmos filtros (limit=1 mas total 2)",
+              len(r.json()["vaccines"]) == 1 and r.json()["total"] == 2)
+
+        # --- vaivém: o ataque 3 volta a partial ---
+        set_ml(ML_RESULTS)
+        asyncio.run(main._run_vaccine_cycle())
+        check("vaivém: a atual do ataque 3 volta a ser vac-bd617cce8054",
+              ids_of("/api/vaccines") == ["vac-bd617cce8054", "vac-5fe3861aa2a3"])
+        r = client.get("/api/vaccines?include_superseded=true", headers=HEADERS)
+        by_id = {v["id"]: v for v in r.json()["vaccines"]}
+        check("vaivém: vac-3eb8018acb1c com superseded_by vac-bd617cce8054 e include_superseded continua com 3",
+              r.json()["total"] == 3 and by_id["vac-3eb8018acb1c"]["superseded_by"] == "vac-bd617cce8054"
+              and by_id["vac-bd617cce8054"]["superseded_by"] is None)
+
+        # --- D-07: o ataque 2 passa a detected, a vaccine fica ---
+        before = client.get("/api/vaccines/vac-5fe3861aa2a3", headers=HEADERS).json()["vaccine"]
+        set_ml(ML_RESULTS + [ml_row(1980, 5140, True, True)])
+        asyncio.run(main._run_vaccine_cycle())
+        listed = {v["id"]: v for v in client.get("/api/vaccines", headers=HEADERS).json()["vaccines"]}
+        check("D-07: ataque 2 detected -> vac-5fe3861aa2a3 continua na lista por omissão",
+              "vac-5fe3861aa2a3" in listed)
+        after = listed["vac-5fe3861aa2a3"]
+        check("D-07: igual byte a byte, superseded_by None e state proposed",
+              json.dumps(after, sort_keys=True) == json.dumps(before, sort_keys=True)
+              and after["superseded_by"] is None and after["state"] == "proposed")
+        check("D-07: include_superseded=true continua com 3",
+              client.get("/api/vaccines?include_superseded=true", headers=HEADERS).json()["total"] == 3)
+
+        # --- 422 nos filtros ---
+        for bad in ("attack_id=0", "attack_id=abc", "attack_id=1000000000", "technique=T11", "technique=t1110",
+                    "technique=../../etc", "include_superseded=talvez"):
+            check(f"filtro inválido ({bad}) -> 422",
+                  client.get(f"/api/vaccines?{bad}", headers=HEADERS).status_code == 422)
+    finally:
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = original_load, original_build
+        main.indexer_client.get_recent_alerts = original_indexer
+        tmp.cleanup()
+
+
 if __name__ == "__main__":
     run_tracer()
+    print()
+    run_history()
     print()
     if failures:
         print(f"{len(failures)} verificação(ões) falharam:")

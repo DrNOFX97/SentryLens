@@ -1701,14 +1701,24 @@ async def _start_vaccine_loop() -> None:
 
 @app.get("/api/vaccines", dependencies=_REQUIRE_API_KEY)
 async def list_vaccines(
+    attack_id: int | None = Query(None, ge=1, le=999_999_999, description="Só as vaccines deste ataque"),
+    technique: str | None = Query(None, pattern=r"^T\d{4}(\.\d{3})?$", description="Técnica MITRE, ex. T1110"),
+    include_superseded: bool = Query(False, description="Incluir as vaccines já substituídas por uma mais recente do mesmo ataque"),
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     """Vaccines propostas, das mais recentes (attack_id mais alto) para as mais
-    antigas. Só leitura. 200 com `no_data` se o store está vazio; 503 estável
-    se não for possível lê-lo."""
+    antigas. Só leitura. Filtros: `attack_id`, `technique` (MITRE) e
+    `include_superseded`. Por omissão só aparece a vaccine atual de cada ataque:
+    quando o veredito muda, a anterior fica com `superseded_by` e só aparece com
+    `include_superseded=true` (o detalhe devolve-a sempre). `total` conta com
+    os mesmos filtros. 200 com `no_data` só se o store não tem linhas (um filtro
+    sem resultados dá `reason` null); 503 estável se não for possível lê-lo."""
     try:
-        rows, total, store_total = await run_in_threadpool(vaccine_store.list_vaccines, limit=limit, offset=offset)
+        rows, total, store_total = await run_in_threadpool(
+            vaccine_store.list_vaccines,
+            attack_id=attack_id, technique=technique, include_superseded=include_superseded,
+            limit=limit, offset=offset)
     except (sqlite3.Error, ValueError):
         logger.exception("Vaccines: store ilegível")
         raise HTTPException(status_code=503, detail="store_unavailable")
