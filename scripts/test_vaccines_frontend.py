@@ -660,12 +660,54 @@ def run_detail() -> None:
         check(f"style.css servido define .{classe}", re.search(r"\." + re.escape(classe) + r"\s*\{", css) is not None)
 
 
+def run_chain() -> None:
+    files = served()
+    js = files["/vaccines.js"][2]
+
+    # a) vacLoadChain: um segundo pedido só de leitura, por ataque
+    corpo = function_body(js, "vacLoadChain")
+    check("vacLoadChain pede attack_id, include_superseded e limit por vacRequest(",
+          all(x in corpo for x in ("include_superseded", "attack_id", "limit", "vacRequest(")))
+    check("vacLoadChain ignora respostas fora de ordem (seq !== vacSelectSeq, 2 vezes: resposta e erro)",
+          corpo.count("seq !== vacSelectSeq") >= 2)
+    check("vacSelect chama vacLoadChain", "vacLoadChain(" in function_body(js, "vacSelect"))
+    check("vacReplacedIds lê superseded_by", "superseded_by" in function_body(js, "vacReplacedIds"))
+
+    # b) textos da cadeia; o erro nunca afirma que não substitui nada
+    check("vaccines.js tem Substitui, Substituída por, Atual e Cadeia indisponível",
+          all(x in js for x in ("Substitui", "Substituída por", "Atual", "Cadeia indisponível")))
+    check('"Cadeia indisponível" aparece só dentro de vacLoadChain, junto de vacErrorText(',
+          js.count("Cadeia indisponível") == corpo.count("Cadeia indisponível") >= 1 and "vacErrorText(" in corpo)
+    check("a frase 'Não substitui nenhuma' fica fora de vacLoadChain (um erro nunca a desenha)",
+          "Não substitui nenhuma" in function_body(js, "vacChainHtml") and "Não substitui nenhuma" not in corpo)
+
+    # c) D-07: só texto, sem navegação
+    check("vaccines.js não tem links nem navegação (<a, href, activateTab(, location.hash)",
+          not any(x in js for x in ("<a", "href", "activateTab(", "location.hash")))
+    check("a linha selecionada sobrevive a um Atualizar (vacRowClass lê vacSelectedId)",
+          "vacSelectedId" in function_body(js, "vacRowClass"))
+
+    # d) rota real: o "Substitui" é derivável das vaccines do mesmo ataque
+    caminhos = ("/api/vaccines?attack_id=2&include_superseded=true", "/api/vaccines?attack_id=3&include_superseded=true")
+    _, respostas = real_api_keys(caminhos)
+    estado, dois = respostas["extra"][caminhos[0]]
+    check("rota real: attack_id=2&include_superseded=true -> B e A",
+          estado == 200 and [v["id"] for v in dois["vaccines"]] == [ID_B, ID_A])
+    a = next((v for v in dois["vaccines"] if v["id"] == ID_A), {})
+    check("rota real: A tem superseded_by = B (o 'Substitui A' de B é derivável)", a.get("superseded_by") == ID_B)
+    estado, tres = respostas["extra"][caminhos[1]]
+    check("rota real: attack_id=3&include_superseded=true -> só C, sem superseded_by",
+          estado == 200 and [v["id"] for v in tres["vaccines"]] == [ID_C]
+          and tres["vaccines"][0]["superseded_by"] is None)
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
     run_filters()
     run_states()
     run_detail()
+    run_chain()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:

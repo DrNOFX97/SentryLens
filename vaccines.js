@@ -368,9 +368,46 @@ function vacProposalsHtml(vaccine) {
   </div>`).join("");
 }
 
-function vacChainHtml(vaccine) {
-  if (vaccine.superseded_by) return "<p>Substituída por <strong>" + vacCell(vaccine.superseded_by) + "</strong></p>";
-  return "<p>Atual — é a proposta em vigor para este ataque.</p>";
+// O que a própria vaccine já diz da cadeia, em texto simples.
+function vacChainLead(vaccine) {
+  if (vaccine.superseded_by) return "Substituída por " + vaccine.superseded_by + ".";
+  return "Atual — é a proposta em vigor para este ataque.";
+}
+
+// replacedIds é a lista calculada a partir do segundo pedido; sem ela (ainda
+// por chegar) só se desenha a linha que a própria vaccine permite afirmar.
+function vacChainHtml(vaccine, replacedIds) {
+  let html = "<p>" + vacCell(vacChainLead(vaccine)) + "</p>";
+  if (Array.isArray(replacedIds)) {
+    html += replacedIds.length
+      ? "<p>Substitui: " + vacCell(replacedIds.join(", ")) + "</p>"
+      : "<p>Não substitui nenhuma vaccine anterior deste ataque.</p>";
+  }
+  return html;
+}
+
+// Ids (por ordem) das vaccines da lista que esta vaccine substituiu.
+function vacReplacedIds(vaccines, id) {
+  return vaccines.filter((vaccine) => vaccine.superseded_by === id).map((vaccine) => vaccine.id);
+}
+
+// Segundo pedido de leitura: as vaccines do mesmo ataque, incluindo as
+// substituídas. Um erro nunca se apresenta como "não substitui nenhuma".
+async function vacLoadChain(vaccine, seq) {
+  const chain = document.getElementById("vac-detail-chain");
+  chain.textContent = "A carregar a cadeia…";
+  const params = new URLSearchParams();
+  params.set("attack_id", String(vaccine.origin.attack_id));
+  params.set("include_superseded", "true");
+  params.set("limit", "500");
+  try {
+    const envelope = await vacRequest("/api/vaccines?" + params.toString());
+    if (seq !== vacSelectSeq) return;
+    chain.innerHTML = vacChainHtml(vaccine, vacReplacedIds(envelope.vaccines || [], vaccine.id));
+  } catch (err) {
+    if (seq !== vacSelectSeq) return;
+    chain.textContent = vacChainLead(vaccine) + " Cadeia indisponível: " + vacErrorText(err.message);
+  }
 }
 
 function vacRenderDetail(vaccine) {
@@ -401,6 +438,7 @@ async function vacSelect(id) {
     if (seq !== vacSelectSeq) return;
     renderPanelError("#vaccine-detail-panel", "");
     vacRenderDetail(envelope.vaccine);
+    vacLoadChain(envelope.vaccine, seq);
   } catch (err) {
     if (seq !== vacSelectSeq) return;
     vacRenderDetailError(err.message);
