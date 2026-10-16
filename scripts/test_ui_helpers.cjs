@@ -1,0 +1,51 @@
+"use strict";
+// Teste Node dos helpers puros de ui_helpers.js. Carrega o ficheiro REAL num
+// contexto node:vm sem document/window/fetch: se o ficheiro tocar no DOM no
+// topo, o carregamento falha e isso fica registado como [FALHOU].
+// As tarefas seguintes acrescentam check(...) no fim, antes do resumo.
+//
+// Uso: node test_ui_helpers.cjs <caminho-de-ui_helpers.js>
+
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const failures = [];
+
+function check(label, condition) {
+  console.log(`[${condition ? "OK   " : "FALHOU"}] ${label}`);
+  if (!condition) failures.push(label);
+}
+
+function finish() {
+  if (failures.length) {
+    console.log(`\n[FALHOU] ${failures.length} teste(s) falharam`);
+    process.exit(1);
+  }
+  console.log("\n[OK] Todos os testes passaram");
+}
+
+const helpersPath = process.argv[2];
+if (!helpersPath) {
+  check("caminho de ui_helpers.js passado como argumento", false);
+  finish();
+}
+
+const ctx = vm.createContext({ console });
+try {
+  vm.runInContext(fs.readFileSync(helpersPath, "utf8"), ctx, { filename: helpersPath });
+  check("ui_helpers.js carrega sem DOM (sem document no contexto)", true);
+} catch (e) {
+  check(`ui_helpers.js carrega sem DOM: ${e && e.message}`, false);
+  finish();
+}
+
+check("slParseDate aceita +0000 do Wazuh",
+  ctx.slParseDate("2026-10-16T10:00:00.000+0000").toISOString() === "2026-10-16T10:00:00.000Z");
+check("slParseDate aceita +01:00", ctx.slParseDate("2026-10-16T11:00:00+01:00").toISOString() === "2026-10-16T10:00:00.000Z");
+check("slParseDate inválido -> null", ctx.slParseDate("não é data") === null);
+check("slParseDate vazio -> null", ctx.slParseDate("") === null && ctx.slParseDate(null) === null && ctx.slParseDate(undefined) === null);
+check("slFormatTimestamp inválido -> travessão", ctx.slFormatTimestamp("xyz") === "—");
+check("slFormatTimestamp válido não é Invalid Date",
+  !/Invalid/.test(ctx.slFormatTimestamp("2026-10-16T10:00:00.000+0000")) && ctx.slFormatTimestamp("2026-10-16T10:00:00.000+0000") !== "—");
+
+finish();

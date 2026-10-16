@@ -196,12 +196,7 @@ function mapSeverity(sev) {
 }
 
 function formatTimestamp(ts) {
-  if (!ts) return "-";
-  try {
-    return new Date(ts).toLocaleString("pt-PT");
-  } catch {
-    return ts;
-  }
+  return slFormatTimestamp(ts);
 }
 
 async function fetchJSON(path) {

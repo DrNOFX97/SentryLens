@@ -39,6 +39,7 @@ LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 ALLOWED_FILES = {
     "/": "index.html",
     "/index.html": "index.html",
+    "/ui_helpers.js": "ui_helpers.js",
     "/app.js": "app.js",
     "/redblue.js": "redblue.js",
     "/incidents.js": "incidents.js",
