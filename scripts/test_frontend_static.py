@@ -51,6 +51,19 @@ def section_header() -> None:
     check("estilo status-warn existe", ".status-warn" in read("style.css"))
 
 
+def section_header_extras() -> None:
+    check("cabeçalho distingue 401", "slHeaderErrorStatus(err)" in read("app.js"))
+    check("rodapé sem afirmação de tempo real",
+          "Ligação em tempo real ao Wazuh" not in read("index.html")
+          and "SentryLens — Fase 2 do projeto CET.</p>" in read("index.html"))
+    m = re.search(r"function applyHash\(\)\s*\{(.*?)\n\}", read("app.js"), re.S)
+    body = m.group(1) if m else ""
+    check("applyHash protege decodeURIComponent com try",
+          "try {" in body and "decodeURIComponent" in body
+          and body.index("try {") < body.index("decodeURIComponent")
+          and body.index("decodeURIComponent") < body.index("catch"))
+
+
 def section_system() -> None:
     css = read("style.css")
     block = re.search(r"\.progress-fill\s*\{([^}]*)\}", css).group(1)
@@ -140,6 +153,7 @@ def section_cleanups() -> None:
 if __name__ == "__main__":
     section_gitignore()
     section_header()
+    section_header_extras()
     section_system()
     section_no_inline_handlers()
     section_modals()

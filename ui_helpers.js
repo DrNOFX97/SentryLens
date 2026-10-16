@@ -42,6 +42,13 @@ function slHeaderStatus(health, failed) {
   }
 }
 
+// Indicador do cabeçalho quando o pedido a /api/siem/health lança erro:
+// 401 é chave da API inválida (o backend respondeu), o resto é falta de ligação.
+function slHeaderErrorStatus(err) {
+  if (err && err.status === 401) return { text: "● chave da API inválida", cls: "status-error" };
+  return slHeaderStatus(null, true);
+}
+
 // Número finito ou null. Rejeita null/undefined/""/booleanos/NaN/Infinity,
 // para que "sem valor" nunca vire 0.
 function slNumberOrNull(v) {

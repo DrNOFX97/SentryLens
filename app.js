@@ -54,7 +54,7 @@ async function refreshHeaderStatus() {
     estado = slHeaderStatus(await fetchJSON("/api/siem/health"), false);
   } catch (err) {
     console.error(err);
-    estado = slHeaderStatus(null, true);
+    estado = slHeaderErrorStatus(err);
   }
   statusIndicator.textContent = estado.text;
   statusIndicator.className = "status-indicator " + estado.cls;
@@ -1413,7 +1413,12 @@ document.getElementById("system-summary-card").addEventListener("click", () => a
 // Deep link: #redblue, #alerts, #planned:Incidentes… (sem hash válido fica
 // na Visão Geral, que já vem ativa no HTML).
 function applyHash() {
-  const hash = decodeURIComponent(location.hash.slice(1));
+  let hash = "";
+  try {
+    hash = decodeURIComponent(location.hash.slice(1));
+  } catch (_) {
+    return; // hash malformado (ex.: #%E0): tratar como sem hash
+  }
   if (!hash) return;
   if (hash.startsWith(PLANNED_HASH_PREFIX)) {
     const label = hash.slice(PLANNED_HASH_PREFIX.length);

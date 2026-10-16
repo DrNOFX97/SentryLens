@@ -80,6 +80,12 @@ check("slHeaderStatus outro estado -> desconhecido", hsEq({ status: "xpto" }, fa
 check("slHeaderStatus({}, false).cls é status-unknown", ctx.slHeaderStatus({}, false).cls === "status-unknown");
 check("slHeaderStatus com resposta ignora failed", ctx.slHeaderStatus({ status: "ok" }, true).text === "● Wazuh operacional");
 
+const hes = (e) => JSON.stringify(ctx.slHeaderErrorStatus(e));
+check("slHeaderErrorStatus 401 -> chave inválida",
+  hes({ status: 401 }) === JSON.stringify({ text: "● chave da API inválida", cls: "status-error" }));
+check("slHeaderErrorStatus outro erro -> sem ligação",
+  hes({ status: 502 }) === hs(null, true) && hes(new Error("x")) === hs(null, true) && hes(null) === hs(null, true));
+
 check("slFmtPct(null) -> —", ctx.slFmtPct(null) === "—");
 check("slFmtPct(12.34,1) -> 12.3%", ctx.slFmtPct(12.34, 1) === "12.3%");
 check("slFmtPct(true) -> —", ctx.slFmtPct(true) === "—");
