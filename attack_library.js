@@ -38,17 +38,8 @@ function alibReplayableBadge(replayable) {
   return `<span class="alib-replayable alib-replayable-${replayable ? "yes" : "no"}">${replayable ? "Sim" : "Não"}</span>`;
 }
 
-async function alibRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
+function alibRequest(path) {
+  return apiRequest(path);
 }
 
 function alibFilteredEntries() {
@@ -114,7 +105,7 @@ async function selectAttackLibraryEntry(id) {
     renderAttackLibraryDetail(entry);
   } catch (err) {
     if (seq !== alibSelectSeq) return;
-    alibShowDetailError(`Não foi possível carregar o detalhe: ${err.message}`);
+    alibShowDetailError(`Não foi possível carregar o detalhe: ${apiErrorMessage(err)}`);
   }
 }
 
@@ -133,10 +124,10 @@ async function refreshAttackLibrary() {
       alibEntries.length ? `${data.total} cenário(s) no catálogo.` : "";
     alibApplyFilters();
   } catch (err) {
-    const message = `Não foi possível carregar a Attack Library: ${err.message}`;
+    const message = `Não foi possível carregar a Attack Library: ${apiErrorMessage(err)}`;
     renderPanelError("#attack-library-panel", message);
     document.getElementById("alib-body").innerHTML =
-      `<tr><td colspan="8" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+      `<tr><td colspan="8" class="empty-state">Sem dados — ${escapeHtml(apiErrorMessage(err))}.</td></tr>`;
   } finally {
     alibLoading = false;
   }

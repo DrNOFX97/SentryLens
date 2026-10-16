@@ -39,23 +39,24 @@ function incStatusBadge(status) {
   return `<span class="inc-status inc-status-${escapeHtml(status)}">${escapeHtml(label)}</span>`;
 }
 
+// Cliente HTTP único (api.js): erros já vêm em PT com ação sugerida e
+// `status` HTTP; o texto do backend nunca chega ao DOM.
 async function incRequest(method, path, body) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    const error = new Error(detail);
-    error.status = response.status;
-    throw error;
-  }
-  return response.json();
+  return apiRequest(path, { method, body });
+}
+
+// Estados de carregar/vazio/erro dentro do <tbody> (state.js constrói o <p>).
+function incTableState(kind, text, err) {
+  const body = document.getElementById("incidents-body");
+  if (!body) return;
+  const td = document.createElement("td");
+  td.colSpan = 8;
+  if (kind === "loading") sttShowLoading(td, text);
+  else if (kind === "error") sttShowError(td, err);
+  else sttShowEmpty(td, text);
+  const tr = document.createElement("tr");
+  tr.appendChild(td);
+  body.replaceChildren(tr);
 }
 
 function incWindowHours() {
@@ -73,7 +74,7 @@ function renderIncidentsKpis(summary) {
 function renderIncidentsTable(incidents) {
   const body = document.getElementById("incidents-body");
   if (!incidents.length) {
-    body.innerHTML = `<tr><td colspan="8" class="empty-state">Sem incidentes nesta janela. Se ainda não importaste o histórico, usa «Importar histórico».</td></tr>`;
+    incTableState("empty", "Sem incidentes nesta janela. Se ainda não importaste o histórico, usa «Importar histórico».");
     return;
   }
   body.innerHTML = incidents.map((i) => {
@@ -189,7 +190,7 @@ async function selectIncident(id) {
     document.querySelectorAll("#incidents-body tr[data-id]").forEach((tr) =>
       tr.classList.toggle("selected", tr.dataset.id === id));
   } catch (err) {
-    incShowDetailError(err.message);
+    incShowDetailError(apiErrorMessage(err));
   }
 }
 
@@ -200,7 +201,7 @@ async function incApply(promise) {
     document.getElementById("inc-note-input").value = "";
     await refreshIncidentsTab();
   } catch (err) {
-    incShowDetailError(err.message);
+    incShowDetailError(apiErrorMessage(err));
   }
 }
 
@@ -234,14 +235,14 @@ async function refreshIncidentsTab() {
     if (status) params.set("status", status);
     if (severity) params.set("severity", severity);
     if (assigned) params.set("assigned_to", assigned);
+    if (!document.querySelector("#incidents-body tr[data-id]")) incTableState("loading", "A carregar incidentes…");
     const data = await incRequest("GET", `/api/incidents?${params}`);
     renderPanelError("#incidents-panel", "");
     renderIncidentsKpis(data.summary);
     renderIncidentsTable(data.incidents);
   } catch (err) {
-    renderPanelError("#incidents-panel", `Não foi possível carregar os incidentes: ${err.message}`);
-    document.getElementById("incidents-body").innerHTML =
-      `<tr><td colspan="8" class="empty-state">Indisponível.</td></tr>`;
+    renderPanelError("#incidents-panel", `Não foi possível carregar os incidentes: ${apiErrorMessage(err)}`);
+    incTableState("error", null, err);
   } finally {
     incRefreshing = false;
   }
@@ -259,7 +260,7 @@ async function backfillIncidents() {
       " Só alertas Wazuh (as deteções de rede só existem em memória).");
     await refreshIncidentsTab();
   } catch (err) {
-    incSetText("inc-notice", `⚠️ Falha ao importar: ${err.message}`);
+    incSetText("inc-notice", `⚠️ Falha ao importar: ${apiErrorMessage(err)}`);
   } finally {
     btn.disabled = false;
   }
@@ -337,9 +338,9 @@ async function incTriage(incidentId) {
     if (err.status === 503) {
       statusEl.textContent = "⚠️ JEV desativado — configure SENTRYLENS_JEV_ENABLED=1 e TYPESAFE_API_KEY no backend";
     } else if (err.status === 502) {
-      statusEl.textContent = `⚠️ Erro no JEV: ${err.message}`;
+      statusEl.textContent = `⚠️ Erro no JEV: ${apiErrorMessage(err)}`;
     } else {
-      statusEl.textContent = `❌ Falha: ${err.message}`;
+      statusEl.textContent = `❌ Falha: ${apiErrorMessage(err)}`;
     }
     resultEl.hidden = true;
   } finally {
@@ -431,7 +432,7 @@ async function incAssign(incidentId) {
     // Refresh detail to show updated assignment
     selectIncident(incidentId);
   } catch (err) {
-    statusEl.textContent = `❌ Falha: ${err.message}`;
+    statusEl.textContent = `❌ Falha: ${apiErrorMessage(err)}`;
   } finally {
     btn.disabled = false;
     btn.textContent = "✅ Atribuir";

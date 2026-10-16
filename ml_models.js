@@ -66,10 +66,29 @@ const MLM_GENERIC_ERROR = "Erro inesperado ao ler o registo de modelos.";
 // (HTML, caminho, texto de exceção) cai no genérico ou no código HTTP.
 const MLM_CODE_RE = /^[a-z_]{1,64}$/;
 
+// Códigos de transporte (api.js): o texto fixo em PT vem de apiErrorMessage,
+// nunca da exceção original.
+const MLM_TRANSPORT_CODES = ["network_error", "timeout", "invalid_response", "http_404", "http_502", "http_503", "http_504"];
+
 function mlmErrorText(code) {
   if (typeof code !== "string") return MLM_GENERIC_ERROR;
-  if (!Object.prototype.hasOwnProperty.call(MLM_ERROR_TEXT, code)) return MLM_GENERIC_ERROR;
-  return MLM_ERROR_TEXT[code];
+  if (Object.prototype.hasOwnProperty.call(MLM_ERROR_TEXT, code)) return MLM_ERROR_TEXT[code];
+  if (MLM_TRANSPORT_CODES.indexOf(code) >= 0 && typeof ApiError === "function"
+      && typeof apiErrorMessage === "function") {
+    return apiErrorMessage(new ApiError(code, 0));
+  }
+  return MLM_GENERIC_ERROR;
+}
+
+// Converte o ApiError de api.js no código que o resto do ficheiro já usa
+// (mesma chave de lookup que mlmCodeFromResponse): 403/422 sem slug ficam
+// http_403/http_422; transporte e slugs passam tal e qual.
+function mlmCodeFromApiError(err) {
+  if (!err || err.name !== "ApiError") return "unexpected_error";
+  if (err.code === "validation_error" || (err.code === "forbidden" && err.status)) {
+    return "http_" + (err.status || 422);
+  }
+  return err.code;
 }
 
 function mlmCodeFromResponse(status, body) {
@@ -473,32 +492,39 @@ let mlmLastReport = null;
 let mlmSelectedKey = null;
 let mlmTraining = false;
 
-async function mlmRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let corpo = null;
-    try {
-      corpo = await response.json();
-    } catch (_) { /* corpo não-JSON: fica só o código HTTP */ }
-    throw new Error(mlmCodeFromResponse(response.status, corpo));
+// Único ponto de rede deste ficheiro (e de ml_evaluation.js): apiRequest faz o
+// fetch, a chave e o timeout; aqui só se traduz o erro para o código de lookup.
+async function mlmApiCall(path, options) {
+  try {
+    return await apiRequest(path, options);
+  } catch (err) {
+    throw new Error(mlmCodeFromApiError(err));
   }
-  return response.json();
+}
+
+async function mlmRequest(path) {
+  return mlmApiCall(path);
 }
 
 // POST com o mesmo tratamento de erro de mlmRequest — o `detail` entra como CHAVE
 // de lookup em mlmCodeFromResponse e o código nunca chega ao DOM (API-02).
+// O treino demora: timeout próprio mais largo que os 15 s dos GET.
 async function mlmPost(path, body) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  if (!response.ok) {
-    let corpo = null;
-    try { corpo = await response.json(); } catch (_) { /* corpo não-JSON: fica só o código HTTP */ }
-    throw new Error(mlmCodeFromResponse(response.status, corpo));
-  }
-  return response.json();
+  return mlmApiCall(path, { method: "POST", body: body || {}, timeoutMs: 120000 });
+}
+
+// Estado (a carregar/erro/vazio) dentro de uma célula que ocupa a tabela toda;
+// o <p> do state.js fica dentro do <td>, que é HTML válido num <tbody>.
+function mlmShowTableState(tbody, colunas, tipo, conteudo) {
+  if (!tbody) return;
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = colunas;
+  tr.appendChild(td);
+  tbody.replaceChildren(tr);
+  if (tipo === "loading") sttShowLoading(td, conteudo);
+  else if (tipo === "error") sttShowError(td, conteudo);
+  else sttShowEmpty(td, conteudo);
 }
 
 function mlmSetTrainButton(ocupado) {
@@ -622,6 +648,7 @@ function mlmIsShown(tab) {
 async function mlmRefresh(forcar) {
   if (mlmLoading && forcar !== true) return;
   mlmLoading = true;
+  if (!mlmLastReport) mlmShowTableState(document.getElementById("mlm-models-body"), 5, "loading", "A carregar os modelos…");
   try {
     const report = await mlmRequest("/api/ml/models");
     renderPanelError("#ml-models-panel", "");
@@ -632,8 +659,7 @@ async function mlmRefresh(forcar) {
     mlmLastReport = null;
     mlmHideDetail();
     renderPanelError("#ml-models-panel", "Não foi possível carregar os modelos: " + texto);
-    document.getElementById("mlm-models-body").innerHTML =
-      `<tr><td colspan="5" class="empty-state">Sem dados — ${escapeHtml(texto)}</td></tr>`;
+    mlmShowTableState(document.getElementById("mlm-models-body"), 5, "error", texto);
   } finally {
     mlmLoading = false;
   }

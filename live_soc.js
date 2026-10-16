@@ -104,16 +104,14 @@ async function lsLoadInitialFeed() {
   if (lsLoadingFeed) return false;
   lsLoadingFeed = true;
   try {
-    const response = await fetch(`${API_BASE}/api/alerts?hours=1`, { headers: { "X-API-Key": API_KEY } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const data = await apiRequest("/api/alerts?hours=1");
     const history = (data.alerts || []).slice(0, LS_FEED_MAX);
     if (lsPaused) lsPending = lsPending.concat(history).slice(0, LS_PENDING_MAX);
     else lsAddToFeed(history);
   } catch (err) {
     if (!lsFeed.length) {
       document.getElementById("ls-feed-body").innerHTML =
-        `<tr><td colspan="4" class="empty-state">Sem dados: ${escapeHtml(err.message)}</td></tr>`;
+        `<tr><td colspan="4" class="empty-state">Sem dados: ${escapeHtml(apiErrorMessage(err))}</td></tr>`;
     }
     return false;
   } finally {
@@ -194,13 +192,7 @@ async function lsRefreshHealth() {
   if (lsRefreshing) return;
   lsRefreshing = true;
   try {
-    const response = await fetch(`${API_BASE}/api/siem/health`, { headers: { "X-API-Key": API_KEY } });
-    if (!response.ok) {
-      const e = new Error(`HTTP ${response.status}`);
-      e.status = response.status;
-      throw e;
-    }
-    lsHealth = await response.json();
+    lsHealth = await apiRequest("/api/siem/health");
     lsHealthFetchedAt = Date.now();
     lsRenderHealth();
   } catch (err) {
@@ -211,11 +203,9 @@ async function lsRefreshHealth() {
       el.textContent = "Sem dados";
       el.className = el.className.replace(/ls-(ok|down)/g, "").trim();
     });
-    const nota = err.status === 401
+    const nota = err && err.code === "unauthorized"
       ? "API key inválida ou em falta — confirma SENTRYLENS_API_KEY."
-      : err.status
-        ? `O backend respondeu HTTP ${err.status} ao pedir a saúde do SIEM.`
-        : "Sem ligação ao backend (localhost:8001).";
+      : apiErrorMessage(err);
     lsText("ls-health-note", nota);
   } finally {
     lsRefreshing = false;

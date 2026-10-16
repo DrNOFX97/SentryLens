@@ -98,26 +98,30 @@ function vacCodeFromResponse(status, body) {
 function vacErrorText(code) {
   if (typeof code !== "string") return VAC_GENERIC_ERROR;
   if (Object.prototype.hasOwnProperty.call(VAC_ERROR_TEXT, code)) return VAC_ERROR_TEXT[code];
+  if ((code === "timeout" || code === "invalid_response") && typeof ApiError === "function"
+      && typeof apiErrorMessage === "function") {
+    return apiErrorMessage(new ApiError(code, 0));
+  }
   if (/^http_\d{3}$/.test(code)) return VAC_GENERIC_ERROR + " (HTTP " + code.slice(5) + ")";
   return VAC_GENERIC_ERROR;
 }
 
 // A mensagem do erro lançado é sempre um código, nunca texto do servidor.
+// O transporte (fetch, chave, timeout) é do apiRequest em api.js.
 async function vacRequest(path) {
-  let response;
   try {
-    response = await fetch(API_BASE + path, { headers: { "X-API-Key": API_KEY } });
-  } catch (_) {
-    throw new Error("network_error");
+    return await apiRequest(path);
+  } catch (err) {
+    throw new Error(vacCodeFromApiError(err));
   }
-  if (!response.ok) {
-    let body = null;
-    try {
-      body = await response.json();
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(vacCodeFromResponse(response.status, body));
-  }
-  return response.json();
+}
+
+// ApiError -> a chave de lookup de VAC_ERROR_TEXT (403/422 sem slug ficam
+// http_403/http_422, como em vacCodeFromResponse).
+function vacCodeFromApiError(err) {
+  if (!err || err.name !== "ApiError") return "unexpected_error";
+  if (err.code === "validation_error" || err.code === "forbidden") return "http_" + (err.status || 422);
+  return err.code;
 }
 
 // Texto cru de uma lista, ou o travessão quando está vazia.
@@ -189,8 +193,14 @@ function vacRenderList(envelope) {
 function vacRenderError(code) {
   const text = vacErrorText(code);
   renderPanelError("#vaccines-panel", text);
-  document.getElementById("vac-body").innerHTML =
-    `<tr><td colspan="8" class="vac-error-state">${escapeHtml(text)}</td></tr>`;
+  const tbody = document.getElementById("vac-body");
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = 8;
+  td.className = "vac-error-state";
+  tr.appendChild(td);
+  tbody.replaceChildren(tr);
+  sttShowError(td, text);
   document.getElementById("vac-notice").textContent = "";
 }
 
@@ -282,6 +292,16 @@ function vacAddTechniques(vaccines) {
   select.value = selected;
 }
 
+// Linha "A carregar" (só quando a tabela ainda não tem vaccines).
+function vacShowLoadingRow() {
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = 8;
+  tr.appendChild(td);
+  document.getElementById("vac-body").replaceChildren(tr);
+  sttShowLoading(td, "A carregar as vaccines…");
+}
+
 async function vacRefresh() {
   if (vacLoading) return;
   const query = vacBuildQuery();
@@ -290,6 +310,7 @@ async function vacRefresh() {
     return;
   }
   vacLoading = true;
+  if (!document.querySelector("#vac-body tr[data-id]")) vacShowLoadingRow();
   try {
     const envelope = await vacRequest("/api/vaccines" + query);
     renderPanelError("#vaccines-panel", "");
@@ -395,7 +416,7 @@ function vacReplacedIds(vaccines, id) {
 // substituídas. Um erro nunca se apresenta como "não substitui nenhuma".
 async function vacLoadChain(vaccine, seq) {
   const chain = document.getElementById("vac-detail-chain");
-  chain.textContent = "A carregar a cadeia…";
+  sttShowLoading(chain, "A carregar a cadeia…");
   const params = new URLSearchParams();
   params.set("attack_id", String(vaccine.origin.attack_id));
   params.set("include_superseded", "true");
@@ -406,7 +427,7 @@ async function vacLoadChain(vaccine, seq) {
     chain.innerHTML = vacChainHtml(vaccine, vacReplacedIds(envelope.vaccines || [], vaccine.id));
   } catch (err) {
     if (seq !== vacSelectSeq) return;
-    chain.textContent = vacChainLead(vaccine) + " Cadeia indisponível: " + vacErrorText(err.message);
+    sttShowError(chain, vacChainLead(vaccine) + " Cadeia indisponível: " + vacErrorText(err.message));
   }
 }
 

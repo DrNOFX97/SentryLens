@@ -1,5 +1,5 @@
 // Aba "Red vs Blue" (Fase 11, Onda 3). Carregado depois de app.js e
-// reutiliza os seus globais (fetchJSON, escapeHtml, formatTimestamp,
+// reutiliza os seus globais (apiRequest/apiErrorMessage de api.js, escapeHtml, formatTimestamp,
 // renderPanelError, API_BASE, API_KEY) — não redeclarar nenhum deles aqui.
 // Só mostra dados reais dos endpoints do backend; sem dados, estado vazio.
 
@@ -106,7 +106,7 @@ function renderRedBlueKpis(data) {
 
 async function loadRedBlueMetrics() {
   try {
-    rbMetrics = await fetchJSON(`/api/redblue/metrics?hours=${RB_METRICS_HOURS}`);
+    rbMetrics = await apiRequest(`/api/redblue/metrics?hours=${RB_METRICS_HOURS}`);
     renderPanelError("#redblue-summary-panel", null);
     renderRedBlueKpis(rbMetrics);
   } catch (err) {
@@ -118,17 +118,42 @@ async function loadRedBlueMetrics() {
     if (noticesEl) noticesEl.innerHTML = "";
     const message = err.status === 503
       ? "Modelo de ML ainda não foi treinado. Corre scripts/train_anomaly_model.py."
-      : (err.message || "Erro ao carregar a correlação Red vs Blue.");
+      : apiErrorMessage(err);
     renderPanelError("#redblue-summary-panel", message);
   }
   if (typeof renderBluePanel === "function") renderBluePanel(rbMetrics);
   if (typeof renderRedPanel === "function") renderRedPanel(rbAttackLog, rbMetrics);
 }
 
+// Estado «A carregar» numa tabela (só na 1.ª carga, para não piscar nos refresh).
+function rbTableLoading(tbodyId, cols) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody || tbody.children.length > 0) return;
+  const td = document.createElement("td");
+  td.colSpan = cols;
+  const tr = document.createElement("tr");
+  tr.appendChild(td);
+  tbody.replaceChildren(tr);
+  sttShowLoading(td);
+}
+
+// Estado de erro numa tabela: mensagem PT fixa (nunca texto de exceção).
+function rbTableError(tbodyId, cols, err) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const td = document.createElement("td");
+  td.colSpan = cols;
+  const tr = document.createElement("tr");
+  tr.appendChild(td);
+  tbody.replaceChildren(tr);
+  sttShowError(td, err);
+}
+
 async function loadManagerPanel() {
   const tbody = document.getElementById("redblue-agents-body");
+  rbTableLoading("redblue-agents-body", 4);
   try {
-    const [health, agents] = await Promise.all([fetchJSON("/api/health"), fetchJSON("/api/agents")]);
+    const [health, agents] = await Promise.all([apiRequest("/api/health"), apiRequest("/api/agents")]);
     renderPanelError("#redblue-manager-panel", null);
     rbSetText("kpi-rb-backend", health.status === "ok" ? "Ativo" : String(health.status));
     const list = agents.agents || [];
@@ -150,7 +175,8 @@ async function loadManagerPanel() {
       .join("");
   } catch (err) {
     console.error(err);
-    renderPanelError("#redblue-manager-panel", err.message || "Erro ao carregar agentes.");
+    renderPanelError("#redblue-manager-panel", apiErrorMessage(err));
+    rbTableError("redblue-agents-body", 4, err);
   }
 }
 
@@ -164,13 +190,14 @@ async function refreshRedBlueTab() {
 }
 
 async function loadRedPanel() {
+  rbTableLoading("redblue-attack-body", 6);
   try {
-    rbAttackLog = await fetchJSON("/api/redblue/attack-log");
+    rbAttackLog = await apiRequest("/api/redblue/attack-log");
     renderPanelError("#redblue-red-panel", null);
   } catch (err) {
     console.error(err);
     rbAttackLog = null;
-    renderPanelError("#redblue-red-panel", err.message || "Erro ao carregar o log de ataques.");
+    renderPanelError("#redblue-red-panel", apiErrorMessage(err));
   }
   renderRedPanel(rbAttackLog, rbMetrics);
 }
@@ -370,7 +397,7 @@ function renderNetworkPanel() {
 
 async function loadNetworkPanel() {
   try {
-    const data = await fetchJSON("/api/redblue/network");
+    const data = await apiRequest("/api/redblue/network");
     renderPanelError("#redblue-network-panel", null);
     rbNetwork.configured = !!data.configured;
     rbNetwork.packets = data.packets || [];
@@ -380,7 +407,7 @@ async function loadNetworkPanel() {
     if (rbNetwork.configured && !rbNetworkWs) connectNetworkSocket();
   } catch (err) {
     console.error(err);
-    renderPanelError("#redblue-network-panel", err.message || "Erro ao carregar a captura de rede.");
+    renderPanelError("#redblue-network-panel", apiErrorMessage(err));
   }
 }
 

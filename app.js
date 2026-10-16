@@ -207,17 +207,17 @@ function formatTimestamp(ts) {
   return slFormatTimestamp(ts);
 }
 
+// Invólucro fino sobre apiRequest (api.js): mesma assinatura (path -> JSON).
+// O erro lançado é um ApiError (status numérico + mensagem fixa em PT).
 async function fetchJSON(path) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "X-API-Key": API_KEY },
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    const error = new Error(body.detail || `Erro HTTP ${response.status}`);
-    error.status = response.status;
-    throw error;
-  }
-  return response.json();
+  return apiRequest(path);
+}
+
+// Texto seguro para mostrar num painel: só mensagens de ApiError (fixas, em
+// PT, com ação sugerida); qualquer outro erro (ex.: bug de renderização)
+// cai no texto de reserva, nunca no texto da exceção.
+function panelErrorText(err, fallback) {
+  return err instanceof ApiError ? err.message : fallback;
 }
 
 // --- Helpers partilhados pelos painéis novos (ciclo de vida, privilégios,
@@ -232,7 +232,7 @@ function renderDetections(containerId, detections) {
   if (!container) return;
 
   if (!detections || detections.length === 0) {
-    container.innerHTML = '<p class="empty-state">Sem deteções neste período</p>';
+    sttShowEmpty(container, "Sem deteções neste período");
     return;
   }
 
@@ -279,7 +279,7 @@ function renderPanelError(panelSelector, message) {
       panel.insertBefore(banner, panel.firstChild);
     }
   }
-  banner.innerHTML = `⚠️ ${escapeHtml(message)}`;
+  sttShowError(banner, `⚠️ ${message}`);
 }
 
 async function loadStats(hours) {
@@ -288,7 +288,7 @@ async function loadStats(hours) {
     stats = await fetchJSON(`/api/stats?hours=${hours}`);
   } catch (err) {
     console.error(err);
-    renderPanelError("#overview-error-anchor", err.message || "Erro ao carregar as estatísticas.");
+    renderPanelError("#overview-error-anchor", panelErrorText(err, "Erro ao carregar as estatísticas."));
     return;
   }
   renderPanelError("#overview-error-anchor", null);
@@ -310,7 +310,7 @@ async function loadAgents() {
   } catch (err) {
     console.error(err);
     document.getElementById("agents-table-body").innerHTML =
-      `<tr><td colspan="5" class="empty-state">${escapeHtml(err.message || "Erro ao carregar agentes.")}</td></tr>`;
+      `<tr><td colspan="5" class="error-state" role="alert">${escapeHtml(panelErrorText(err, "Erro ao carregar agentes."))}</td></tr>`;
     return;
   }
   const activeCount = (data.agents || []).filter((a) => a.status === "active").length;
@@ -346,7 +346,7 @@ async function loadAlerts(hours, severity) {
     data = await fetchJSON(url);
   } catch (err) {
     console.error(err);
-    renderPanelError("#alerts-panel", err.message || "Erro ao carregar os alertas.");
+    renderPanelError("#alerts-panel", panelErrorText(err, "Erro ao carregar os alertas."));
     document.getElementById("alerts-table-body").innerHTML =
       `<tr><td colspan="9" class="empty-state">Indisponível.</td></tr>`;
     return;
@@ -712,7 +712,7 @@ async function loadSystemPanel() {
     renderPanelError("#system-panel", null);
   } catch (err) {
     console.error(err);
-    renderPanelError("#system-panel", err.message || "Não foi possível ler o estado desta máquina.");
+    renderPanelError("#system-panel", panelErrorText(err, "Não foi possível ler o estado desta máquina."));
     resetSystemPanelValues();
     resetSystemSummaryCard();
   }
@@ -723,15 +723,11 @@ async function forceSpeedtest() {
   btn.disabled = true;
   btn.textContent = "⏳ A medir...";
   try {
-    const response = await fetch(`${API_BASE}/api/system/speedtest`, {
-      method: "POST",
-      headers: { "X-API-Key": API_KEY },
-    });
-    if (!response.ok) throw new Error(`Erro HTTP ${response.status}`);
+    await apiRequest("/api/system/speedtest", { method: "POST" });
     await loadSystemPanel();
   } catch (err) {
     console.error(err);
-    renderPanelError("#system-panel", "Não foi possível medir a rede: " + err.message);
+    renderPanelError("#system-panel", "Não foi possível medir a rede. " + panelErrorText(err, "Tenta de novo daqui a pouco."));
   } finally {
     btn.disabled = false;
     btn.textContent = "🔄 Medir agora";
@@ -748,12 +744,17 @@ async function exportReport() {
     btn.textContent = "⏳ A gerar...";
   }
   try {
-    const response = await fetch(`${API_BASE}/api/export/report?hours=${hours}`, {
-      headers: { "X-API-Key": API_KEY },
-    });
+    let response;
+    try {
+      response = await fetch(`${API_BASE}/api/export/report?hours=${hours}`, {
+        headers: { "X-API-Key": API_KEY },
+      });
+    } catch (_) {
+      throw new ApiError("network_error", 0);
+    }
     if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.detail || `Erro HTTP ${response.status}`);
+      const body = await response.json().catch(() => null);
+      throw new ApiError(apiCodeFromResponse(response.status, body), response.status);
     }
     const blob = await response.blob();
     const disposition = response.headers.get("Content-Disposition") || "";
@@ -770,7 +771,7 @@ async function exportReport() {
     URL.revokeObjectURL(url);
   } catch (err) {
     console.error("Erro ao exportar relatório:", err);
-    alert("Erro ao exportar relatório: " + err.message);
+    alert("Erro ao exportar relatório. " + apiErrorMessage(err));
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -1011,7 +1012,7 @@ async function loadLifecyclePanel(days) {
     renderDetections("lifecycle-detections", data.detections || []);
   } catch (err) {
     console.error(err);
-    renderPanelError("#lifecycle-panel", err.message || "Erro ao carregar o painel de ciclo de vida.");
+    renderPanelError("#lifecycle-panel", panelErrorText(err, "Erro ao carregar o painel de ciclo de vida."));
   }
 }
 
@@ -1098,7 +1099,7 @@ async function loadPrivilegesPanel(days) {
     renderCriticalAdditionsBlock(data.critical_additions || []);
   } catch (err) {
     console.error(err);
-    renderPanelError("#privileges-panel", err.message || "Erro ao carregar o painel de privilégios.");
+    renderPanelError("#privileges-panel", panelErrorText(err, "Erro ao carregar o painel de privilégios."));
   }
 }
 
@@ -1191,7 +1192,7 @@ async function loadAdminActivityPanel(days) {
     renderDetections("admin-activity-detections", data.detections || []);
   } catch (err) {
     console.error(err);
-    renderPanelError("#admin-activity-panel", err.message || "Erro ao carregar o painel de contas administrativas.");
+    renderPanelError("#admin-activity-panel", panelErrorText(err, "Erro ao carregar o painel de contas administrativas."));
   }
 }
 
@@ -1242,7 +1243,7 @@ async function loadMlAnomaliesPanel(hours) {
     if (err.status === 503) {
       renderPanelError("#ml-anomalies-panel", "Modelo de ML ainda não foi treinado. Corre scripts/train_anomaly_model.py.");
     } else {
-      renderPanelError("#ml-anomalies-panel", err.message || "Erro ao carregar o painel de ML.");
+      renderPanelError("#ml-anomalies-panel", panelErrorText(err, "Erro ao carregar o painel de ML."));
     }
   }
 }
@@ -1300,7 +1301,7 @@ async function loadCompliancePanel(hours) {
     renderComplianceTable(data.alerts || []);
   } catch (err) {
     console.error(err);
-    renderPanelError("#compliance-panel", err.message || "Erro ao carregar o painel de conformidade.");
+    renderPanelError("#compliance-panel", panelErrorText(err, "Erro ao carregar o painel de conformidade."));
   }
 }
 

@@ -1,6 +1,5 @@
 // Abas "MTTD / MTTR", "Detection Coverage" e "Detection Rate" (Roadmap v2, R8).
-// Carregado depois de app.js: reutiliza os seus globais (API_BASE, API_KEY,
-// escapeHtml, renderPanelError) — não redeclarar nenhum aqui. Consome só
+// Carregado depois de app.js: reutiliza os seus globais (escapeHtml, renderPanelError) — não redeclarar nenhum aqui. Consome só
 // GET /api/metrics (um único pedido serve as 3 abas). Só pede dados com uma
 // das abas ativa e o separador visível. Só mostra dados reais: sem amostra ->
 // "Sem dados"; amostra pequena -> aviso. Todo o texto dinâmico passa por
@@ -40,19 +39,6 @@ function metNote(id, block, label) {
     return;
   }
   metText(id, block.small_sample ? `${label}: amostra pequena (n=${block.n}).` : `${label}: n=${block.n}.`);
-}
-
-async function metRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
 }
 
 function metRenderMttd(data) {
@@ -128,7 +114,7 @@ function metRenderRate(data) {
 
 async function refreshMetrics() {
   try {
-    const data = await metRequest("/api/metrics?hours=168");
+    const data = await apiRequest("/api/metrics?hours=168");
     for (const id of ["#mttd-mttr-panel", "#detection-coverage-panel", "#detection-rate-panel"]) renderPanelError(id, null);
     metRenderMttd(data);
     metRenderCoverage(data);
@@ -143,7 +129,7 @@ async function refreshMetrics() {
     }
   } catch (err) {
     for (const id of ["#mttd-mttr-panel", "#detection-coverage-panel", "#detection-rate-panel"]) {
-      renderPanelError(id, `Não foi possível carregar as métricas: ${err.message}`);
+      renderPanelError(id, `Não foi possível carregar as métricas: ${apiErrorMessage(err)}`);
     }
   }
 }

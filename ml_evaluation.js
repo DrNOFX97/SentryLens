@@ -421,15 +421,7 @@ let mleLastReport = null;
 // a mesma, mas o ciclo de dados desta aba é independente — ml_models.js só
 // redesenha a aba Models.
 async function mleRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let corpo = null;
-    try {
-      corpo = await response.json();
-    } catch (_) { /* corpo não-JSON: fica só o código HTTP */ }
-    throw new Error(mlmCodeFromResponse(response.status, corpo));
-  }
-  return response.json();
+  return mlmApiCall(path);
 }
 
 // A janela escolhida. O select só oferece 1/24/72/168 (o ge=1, le=168 da
@@ -451,6 +443,7 @@ async function mleRefreshLive() {
   if (!corpo || !aviso) return;
   mleLoadingLive = true;
   const horas = mleLiveHours();
+  sttShowLoading(corpo, "A carregar a concordância ao vivo…");
   try {
     const relatorio = await mleRequest(`/api/ml-anomalies?hours=${horas}`);
     const resultado = mleBuildLiveAgreement(relatorio);
@@ -461,7 +454,7 @@ async function mleRefreshLive() {
   } catch (err) {
     // Um erro NUNCA é desenhado como "Sem dados": a diferença entre "não há
     // eventos na janela" e "o Indexer não respondeu" é toda a informação.
-    corpo.innerHTML = mleLiveErrorHtml(err.message);
+    sttShowError(corpo, mleLiveErrorMessage(err.message));
     aviso.textContent = "Não foi possível ler a concordância ao vivo: " + mleLiveErrorMessage(err.message);
   } finally {
     mleLoadingLive = false;
@@ -471,6 +464,7 @@ async function mleRefreshLive() {
 async function mleRefresh() {
   if (mleLoading) return;
   mleLoading = true;
+  if (!mleLastReport) mlmShowTableState(document.getElementById("mlm-eval-body"), MLE_COLUNAS, "loading", "A carregar as avaliações…");
   try {
     const report = await mleRequest("/api/ml/models");
     renderPanelError("#ml-evaluation-panel", "");
@@ -482,8 +476,7 @@ async function mleRefresh() {
     const texto = mlmErrorText(err.message);
     mleLastReport = null;
     renderPanelError("#ml-evaluation-panel", "Não foi possível carregar as avaliações: " + texto);
-    document.getElementById("mlm-eval-body").innerHTML =
-      mleEmptyState(MLE_COLUNAS, `Sem dados — ${texto}`);
+    mlmShowTableState(document.getElementById("mlm-eval-body"), MLE_COLUNAS, "error", texto);
   } finally {
     mleLoading = false;
   }
@@ -533,7 +526,7 @@ function mleRenderFeatureStats(report) {
     }
   }
   if (!html) {
-    container.innerHTML = '<div class="empty-state">Nenhuma feature_stats disponível nas versões avaliadas.</div>';
+    sttShowEmpty(container, "Nenhuma feature_stats disponível nas versões avaliadas.");
   } else {
     container.innerHTML = html;
   }

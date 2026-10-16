@@ -290,10 +290,10 @@ def run_tracer() -> None:
           index_html.count(tag) == 1 and app_tag in index_html and index_html.index(tag) > index_html.index(app_tag))
 
     # e) pedidos
-    check("vaccines.js tem exatamente um fetch(", js.count("fetch(") == 1)
+    check("vaccines.js não faz fetch( próprio (o transporte é do apiRequest)", js.count("fetch(") == 0)
     corpo_request = function_body(js, "vacRequest")
-    check("o fetch está dentro de vacRequest e leva X-API-Key", "fetch(" in corpo_request
-          and '"X-API-Key": API_KEY' in corpo_request)
+    check("vacRequest delega em apiRequest (a chave X-API-Key é posta por api.js)",
+          "apiRequest(" in corpo_request)
     check('vaccines.js pede "/api/vaccines"', '"/api/vaccines"' in js)
     check("a chave nunca vai na query (sem api_key=)", "api_key=" not in js)
     check("sem opção method nem verbos HTTP de escrita",

@@ -29,17 +29,8 @@ function ovwIsActive() {
   return ovwTab.classList.contains("active") && document.visibilityState === "visible";
 }
 
-async function ovwRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
+function ovwRequest(path) {
+  return apiRequest(path);
 }
 
 function ovwText(id, text) {

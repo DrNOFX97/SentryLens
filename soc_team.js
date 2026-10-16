@@ -1,4 +1,4 @@
-// Aba "Equipa SOC" (Tier 1/2/3). Carregado depois de app.js e incidents.js:
+// Aba "Equipa SOC" (Tier 1/2/3). Carregado depois de app.js, api.js e state.js (apiRequest, apiErrorMessage, stt*):
 // reutiliza os seus globais (API_BASE, API_KEY, escapeHtml, severityBadge,
 // formatTimestamp, renderPanelError, periodSelect) — não redeclarar nenhum aqui.
 // Só mostra dados reais de /api/soc/*; sem dados, estado vazio.
@@ -40,23 +40,33 @@ function formatTimeOnly(ts) {
   return d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
 }
 
-async function stRequest(method, path, body) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { }
-    const error = new Error(detail);
-    error.status = response.status;
-    throw error;
+// Estados de carregar/vazio/erro (state.js) dentro de <tbody> ou <ul>: o <p> do
+// state.js não é filho válido de tbody/ul, por isso vai embrulhado em <tr><td>/<li>.
+function stShowState(container, kind, textOrErr, colspan) {
+  if (!container) return;
+  // Auto-refresh: o «A carregar» só aparece na primeira carga, para não piscar.
+  if (kind === "loading" && container.dataset.stReady) return;
+  if (kind === "loading" || kind === "error") delete container.dataset.stReady;
+  else container.dataset.stReady = "1";
+  const isList = container.tagName === "UL";
+  const wrap = document.createElement(isList ? "li" : "tr");
+  const cell = isList ? wrap : document.createElement("td");
+  if (!isList) {
+    cell.colSpan = colspan || 1;
+    wrap.appendChild(cell);
   }
-  return response.json();
+  if (kind === "loading") sttShowLoading(cell, textOrErr);
+  else if (kind === "error") sttShowError(cell, textOrErr);
+  else sttShowEmpty(cell, textOrErr);
+  container.replaceChildren(wrap);
+}
+
+// Erro de carregamento de um painel: aviso, banner e estado na tabela.
+function stLoadFailed(err, noticeId, panelSel, label, body, colspan) {
+  const msg = apiErrorMessage(err);
+  stText(noticeId, `⚠️ ${msg}`);
+  if (panelSel) renderPanelError(panelSel, `${label}: ${msg}`);
+  if (body) stShowState(body, "error", err, colspan);
 }
 
 // ====== Analysts ======
@@ -65,13 +75,14 @@ let stAnalystsCache = [];
 
 async function loadAnalysts() {
   stText("analyst-notice", "A carregar analistas...");
+  stShowState(document.getElementById("analysts-body"), "loading", "A carregar analistas…", 6);
   try {
     const tier = document.getElementById("analyst-tier-filter").value;
     const filter = slAnalystActiveFilter(document.getElementById("analyst-active-filter").value);
     const params = new URLSearchParams();
     if (tier) params.set("tier", tier);
     params.set("active_only", filter.activeOnly ? "true" : "false");
-    const data = await stRequest("GET", `/api/soc/analysts?${params}`);
+    const data = await apiRequest(`/api/soc/analysts?${params}`);
     const received = data.analysts || [];
     // O select de turnos precisa dos analistas ativos da resposta completa,
     // por isso recebe a lista antes do filtro "Inativos" (feito no cliente).
@@ -80,17 +91,18 @@ async function loadAnalysts() {
     renderAnalystsTable(stAnalystsCache);
     stText("analyst-notice", `${stAnalystsCache.length} analista(s)`);
   } catch (err) {
-    renderPanelError("#analysts-section", `Falha ao carregar analistas: ${err.message}`);
-    stText("analyst-notice", `⚠️ ${err.message}`);
+    stAnalystsCache = [];
+    stLoadFailed(err, "analyst-notice", "#analysts-section", "Falha ao carregar analistas", document.getElementById("analysts-body"), 6);
   }
 }
 
 function renderAnalystsTable(analysts) {
   const body = document.getElementById("analysts-body");
   if (!analysts.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Sem analistas.</td></tr>';
+    stShowState(body, "empty", "Sem analistas.", 6);
     return;
   }
+  body.dataset.stReady = "1";
   body.innerHTML = analysts.map((a) => `
     <tr data-id="${escapeHtml(a.id)}">
       <td>${escapeHtml(a.id)}</td>
@@ -145,16 +157,16 @@ document.getElementById("analyst-form").addEventListener("submit", async (e) => 
 
   try {
     if (id) {
-      await stRequest("PATCH", `/api/soc/analysts/${encodeURIComponent(id)}`, { tier, email, active: parseInt(active, 10) });
+      await apiRequest(`/api/soc/analysts/${encodeURIComponent(id)}`, { method: "PATCH", body: { tier, email, active: parseInt(active, 10) } });
       stText("analyst-notice", `✅ Analista ${name} atualizado`);
     } else {
-      await stRequest("POST", "/api/soc/analysts", { id: analystId, name, tier, email });
+      await apiRequest("/api/soc/analysts", { method: "POST", body: { id: analystId, name, tier, email } });
       stText("analyst-notice", `✅ Analista ${name} criado`);
     }
     closeAnalystModal();
     await loadAnalysts();
   } catch (err) {
-    stText("analyst-notice", `❌ ${err.message}`);
+    stText("analyst-notice", `❌ ${apiErrorMessage(err)}`);
   } finally {
     btn.disabled = false;
     btn.textContent = "Guardar";
@@ -199,11 +211,11 @@ function closeAnalystModal() {
 async function deactivateAnalyst(id, name) {
   if (!confirm(`Desativar analista ${name}?`)) return;
   try {
-    await stRequest("POST", `/api/soc/analysts/${encodeURIComponent(id)}/deactivate`);
+    await apiRequest(`/api/soc/analysts/${encodeURIComponent(id)}/deactivate`, { method: "POST" });
     stText("analyst-notice", `✅ Analista ${name} desativado`);
     await loadAnalysts();
   } catch (err) {
-    stText("analyst-notice", `❌ ${err.message}`);
+    stText("analyst-notice", `❌ ${apiErrorMessage(err)}`);
   }
 }
 
@@ -211,25 +223,26 @@ async function deactivateAnalyst(id, name) {
 
 async function loadShifts() {
   stText("shift-notice", "A carregar turnos...");
+  stShowState(document.getElementById("shifts-body"), "loading", "A carregar turnos…", 5);
   try {
     const analystId = document.getElementById("shift-analyst-filter").value;
     const params = new URLSearchParams();
     if (analystId) params.set("analyst_id", analystId);
-    const data = await stRequest("GET", `/api/soc/shifts?${params}`);
+    const data = await apiRequest(`/api/soc/shifts?${params}`);
     renderShiftsTable(data.shifts || []);
     stText("shift-notice", `${(data.shifts || []).length} turno(s)`);
   } catch (err) {
-    renderPanelError("#shifts-section", `Falha ao carregar turnos: ${err.message}`);
-    stText("shift-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "shift-notice", "#shifts-section", "Falha ao carregar turnos", document.getElementById("shifts-body"), 5);
   }
 }
 
 function renderShiftsTable(shifts) {
   const body = document.getElementById("shifts-body");
   if (!shifts.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem turnos.</td></tr>';
+    stShowState(body, "empty", "Sem turnos.", 5);
     return;
   }
+  body.dataset.stReady = "1";
   body.innerHTML = shifts.map((s) => `
     <tr data-id="${escapeHtml(String(s.id))}">
       <td>${stCell(s.analyst_name || s.analyst_id)}</td>
@@ -257,12 +270,12 @@ document.getElementById("shift-form").addEventListener("submit", async (e) => {
   btn.textContent = "A guardar...";
 
   try {
-    await stRequest("POST", "/api/soc/shifts", { analyst_id, start_ts, end_ts, role });
+    await apiRequest("/api/soc/shifts", { method: "POST", body: { analyst_id, start_ts, end_ts, role } });
     stText("shift-notice", "✅ Turno criado");
     closeShiftModal();
     await loadShifts();
   } catch (err) {
-    stText("shift-notice", `❌ ${err.message}`);
+    stText("shift-notice", `❌ ${apiErrorMessage(err)}`);
   } finally {
     btn.disabled = false;
     btn.textContent = "Guardar";
@@ -288,22 +301,23 @@ function closeShiftModal() {
 
 async function loadEscalationRules() {
   stText("escalation-notice", "A carregar regras...");
+  stShowState(document.getElementById("escalation-body"), "loading", "A carregar regras…", 5);
   try {
-    const data = await stRequest("GET", "/api/soc/escalation-rules");
+    const data = await apiRequest("/api/soc/escalation-rules");
     renderEscalationTable(data.rules || []);
     stText("escalation-notice", `${(data.rules || []).length} regra(s)`);
   } catch (err) {
-    renderPanelError("#escalation-section", `Falha ao carregar regras: ${err.message}`);
-    stText("escalation-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "escalation-notice", "#escalation-section", "Falha ao carregar regras", document.getElementById("escalation-body"), 5);
   }
 }
 
 function renderEscalationTable(rules) {
   const body = document.getElementById("escalation-body");
   if (!rules.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem regras de escalamento.</td></tr>';
+    stShowState(body, "empty", "Sem regras de escalamento.", 5);
     return;
   }
+  body.dataset.stReady = "1";
   body.innerHTML = rules.map((r) => `
     <tr data-id="${escapeHtml(String(r.id))}">
       <td>${tierBadge(r.from_tier)}</td>
@@ -331,12 +345,12 @@ document.getElementById("escalation-form").addEventListener("submit", async (e) 
   btn.textContent = "A guardar...";
 
   try {
-    await stRequest("POST", "/api/soc/escalation-rules", { from_tier, to_tier: to_tier ? parseInt(to_tier, 10) : null, severity, auto_escalate, sla_minutes: sla });
+    await apiRequest("/api/soc/escalation-rules", { method: "POST", body: { from_tier, to_tier: to_tier ? parseInt(to_tier, 10) : null, severity, auto_escalate, sla_minutes: sla } });
     stText("escalation-notice", "✅ Regra criada");
     closeEscalationModal();
     await loadEscalationRules();
   } catch (err) {
-    stText("escalation-notice", `❌ ${err.message}`);
+    stText("escalation-notice", `❌ ${apiErrorMessage(err)}`);
   } finally {
     btn.disabled = false;
     btn.textContent = "Guardar";
@@ -361,26 +375,31 @@ function closeEscalationModal() {
 
 async function loadOnCall() {
   stText("oncall-notice", "A carregar...");
+  stShowState(document.getElementById("oncall-list"), "loading", "A carregar…");
+  stShowState(document.getElementById("primary-list"), "loading", "A carregar…");
   try {
     const tier = parseInt(document.getElementById("oncall-tier-filter").value, 10);
     const [oncallData, primaryData] = await Promise.all([
-      stRequest("GET", `/api/soc/on-call?tier=${tier}`),
-      stRequest("GET", `/api/soc/primary?tier=${tier}`),
+      apiRequest(`/api/soc/on-call?tier=${tier}`),
+      apiRequest(`/api/soc/primary?tier=${tier}`),
     ]);
     renderOnCallList(oncallData.on_call || [], "oncall-list");
     renderOnCallList(primaryData.primary || [], "primary-list");
-    stText("oncall-notice", `Tier ${tier} — ${oncallData.on_call?.length || 0} on-call, ${primaryData.primary?.length || 0} principal`);
+    stText("oncall-notice", `Tier ${tier} — ${(oncallData.on_call || []).length} on-call, ${(primaryData.primary || []).length} principal`);
   } catch (err) {
-    stText("oncall-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "oncall-notice", null, "", null);
+    stShowState(document.getElementById("oncall-list"), "error", err);
+    stShowState(document.getElementById("primary-list"), "error", err);
   }
 }
 
 function renderOnCallList(analysts, listId) {
   const list = document.getElementById(listId);
   if (!analysts.length) {
-    list.innerHTML = '<li class="empty-state">Nenhum</li>';
+    stShowState(list, "empty", "Nenhum");
     return;
   }
+  list.dataset.stReady = "1";
   list.innerHTML = analysts.map(a => `<li>${escapeHtml(a.name)} (${escapeHtml(a.id)})${a.email ? ` — ${escapeHtml(a.email)}` : ""}</li>`).join("");
 }
 
@@ -391,22 +410,24 @@ document.getElementById("oncall-refresh-btn").addEventListener("click", loadOnCa
 
 async function loadSLABreaches() {
   stText("sla-breaches-notice", "A carregar...");
+  stShowState(document.getElementById("sla-breaches-body"), "loading", "A carregar…", 7);
   try {
-    const data = await stRequest("GET", "/api/soc/sla-breaches");
+    const data = await apiRequest("/api/soc/sla-breaches");
     renderSLABreaches(data.breaches || []);
-    stText("sla-breaches-notice", `${data.count || 0} breach(es)`);
+    stText("sla-breaches-notice", `${(data.breaches || []).length} breach(es)`);
   } catch (err) {
-    stText("sla-breaches-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "sla-breaches-notice", null, "", document.getElementById("sla-breaches-body"), 7);
   }
 }
 
 function renderSLABreaches(breaches) {
   const body = document.getElementById("sla-breaches-body");
   if (!breaches.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum SLA breach.</td></tr>';
+    stShowState(body, "empty", "Nenhum SLA breach.", 7);
     return;
   }
   const now = new Date();
+  body.dataset.stReady = "1";
   body.innerHTML = breaches.map((b) => {
     const deadline = new Date(b.sla_deadline.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
     const overdue = now > deadline;
@@ -428,15 +449,16 @@ function renderSLABreaches(breaches) {
 
 async function loadTierSummary() {
   stText("tier-summary-notice", "A carregar...");
+  stShowState(document.getElementById("tier-summary-body"), "loading", "A carregar…", 5);
   try {
     const days = parseInt(periodSelect.value, 10);
     const hours = slTierWindowHours(days);
     const clamped = Number.isFinite(days) && days > 0 && days * 24 > hours;
-    const data = await stRequest("GET", `/api/soc/summary-by-tier?hours=${hours}`);
+    const data = await apiRequest(`/api/soc/summary-by-tier?hours=${hours}`);
     renderTierSummary(data.by_tier || {});
     stText("tier-summary-notice", clamped ? `Janela de ${hours} h (máximo desta fonte)` : `Janela de ${hours} h`);
   } catch (err) {
-    stText("tier-summary-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "tier-summary-notice", null, "", document.getElementById("tier-summary-body"), 5);
   }
 }
 
@@ -444,9 +466,10 @@ function renderTierSummary(byTier) {
   const body = document.getElementById("tier-summary-body");
   const tiers = [1, 2, 3, 0].filter(t => byTier[t] !== undefined); // 0 = sem tier
   if (!tiers.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>';
+    stShowState(body, "empty", "Sem dados", 5);
     return;
   }
+  body.dataset.stReady = "1";
   body.innerHTML = tiers.map(t => {
     const d = byTier[t];
     const statusStr = Object.entries(d.by_status || {}).map(([s, c]) => `${s}: ${c}`).join(", ") || "—";

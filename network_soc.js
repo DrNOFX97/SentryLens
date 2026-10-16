@@ -1,6 +1,6 @@
 // Abas "Live Traffic", "Network Detections" e "PCAP / Evidence" (Roadmap v2,
 // R6 — Network SOC). Carregado depois de app.js: reutiliza os seus globais
-// (API_BASE, API_KEY, escapeHtml, formatTimestamp, renderPanelError) — não
+// (escapeHtml, formatTimestamp, renderPanelError) — não
 // redeclarar nenhum aqui. Reaproveita os dados já recolhidos por
 // network_monitor.py/network_detections.py (mesma fonte do painel de rede
 // da aba Red vs Blue, redblue.js) através de 3 rotas dedicadas
@@ -36,19 +36,6 @@ function nsTypeLabel(type) {
   return NS_DETECTION_TYPE_LABELS[type] || type || "—";
 }
 
-async function nsRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
-}
-
 // ===== Live Traffic =====
 
 function nsRenderCountTable(bodyId, rows, labelKey, countKey, colspan) {
@@ -62,7 +49,7 @@ function nsRenderCountTable(bodyId, rows, labelKey, countKey, colspan) {
 
 async function refreshLiveTraffic() {
   try {
-    const data = await nsRequest("/api/network/live-traffic");
+    const data = await apiRequest("/api/network/live-traffic");
     renderPanelError("#live-traffic-panel", null);
     document.getElementById("nst-note").textContent = data.configured
       ? `Captura de rede configurada — ${data.total} pacote(s) no buffer.`
@@ -80,7 +67,7 @@ async function refreshLiveTraffic() {
     const ports = (data.top_ports || []).map((p) => ({ port: p.port, packets: p.packets }));
     nsRenderCountTable("nst-ports-body", ports, "port", "packets", 2);
   } catch (err) {
-    const message = `Não foi possível carregar o Live Traffic: ${err.message}`;
+    const message = `Não foi possível carregar o Live Traffic: ${apiErrorMessage(err)}`;
     renderPanelError("#live-traffic-panel", message);
     document.getElementById("nst-note").textContent = "Sem dados.";
     ["nst-protocol-body", "nst-talkers-body", "nst-ports-body"].forEach((id) => {
@@ -93,7 +80,7 @@ async function refreshLiveTraffic() {
 
 async function refreshNetworkDetections() {
   try {
-    const data = await nsRequest("/api/network/detections");
+    const data = await apiRequest("/api/network/detections");
     renderPanelError("#network-detections-panel", null);
     document.getElementById("nsd-note").textContent = data.configured
       ? "Captura de rede configurada."
@@ -116,7 +103,7 @@ async function refreshNetworkDetections() {
         </tr>`).join("")
       : `<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`;
   } catch (err) {
-    const message = `Não foi possível carregar as Network Detections: ${err.message}`;
+    const message = `Não foi possível carregar as Network Detections: ${apiErrorMessage(err)}`;
     renderPanelError("#network-detections-panel", message);
     document.getElementById("nsd-note").textContent = "Sem dados.";
     document.getElementById("nsd-bytype-body").innerHTML = `<tr><td colspan="2" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
@@ -136,7 +123,7 @@ function nsEvidenceQuery() {
 
 async function refreshPcapEvidence() {
   try {
-    const data = await nsRequest(`/api/network/evidence?${nsEvidenceQuery()}`);
+    const data = await apiRequest(`/api/network/evidence?${nsEvidenceQuery()}`);
     renderPanelError("#pcap-evidence-panel", null);
     document.getElementById("nse-disclaimer").textContent = data.note || "";
     document.getElementById("nse-notice").textContent = data.total
@@ -156,7 +143,7 @@ async function refreshPcapEvidence() {
         </tr>`).join("")
       : `<tr><td colspan="6" class="empty-state">Sem dados para este dia.</td></tr>`;
   } catch (err) {
-    const message = `Não foi possível carregar a evidência: ${err.message}`;
+    const message = `Não foi possível carregar a evidência: ${apiErrorMessage(err)}`;
     renderPanelError("#pcap-evidence-panel", message);
     document.getElementById("nse-notice").textContent = "";
     document.getElementById("nse-body").innerHTML = `<tr><td colspan="6" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;

@@ -1,5 +1,5 @@
 // Aba "Detections" (Roadmap v2, R7 — Detection Engine). Carregado depois de
-// app.js: reutiliza os seus globais (API_BASE, API_KEY, escapeHtml,
+// app.js: reutiliza os seus globais (escapeHtml,
 // formatTimestamp, severityBadge, renderPanelError) — não redeclarar nenhum
 // aqui. Consome só GET /api/detections (vista unificada regra/ML/rede via
 // DetectionEvent); o dado bruto de origem nunca chega ao cliente. Só pede
@@ -23,19 +23,6 @@ function detCell(value) {
   return escapeHtml(String(value));
 }
 
-async function detRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
-}
-
 function detSourceCount(sources, name) {
   const s = sources && sources[name];
   if (!s) return "—";
@@ -46,7 +33,7 @@ async function refreshDetections() {
   const hours = document.getElementById("det-hours-filter").value || "24";
   const source = document.getElementById("det-source-filter").value;
   try {
-    const data = await detRequest(`/api/detections?hours=${encodeURIComponent(hours)}&limit=${DET_LIMIT}`);
+    const data = await apiRequest(`/api/detections?hours=${encodeURIComponent(hours)}&limit=${DET_LIMIT}`);
     renderPanelError("#detections-panel", null);
     const sources = data.sources || {};
     const down = Object.keys(DET_SOURCE_LABELS).filter((n) => sources[n] && !sources[n].available);
@@ -70,7 +57,7 @@ async function refreshDetections() {
         </tr>`).join("")
       : `<tr><td colspan="6" class="empty-state">Sem dados.</td></tr>`;
   } catch (err) {
-    renderPanelError("#detections-panel", `Não foi possível carregar as deteções: ${err.message}`);
+    renderPanelError("#detections-panel", `Não foi possível carregar as deteções: ${apiErrorMessage(err)}`);
     document.getElementById("det-note").textContent = "Sem dados.";
     document.getElementById("det-body").innerHTML = `<tr><td colspan="6" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
   }
