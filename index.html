@@ -126,6 +126,44 @@
 
     <!-- ===== Visão Geral ===== -->
     <div class="tab-content active" id="tab-overview">
+      <div id="overview-error-anchor"></div>
+
+      <section class="ovw-status" id="ovw-status" aria-label="Estado da infraestrutura de deteção">
+        <span class="ovw-chip ovw-unknown" id="ovw-chip-siem">SIEM: a carregar…</span>
+        <span class="ovw-chip ovw-unknown" id="ovw-chip-manager">—</span>
+        <span class="ovw-chip ovw-unknown" id="ovw-chip-indexer">—</span>
+        <span class="ovw-chip ovw-unknown" id="ovw-chip-agents">—</span>
+        <span class="ovw-chip ovw-unknown" id="ovw-chip-realtime">—</span>
+        <span class="ovw-chip ovw-unknown" id="ovw-chip-ingest">—</span>
+        <span class="ovw-updated" id="ovw-updated"></span>
+      </section>
+
+      <section class="ovw-kpis" aria-label="Indicadores operacionais">
+        <div class="card ovw-kpi">
+          <h3>Incidentes abertos</h3>
+          <div class="value" id="ovw-kpi-incidents">—</div>
+          <div class="ovw-kpi-sub" id="ovw-kpi-incidents-sub"></div>
+        </div>
+        <div class="card ovw-kpi">
+          <h3>MTTD (7 dias)</h3>
+          <div class="value" id="ovw-kpi-mttd">—</div>
+          <div class="ovw-kpi-sub" id="ovw-kpi-mttd-sub"></div>
+        </div>
+        <div class="card ovw-kpi">
+          <h3>Taxa de deteção (7 dias)</h3>
+          <div class="value" id="ovw-kpi-rate">—</div>
+          <div class="ovw-kpi-sub" id="ovw-kpi-rate-sub"></div>
+        </div>
+      </section>
+
+      <section class="panel ovw-attention" id="ovw-attention">
+        <h2>⚠️ Requer atenção <span class="ovw-attention-count" id="ovw-attention-count"></span></h2>
+        <ul class="ovw-attention-list" id="ovw-attention-list">
+          <li class="ovw-attn-unavailable">A carregar…</li>
+        </ul>
+      </section>
+
+      <h2 class="ovw-section-title">Alertas (janela selecionada)</h2>
       <section class="kpi-grid" id="kpi-grid">
         <div class="card">
           <h3>Total de Alertas</h3>
@@ -150,6 +188,24 @@
         <div class="card">
           <h3>Agentes Ativos</h3>
           <div class="value" id="kpi-agents">—</div>
+        </div>
+      </section>
+
+      <section class="panel charts-panel">
+        <h2>📈 Análises</h2>
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h3>Alertas ao longo do tempo</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-alerts-timeline"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Distribuição por severidade</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-severity-donut"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Top Event IDs</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-top-events"></canvas></div>
+          </div>
         </div>
       </section>
 
@@ -181,24 +237,6 @@
           </div>
         </div>
       </section>
-
-      <section class="panel charts-panel">
-        <h2>📈 Análises</h2>
-        <div class="charts-grid">
-          <div class="chart-card">
-            <h3>Alertas ao longo do tempo</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-alerts-timeline"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Distribuição por severidade</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-severity-donut"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Top Event IDs</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-top-events"></canvas></div>
-          </div>
-        </div>
-      </section>
     </div>
 
     <!-- ===== Alertas ===== -->
@@ -208,7 +246,7 @@
         <div id="brute-force-list"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="alerts-panel">
         <h2>🚨 Alertas Recentes</h2>
         <div class="filter-row">
           <select id="severity-filter">
@@ -1704,6 +1742,7 @@
     crossorigin="anonymous"></script>
   <script src="config.js"></script>
   <script src="app.js"></script>
+  <script src="overview.js"></script>
   <script src="redblue.js"></script>
   <script src="incidents.js"></script>
   <script src="soc_team.js"></script>

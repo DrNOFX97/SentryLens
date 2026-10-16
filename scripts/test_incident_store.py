@@ -7,11 +7,12 @@ Correr (a partir de scripts/):
 """
 
 import os
+import re
 import sqlite3
 import sys
 import tempfile
 
-from incident_store import IncidentNotFound, IncidentStore, InvalidTransition
+from incident_store import INCIDENTS_ADDED_COLUMNS, SCHEMA, IncidentNotFound, IncidentStore, InvalidTransition
 
 failures: list[str] = []
 ASSET = "192.168.1.169"
@@ -30,6 +31,64 @@ def ev(key, ts, severity="high", asset=ASSET, kind="wazuh_alert") -> dict:
 def link(ref="7", attack_id=7, technique="T1003", ts="2026-10-06T10:00:00+00:00") -> dict:
     return {"ref": ref, "attack_id": attack_id, "scenario": "brute_force_rdp", "technique": technique,
             "tool": "mimikatz", "attack_timestamp": ts}
+
+
+OLD_INCIDENTS_SCHEMA = """
+CREATE TABLE incidents (
+    id TEXT PRIMARY KEY, status TEXT NOT NULL, severity TEXT NOT NULL, asset TEXT NOT NULL,
+    created_at TEXT NOT NULL, first_evidence_at TEXT NOT NULL, last_evidence_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_incidents_status ON incidents(status);
+"""
+
+
+def run_migration() -> None:
+    """Base criada antes das colunas de JEV/equipa SOC: tem de abrir sem 500,
+    sem perder dados e sem falhar à segunda abertura."""
+    tmp = tempfile.TemporaryDirectory()
+    path = os.path.join(tmp.name, "antiga.sqlite3")
+    conn = sqlite3.connect(path)
+    conn.executescript(OLD_INCIDENTS_SCHEMA)
+    conn.execute("INSERT INTO incidents VALUES ('INC-OLD-001','NEW','high','10.0.0.1',"
+                 "'2026-10-01T10:00:00+00:00','2026-10-01T10:00:00+00:00','2026-10-01T10:00:00+00:00','2026-10-01T10:00:00+00:00')")
+    conn.commit()
+    conn.close()
+
+    # A constante de migração tem de coincidir com as colunas do SCHEMA, senão
+    # uma coluna nova no SCHEMA volta a partir as bases antigas.
+    block = re.search(r"CREATE TABLE IF NOT EXISTS incidents \((.*?)\n\);", SCHEMA, re.S).group(1)
+    schema_cols = {m.group(1) for m in re.finditer(r"^\s+(\w+)\s+(?:TEXT|INTEGER)", block, re.M)}
+    old_cols = {"id", "status", "severity", "asset", "created_at", "first_evidence_at",
+                "last_evidence_at", "updated_at"}
+    check("INCIDENTS_ADDED_COLUMNS = colunas do SCHEMA que a base antiga não tem",
+          set(INCIDENTS_ADDED_COLUMNS) == schema_cols - old_cols)
+
+    store = IncidentStore(path)
+    rows = store.list_incidents()
+    check("migração: a base antiga abre e lista (antes dava 'no such column')",
+          [r["id"] for r in rows] == ["INC-OLD-001"])
+    check("migração: os dados existentes ficam intactos",
+          rows[0]["status"] == "NEW" and rows[0]["severity"] == "high" and rows[0]["asset"] == "10.0.0.1")
+    check("migração: as colunas novas existem e vêm vazias", rows[0]["assigned_to"] is None and rows[0]["sla_deadline"] is None)
+
+    conn = sqlite3.connect(path)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(incidents)")}
+    indexes = {r[1] for r in conn.execute("PRAGMA index_list(incidents)")}
+    conn.close()
+    check("migração: todas as colunas do SCHEMA estão na tabela", schema_cols <= cols)
+    check("migração: o índice sobre assigned_to foi criado", "idx_incidents_assigned" in indexes)
+    check("migração: a rota de métricas (list_for_metrics) também funciona", len(store.list_for_metrics()) == 1)
+    check("migração: consegue criar um incidente novo depois",
+          store.create_incident(ev("alert:m1", "2026-10-02T10:00:00+00:00", asset="10.0.0.2"),
+                                "2026-10-02T10:00:00+00:00").startswith("INC-20261002"))
+
+    again = IncidentStore(path)  # 2.ª abertura: não pode tentar voltar a acrescentar colunas
+    check("migração: idempotente (2.ª abertura não falha)", len(again.list_incidents()) == 2)
+
+    fresh = IncidentStore(os.path.join(tmp.name, "nova.sqlite3"))
+    check("migração: base nova não é afetada", fresh.list_incidents() == [])
+    tmp.cleanup()
 
 
 def run() -> None:
@@ -166,6 +225,8 @@ def run() -> None:
     check("summary de base vazia", empty["total"] == 0 and empty["open"] == 0 and empty["avg_mttd_seconds"] is None)
 
     tmp.cleanup()
+
+    run_migration()
 
     print()
     if failures:

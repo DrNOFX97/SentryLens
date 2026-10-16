@@ -93,8 +93,27 @@ function startWsRecovery() {
   wsRecoveryIntervalId = setInterval(connectWebSocket, WS_RECOVERY_INTERVAL_MS);
 }
 
+// Cada alerta novo chega por WebSocket e, antes, chamava refreshDashboard()
+// diretamente — uma rajada de alertas (ex.: um ataque) redesenhava os gráficos
+// e repetia 5 pedidos várias vezes por segundo. Agora agrupa-se: o primeiro
+// alerta atualiza logo (se passou o intervalo mínimo) e os seguintes dentro
+// da janela viram UM único refresh no fim dela.
+const REALTIME_REFRESH_MIN_MS = 15000;
+let lastRealtimeRefreshAt = 0;
+let realtimeRefreshTimerId = null;
+
+function scheduleRealtimeRefresh() {
+  if (realtimeRefreshTimerId) return; // já há um refresh agendado para cobrir este alerta
+  const wait = Math.max(0, lastRealtimeRefreshAt + REALTIME_REFRESH_MIN_MS - Date.now());
+  realtimeRefreshTimerId = setTimeout(() => {
+    realtimeRefreshTimerId = null;
+    lastRealtimeRefreshAt = Date.now();
+    refreshDashboard();
+  }, wait);
+}
+
 // Liga o WebSocket de alertas em tempo real (/ws/alerts). Ao receber
-// {"type":"new_alert"} chama refreshDashboard() em vez de inserir a linha
+// {"type":"new_alert"} agenda refreshDashboard() (ver scheduleRealtimeRefresh) em vez de inserir a linha
 // manualmente — refreshDashboard() já busca/filtra tudo (severidade/janela
 // temporal selecionadas) e não vale a pena duplicar essa lógica aqui.
 // Reconecta com backoff exponencial (1s..16s, 5 tentativas); depois disso
@@ -123,7 +142,7 @@ function connectWebSocket() {
     try {
       const msg = JSON.parse(event.data);
       if (msg && msg.type === "new_alert") {
-        refreshDashboard();
+        scheduleRealtimeRefresh();
         document.dispatchEvent(new CustomEvent("sentrylens:new-alert", { detail: msg.alert }));
       }
     } catch (err) {
@@ -261,7 +280,15 @@ function renderPanelError(panelSelector, message) {
 }
 
 async function loadStats(hours) {
-  const stats = await fetchJSON(`/api/stats?hours=${hours}`);
+  let stats;
+  try {
+    stats = await fetchJSON(`/api/stats?hours=${hours}`);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#overview-error-anchor", err.message || "Erro ao carregar as estatísticas.");
+    return;
+  }
+  renderPanelError("#overview-error-anchor", null);
 
   document.getElementById("kpi-total").textContent = stats.total_alerts ?? 0;
   document.getElementById("kpi-critical").textContent = stats.by_severity?.critical ?? 0;
@@ -274,7 +301,15 @@ async function loadStats(hours) {
 }
 
 async function loadAgents() {
-  const data = await fetchJSON(`/api/agents`);
+  let data;
+  try {
+    data = await fetchJSON(`/api/agents`);
+  } catch (err) {
+    console.error(err);
+    document.getElementById("agents-table-body").innerHTML =
+      `<tr><td colspan="5" class="empty-state">${escapeHtml(err.message || "Erro ao carregar agentes.")}</td></tr>`;
+    return;
+  }
   const activeCount = (data.agents || []).filter((a) => a.status === "active").length;
   document.getElementById("kpi-agents").textContent = activeCount;
 
@@ -303,7 +338,17 @@ async function loadAlerts(hours, severity) {
   let url = `/api/alerts?hours=${hours}`;
   if (severity) url += `&severity=${severity}`;
 
-  const data = await fetchJSON(url);
+  let data;
+  try {
+    data = await fetchJSON(url);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#alerts-panel", err.message || "Erro ao carregar os alertas.");
+    document.getElementById("alerts-table-body").innerHTML =
+      `<tr><td colspan="9" class="empty-state">Indisponível.</td></tr>`;
+    return;
+  }
+  renderPanelError("#alerts-panel", null);
   const tbody = document.getElementById("alerts-table-body");
   tbody.innerHTML = "";
 
@@ -339,9 +384,18 @@ async function loadAlerts(hours, severity) {
 }
 
 async function loadBruteForce(hours) {
-  const data = await fetchJSON(`/api/brute-force?hours=${hours}`);
   const panel = document.getElementById("brute-force-panel");
   const list = document.getElementById("brute-force-list");
+  let data;
+  try {
+    data = await fetchJSON(`/api/brute-force?hours=${hours}`);
+  } catch (err) {
+    // Painel opcional (só aparece quando há suspeitas): numa falha fica
+    // escondido como por omissão, em vez de ficar preso em "A carregar...".
+    console.error(err);
+    panel.style.display = "none";
+    return;
+  }
 
   if (!data.suspects || data.suspects.length === 0) {
     panel.style.display = "none";
@@ -695,7 +749,7 @@ function renderChart(canvasId, config) {
   if (charts[canvasId]) {
     charts[canvasId].data = config.data;
     charts[canvasId].options = config.options;
-    charts[canvasId].update();
+    charts[canvasId].update("none"); // sem animação: um refresh não deve "piscar" os gráficos
     return;
   }
   charts[canvasId] = new Chart(canvas.getContext("2d"), config);

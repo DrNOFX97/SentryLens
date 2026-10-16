@@ -100,6 +100,19 @@ BEGIN SELECT RAISE(ABORT, 'incident_events e append-only'); END;
 """
 
 
+# Colunas de `incidents` acrescentadas depois do R3 (JEV e equipa SOC). Têm de
+# coincidir com as do SCHEMA (test_incident_store.py verifica); servem só para
+# migrar bases criadas antes delas existirem.
+INCIDENTS_ADDED_COLUMNS = {
+    "triage_json": "TEXT",
+    "assigned_to": "TEXT",
+    "assigned_team_tier": "INTEGER",
+    "escalated_from_tier": "INTEGER",
+    "escalated_at": "TEXT",
+    "sla_deadline": "TEXT",
+}
+
+
 class IncidentNotFound(Exception):
     pass
 
@@ -123,9 +136,31 @@ class IncidentStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         if not self._schema_ready:
-            conn.executescript(SCHEMA)
-            self._schema_ready = True
+            # O lock evita que duas threads migrem ao mesmo tempo (o segundo
+            # ALTER TABLE falharia com "duplicate column name").
+            with self.lock:
+                if not self._schema_ready:
+                    self._migrate_incidents_columns(conn)
+                    conn.executescript(SCHEMA)
+                    self._schema_ready = True
         return conn
+
+    @staticmethod
+    def _migrate_incidents_columns(conn: sqlite3.Connection) -> None:
+        """Acrescenta a uma tabela `incidents` antiga as colunas que o SCHEMA
+        passou a ter. `CREATE TABLE IF NOT EXISTS` não toca numa tabela que já
+        existe, por isso sem isto o `CREATE INDEX ... assigned_to` do SCHEMA
+        falhava ("no such column") e todas as rotas de incidentes davam 500.
+        Só acrescenta colunas (nunca remove nem altera dados); numa base nova a
+        tabela ainda não existe e o SCHEMA cria-a já completa."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(incidents)")}
+        if not existing:
+            return
+        for name, declaration in INCIDENTS_ADDED_COLUMNS.items():
+            if name not in existing:
+                # `name`/`declaration` vêm da constante acima, nunca de input.
+                conn.execute(f"ALTER TABLE incidents ADD COLUMN {name} {declaration}")
+        conn.commit()
 
     @contextmanager
     def _tx(self):
@@ -473,19 +508,32 @@ class IncidentStore:
             )
             return cur.lastrowid
 
-    def get_shifts_for_analyst(self, analyst_id: str, since: str | None = None, until: str | None = None) -> list[dict]:
+    def get_shifts(self, analyst_id: str | None = None, since: str | None = None,
+                   until: str | None = None) -> list[dict]:
+        """Turnos, de um analista (`analyst_id`) ou de todos (None). Junta o nome
+        e o tier do analista (`analyst_name`/`analyst_tier`), que a aba Equipa
+        SOC mostra; um turno cujo analista já não exista fica com ambos a None
+        em vez de desaparecer da lista."""
+        query = ("SELECT s.*, a.name AS analyst_name, a.tier AS analyst_tier "
+                 "FROM soc_shifts s LEFT JOIN soc_analysts a ON a.id = s.analyst_id")
+        clauses, params = [], []
+        if analyst_id:
+            clauses.append("s.analyst_id = ?")
+            params.append(analyst_id)
+        if since:
+            clauses.append("s.end_ts >= ?")
+            params.append(since)
+        if until:
+            clauses.append("s.start_ts <= ?")
+            params.append(until)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY s.start_ts, s.id"
         with self._tx() as conn:
-            query = "SELECT * FROM soc_shifts WHERE analyst_id = ?"
-            params = [analyst_id]
-            if since:
-                query += " AND end_ts >= ?"
-                params.append(since)
-            if until:
-                query += " AND start_ts <= ?"
-                params.append(until)
-            query += " ORDER BY start_ts"
-            rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    def get_shifts_for_analyst(self, analyst_id: str, since: str | None = None, until: str | None = None) -> list[dict]:
+        return self.get_shifts(analyst_id, since, until)
 
     def get_current_on_call(self, tier: int, now_iso: str) -> list[dict]:
         """Get analysts currently on-call for a tier."""

@@ -551,6 +551,11 @@ function mleRenderEvaluation(report) {
   mleRenderFeatureStats(report);
 }
 
+// Mesma regra que mlmIsShown em ml_models.js: aba ativa e página visível.
+function mleIsShown(tab) {
+  return tab.classList.contains("active") && document.visibilityState === "visible";
+}
+
 // Recarrega SEMPRE que a aba passa de escondida a visível, como ml_models.js
 // faz com a Models: um `evaluate` pode ter corrido entretanto e o backend
 // só passa a usar a versão nova depois de reiniciado.

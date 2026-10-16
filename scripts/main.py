@@ -22,7 +22,8 @@ import sqlite3
 import sys
 from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Literal
+from typing_extensions import Annotated
 
 # Windows redirects stdout/stderr para o codepage da consola por omissão,
 # o que corrompe os acentos nos logs (ex: "Violações" -> "Viola��es") quando
@@ -1599,9 +1600,10 @@ async def create_shift(body: ShiftCreate):
 
 
 @app.get("/api/soc/shifts", dependencies=_REQUIRE_API_KEY)
-async def get_shifts(analyst_id: str = Query(...), since: str | None = None, until: str | None = None):
-    """Get shifts for an analyst."""
-    shifts = await _incidents_call(incident_store.get_shifts_for_analyst, analyst_id, since, until)
+async def get_shifts(analyst_id: str | None = Query(None, max_length=128, description="Só os turnos deste analista; sem ele, os de todos"),
+                     since: str | None = None, until: str | None = None):
+    """Turnos de um analista ou, sem `analyst_id`, de todos (com nome e tier do analista)."""
+    shifts = await _incidents_call(incident_store.get_shifts, analyst_id or None, since, until)
     return {"shifts": shifts}
 
 
