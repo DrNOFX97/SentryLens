@@ -101,6 +101,13 @@ def section_soc_filters() -> None:
     check("badges escapam o fallback", "escapeHtml(String(labels[tier] || tier))" in soc and "escapeHtml(String(labels[role] || role))" in soc)
 
 
+def section_incidents_filter() -> None:
+    check("sem CURRENT_USER", "CURRENT_USER" not in read("incidents.js"))
+    check("sem opção __mine__", "__mine__" not in read("index.html"))
+    check("sem ramo __mine__ em incidents.js", "__mine__" not in read("incidents.js"))
+    check("filtro carrega analistas ativos", "/api/soc/analysts?active_only=true" in read("incidents.js"))
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
@@ -109,6 +116,7 @@ if __name__ == "__main__":
     section_modals()
     section_ml_anomalies()
     section_soc_filters()
+    section_incidents_filter()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

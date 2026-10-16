@@ -204,6 +204,25 @@ async function incApply(promise) {
   }
 }
 
+// Preenche o filtro "Analista" com os analistas ativos. O backend filtra
+// assigned_to pelo texto guardado na atribuição, por isso value = nome.
+// Se o pedido falhar fica só "Todos", sem mensagem extra.
+async function incLoadAnalystFilter() {
+  const select = document.getElementById("inc-assigned-filter");
+  if (!select) return;
+  const atual = select.value;
+  let nomes = [];
+  try {
+    const data = await incRequest("GET", "/api/soc/analysts?active_only=true");
+    nomes = (data.analysts || []).filter((a) => a && a.active !== false && a.name).map((a) => a.name);
+  } catch (err) {
+    nomes = [];
+  }
+  select.innerHTML = `<option value="">Todos</option>` +
+    nomes.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  select.value = nomes.includes(atual) ? atual : "";
+}
+
 async function refreshIncidentsTab() {
   if (incRefreshing) return;
   incRefreshing = true;
@@ -214,13 +233,7 @@ async function refreshIncidentsTab() {
     const assigned = document.getElementById("inc-assigned-filter").value;
     if (status) params.set("status", status);
     if (severity) params.set("severity", severity);
-    if (assigned === "__mine__") {
-      // Special value: will be replaced with current user name from app.js
-      const me = typeof CURRENT_USER !== "undefined" ? CURRENT_USER : "";
-      if (me) params.set("assigned_to", me);
-    } else if (assigned) {
-      params.set("assigned_to", assigned);
-    }
+    if (assigned) params.set("assigned_to", assigned);
     const data = await incRequest("GET", `/api/incidents?${params}`);
     renderPanelError("#incidents-panel", "");
     renderIncidentsKpis(data.summary);
@@ -295,7 +308,7 @@ document.getElementById("inc-assigned-filter").addEventListener("change", refres
 periodSelect.addEventListener("change", refreshIncidentsTab);
 document.addEventListener("sentrylens:new-alert", refreshIncidentsTab);
 
-refreshIncidentsTab();
+incLoadAnalystFilter().then(refreshIncidentsTab);
 setInterval(refreshIncidentsTab, INC_REFRESH_MS);
 
 // --- JEV Triagem ---
@@ -413,6 +426,7 @@ async function incAssign(incidentId) {
     await incRequest("PATCH", `/api/incidents/${encodeURIComponent(incidentId)}/assignment`, { analyst });
     statusEl.textContent = analyst ? `✅ Atribuído a ${analyst}` : "✅ Desatribuído";
     input.value = analyst || "";
+    await incLoadAnalystFilter();
     await refreshIncidentsTab();
     // Refresh detail to show updated assignment
     selectIncident(incidentId);
