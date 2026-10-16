@@ -59,6 +59,11 @@ ALLOWED_FILES = {
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",
+    # Dependências locais (offline): Chart.js 4.5.1 e fontes latin (woff2).
+    "/vendor/chart.umd.min.js": "vendor/chart.umd.min.js",
+    "/vendor/fonts/inter-latin.woff2": "vendor/fonts/inter-latin.woff2",
+    "/vendor/fonts/jetbrains-mono-latin.woff2": "vendor/fonts/jetbrains-mono-latin.woff2",
+    "/vendor/fonts/space-grotesk-latin.woff2": "vendor/fonts/space-grotesk-latin.woff2",
 }
 
 CONTENT_TYPES = {
@@ -66,6 +71,7 @@ CONTENT_TYPES = {
     ".js": "application/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".png": "image/png",
+    ".woff2": "font/woff2",
 }
 
 

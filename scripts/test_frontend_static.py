@@ -150,6 +150,34 @@ def section_cleanups() -> None:
           re.search(r"function alibShowDetailError[\s\S]{0,300}hidden\s*=\s*false", read("attack_library.js")) is not None)
 
 
+def section_offline() -> None:
+    """O dashboard tem de abrir sem internet: nada de https:// externo em index.html/style.css."""
+    import hashlib, base64
+    index = read("index.html")
+    css = read("style.css")
+    for nome, texto in (("index.html", index), ("style.css", css)):
+        check(f"{nome} sem referências http(s):// externas em src/href/url()",
+              re.search(r"""(?:src|href)\s*=\s*["']https?://|url\(\s*["']?https?://|@import\s+["']?https?://""", texto) is None)
+    check("index.html não referencia Google Fonts nem CDNs",
+          not any(h in index for h in ("fonts.googleapis.com", "fonts.gstatic.com", "cdnjs.cloudflare.com", "jsdelivr", "unpkg.com")))
+    check("Chart.js carregado de vendor/", '<script src="vendor/chart.umd.min.js"></script>' in index)
+    chart = (ROOT / "vendor" / "chart.umd.min.js").read_bytes()
+    digest = "sha384-" + base64.b64encode(hashlib.sha384(chart).digest()).decode()
+    check("vendor/chart.umd.min.js é o Chart.js 4.5.1 original (sha384 do cdnjs)",
+          digest == "sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ")
+    for familia, ficheiro in (("Inter", "inter-latin"), ("JetBrains Mono", "jetbrains-mono-latin"),
+                              ("Space Grotesk", "space-grotesk-latin")):
+        check(f"@font-face local para {familia}",
+              re.search(r"@font-face\s*\{[^}]*font-family:\s*'" + familia + r"'[^}]*vendor/fonts/" + ficheiro + r"\.woff2", css) is not None)
+        data = (ROOT / "vendor" / "fonts" / (ficheiro + ".woff2")).read_bytes()
+        check(f"{ficheiro}.woff2 é um woff2 válido (magic wOF2)", data[:4] == b"wOF2")
+    serve = read("scripts/serve_frontend.py")
+    for rota in ("/vendor/chart.umd.min.js", "/vendor/fonts/inter-latin.woff2",
+                 "/vendor/fonts/jetbrains-mono-latin.woff2", "/vendor/fonts/space-grotesk-latin.woff2",
+                 '".woff2": "font/woff2"'):
+        check(f"serve_frontend.py contém {rota}", rota in serve)
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
@@ -162,6 +190,7 @@ if __name__ == "__main__":
     section_incidents_filter()
     section_ml_models()
     section_cleanups()
+    section_offline()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)
