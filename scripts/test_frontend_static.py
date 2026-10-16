@@ -108,6 +108,15 @@ def section_incidents_filter() -> None:
     check("filtro carrega analistas ativos", "/api/soc/analysts?active_only=true" in read("incidents.js"))
 
 
+def section_ml_models() -> None:
+    html = read("index.html")
+    check("parágrafo do treino aparece uma vez", html.count("O botão treina a partir do próprio dashboard") == 1)
+    check("origem por omissão não é 'real'", '<option value="real" selected>' not in html)
+    check("origem por omissão é 'unknown'", '<option value="unknown" selected>' in html)
+    check("sem escape duplo no resultado do treino", "mlmRenderTrainResult(\"erro\", escapeHtml(" not in read("ml_models.js"))
+    check("sem escapeHtml no resultado do treino", "escapeHtml(resultado.texto)" not in read("ml_models.js"))
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
@@ -117,6 +126,7 @@ if __name__ == "__main__":
     section_ml_anomalies()
     section_soc_filters()
     section_incidents_filter()
+    section_ml_models()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

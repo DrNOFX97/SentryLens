@@ -604,14 +604,6 @@
         <p class="panel-note">
           Versões do modelo de ML registadas em <code>scripts/models/vN/</code> (metadados em
           <code>metadata.json</code>); a versão ativa é a indicada por <code>scripts/models/ACTIVE</code>.
-          O botão treina a partir do próprio dashboard e regista o resultado como uma versão
-          nova em <code>scripts/models/vN/</code>, com <code>metadata.json</code> e SHA-256,
-          apontando <code>ACTIVE</code> para ela. O dataset é escolhido pelo servidor
-          (export recente do Wazuh Indexer ou gerador sintético) — o pedido não leva
-          caminhos. Um treino demora alguns segundos e não há cancelamento: o servidor só
-          aceita um de cada vez. <strong>Depois de treinar é preciso reiniciar o backend</strong>
-          (<code>.\scripts\start-backend.ps1</code>): enquanto isso, as deteções continuam a
-          usar a versão anterior. Ativar uma versão já existente continua a não ter botão aqui.
         </p>
 
         <div class="filter-row">
@@ -639,9 +631,9 @@
             </select>
             <label for="mlm-train-origin">Origem declarada</label>
             <select id="mlm-train-origin">
-              <option value="real" selected>dados reais</option>
+              <option value="real">dados reais</option>
               <option value="synthetic">dados sintéticos</option>
-              <option value="unknown">não declarada</option>
+              <option value="unknown" selected>não declarada</option>
             </select>
             <button id="mlm-train-button" type="button">Treinar</button>
           </div>

@@ -1211,6 +1211,12 @@ check("mlmTrainBody: origin inválido -> omissão unknown",
   mlmTrainBody("latest_export", "inventado").dataset_origin === "unknown");
 check("mlmTrainBody: null/undefined -> omissões",
   JSON.stringify(mlmTrainBody(null, undefined)) === '{"dataset":"latest_export","dataset_origin":"unknown"}');
+check("mlmTrainBody: sample_fixture força origem synthetic",
+  mlmTrainBody("sample_fixture", "real").dataset_origin === "synthetic");
+check("mlmTrainBody: sample_fixture sem origem -> synthetic",
+  mlmTrainBody("sample_fixture", undefined).dataset_origin === "synthetic");
+check("mlmTrainBody: latest_export mantém origem declarada",
+  mlmTrainBody("latest_export", "real").dataset_origin === "real");
 check("mlmTrainBody: nunca contém contamination/random_state/n_estimators",
   !JSON.stringify(mlmTrainBody("latest_export", "real")).includes("contamination")
   && !JSON.stringify(mlmTrainBody("latest_export", "real")).includes("random_state")

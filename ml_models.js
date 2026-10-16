@@ -90,10 +90,12 @@ const MLM_TRAIN_DATASET_OMISSAO = "latest_export";
 const MLM_TRAIN_ORIGEM_OMISSAO = "unknown";
 
 function mlmTrainBody(dataset, dataset_origin) {
-  return {
-    dataset: MLM_TRAIN_DATASETS.includes(dataset) ? dataset : MLM_TRAIN_DATASET_OMISSAO,
-    dataset_origin: MLM_TRAIN_ORIGINS.includes(dataset_origin) ? dataset_origin : MLM_TRAIN_ORIGEM_OMISSAO,
-  };
+  const dsFinal = MLM_TRAIN_DATASETS.includes(dataset) ? dataset : MLM_TRAIN_DATASET_OMISSAO;
+  // O gerador sintético nunca pode ser declarado como dados reais.
+  const origem = dsFinal === "sample_fixture"
+    ? "synthetic"
+    : (MLM_TRAIN_ORIGINS.includes(dataset_origin) ? dataset_origin : MLM_TRAIN_ORIGEM_OMISSAO);
+  return { dataset: dsFinal, dataset_origin: origem };
 }
 
 // O estado do botão vive aqui para ser testável sem DOM: nenhum sítio
@@ -511,7 +513,7 @@ function mlmRenderTrainResult(estado, texto, mensagem) {
   const alvo = document.getElementById("mlm-train-result");
   if (!alvo) return;
   alvo.className = "panel-note " + (estado === "erro" ? "mlm-train-erro" : "mlm-train-reiniciar");
-  alvo.textContent = texto;   // texto simples: escapeHtml antes de chegar aqui
+  alvo.textContent = texto;   // texto simples: textContent já é seguro, não escapar antes
 }
 
 async function mlmDoTrain() {
@@ -522,9 +524,9 @@ async function mlmDoTrain() {
     const resposta = await mlmPost("/api/ml/train", mlmTrainBody(mlmTrainDataset(), mlmTrainOrigin()));
     const resultado = mlmTrainResult(resposta);
     mlmRenderTrainResult(resultado.estado === "incompleto" ? "erro" : resultado.estado,
-                        escapeHtml(resultado.texto), "");
+                        resultado.texto, "");
   } catch (err) {
-    mlmRenderTrainResult("erro", escapeHtml("Não foi possível treinar: " + mlmTrainErrorText(err.message)), "");
+    mlmRenderTrainResult("erro", "Não foi possível treinar: " + mlmTrainErrorText(err.message), "");
   } finally {
     mlmTraining = false;
     mlmSetTrainButton(false);
@@ -647,6 +649,20 @@ function mlmOnTabChange() {
   mlmModelsWasShown = shown;
 }
 
+// Dataset sintético => origem fixa em "synthetic" e select desativado;
+// com export recente o utilizador volta a poder declarar a origem.
+function mlmSyncTrainOrigin() {
+  const dsSelect = document.getElementById("mlm-train-dataset");
+  const origem = document.getElementById("mlm-train-origin");
+  if (!dsSelect || !origem) return;
+  if (dsSelect.value === "sample_fixture") {
+    origem.value = "synthetic";
+    origem.disabled = true;
+  } else {
+    origem.disabled = false;
+  }
+}
+
 function mlmInit() {
   mlmModelsTab = document.getElementById("tab-ml-models");
   if (mlmModelsTab) {
@@ -657,6 +673,11 @@ function mlmInit() {
   document.getElementById("mlm-models-reload").addEventListener("click", () => mlmRefresh());
   const treinar = document.getElementById("mlm-train-button");
   if (treinar) treinar.addEventListener("click", () => mlmDoTrain());
+  const dsSelect = document.getElementById("mlm-train-dataset");
+  if (dsSelect) {
+    dsSelect.addEventListener("change", mlmSyncTrainOrigin);
+    mlmSyncTrainOrigin();
+  }
   // Linhas selecionáveis com rato e com teclado (Enter/Espaço), como na
   // Attack Library. O keydown delega em mlmHandleRowKey, que é puro.
   const corpo = document.getElementById("mlm-models-body");
