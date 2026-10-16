@@ -69,3 +69,17 @@ function slAgreementText(agree, total) {
   if (a === null || t === null || t <= 0) return "—";
   return `${Math.round((a / t) * 100)}%`;
 }
+
+// Veredito de conformidade de uma norma: rótulo visível + justificação (tooltip).
+// Estado em falta ou desconhecido nunca é apresentado como "não aplicável".
+function slComplianceVerdict(v) {
+  const hasVerdict = v !== null && v !== undefined && typeof v === "object";
+  const estado = hasVerdict ? v.estado : undefined;
+  let label = "❔ Indeterminado";
+  if (estado === "aplicavel") label = "✅ Aplicável";
+  else if (estado === "verificado_e_nao_aplicavel") label = "➖ Não aplicável";
+  let title = "";
+  if (!hasVerdict) title = "Sem veredito do motor de conformidade";
+  else if (typeof v.justificacao === "string") title = v.justificacao;
+  return { label, title };
+}

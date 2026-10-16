@@ -1258,19 +1258,21 @@ function renderComplianceTable(alerts) {
     return;
   }
 
-  const estadoLabel = (estado) => (estado === "aplicavel" ? "✅ Aplicável" : "➖ N/A");
-
   alerts.forEach((a) => {
     const tr = document.createElement("tr");
     const c = a.compliance || {};
+    const cell = (v) => {
+      const { label, title } = slComplianceVerdict(v);
+      return `<td title="${escapeHtml(title)}">${escapeHtml(label)}</td>`;
+    };
     tr.innerHTML = `
       <td class="mono">${escapeHtml(formatTimestamp(a.timestamp))}</td>
       <td>${escapeHtml(a.agent_name)}</td>
       <td>${escapeHtml(a.friendly_name)}</td>
       <td>${severityBadge(a.severity)}</td>
-      <td>${escapeHtml(estadoLabel(c.rgpd && c.rgpd.estado))}</td>
-      <td>${escapeHtml(estadoLabel(c.nis2 && c.nis2.estado))}</td>
-      <td>${escapeHtml(estadoLabel(c.ai_act && c.ai_act.estado))}</td>
+      ${cell(c.rgpd)}
+      ${cell(c.nis2)}
+      ${cell(c.ai_act)}
     `;
     tbody.appendChild(tr);
   });

@@ -72,4 +72,12 @@ check("concordância sem eventos -> —", ctx.slAgreementText(0, 0) === "—");
 check("concordância total null -> —", ctx.slAgreementText(3, null) === "—");
 check("concordância 3/4 -> 75%", ctx.slAgreementText(3, 4) === "75%");
 
+const ap = ctx.slComplianceVerdict({ estado: "aplicavel", justificacao: "Dados pessoais" });
+check("aplicável + justificação", ap.label === "✅ Aplicável" && ap.title === "Dados pessoais");
+check("não aplicável", ctx.slComplianceVerdict({ estado: "verificado_e_nao_aplicavel" }).label === "➖ Não aplicável");
+check("estado desconhecido -> Indeterminado", ctx.slComplianceVerdict({ estado: "xpto" }).label === "❔ Indeterminado");
+const miss = ctx.slComplianceVerdict(undefined);
+check("sem veredito -> Indeterminado com motivo", miss.label === "❔ Indeterminado" && miss.title === "Sem veredito do motor de conformidade");
+check("veredito null -> Indeterminado", ctx.slComplianceVerdict(null).label === "❔ Indeterminado");
+
 finish();
