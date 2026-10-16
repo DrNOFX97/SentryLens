@@ -104,6 +104,7 @@ function boot(visibility) {
   try {
     vm.runInContext(fs.readFileSync(routerPath, "utf8"), ctx, { filename: "router.js" });
     vm.runInContext(fs.readFileSync(path.join(path.dirname(routerPath), "html.js"), "utf8"), ctx, { filename: "html.js" });
+    vm.runInContext(fs.readFileSync(path.join(path.dirname(routerPath), "ui_helpers.js"), "utf8"), ctx, { filename: "ui_helpers.js" });
     vm.runInContext(fs.readFileSync(incPath, "utf8"), ctx, { filename: "incidents.js" });
   } catch (err) {
     check("router.js + incidents.js carregam: " + err.message, false);

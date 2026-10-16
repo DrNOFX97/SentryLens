@@ -87,6 +87,27 @@ CONTENT_TYPES = {
 }
 
 
+# Content-Security-Policy (S3), enviada em todas as respostas HTML.
+# - script-src 'self' SEM unsafe-inline: o frontend não tem JS inline nem
+#   handlers on*= (garantido por test_frontend_static.py).
+# - style-src 'self' 'unsafe-inline': o index.html tem atributos style=""
+#   (e o JS gera alguns) e o CSP bloqueia-os sem 'unsafe-inline'. É o único
+#   afrouxamento; estilos não executam código.
+# - connect-src: o backend corre noutra porta de loopback (8001) -> http/ws
+#   para 127.0.0.1 e localhost em qualquer porta.
+CSP = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+])
+
+
 def load_api_key() -> str:
     """Variável de ambiente primeiro, senão a linha SENTRYLENS_API_KEY= de
     scripts/.env. Lida a cada pedido, para rodar a chave não exigir reiniciar
@@ -140,6 +161,8 @@ class FrontendHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        if content_type.startswith("text/html"):
+            self.send_header("Content-Security-Policy", CSP)
         self.end_headers()
         self.wfile.write(data)
 

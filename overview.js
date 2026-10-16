@@ -132,17 +132,11 @@ function ovwRenderIncidentKpi(incidents, error) {
 }
 
 function ovwRenderMttdKpi(metrics, error) {
-  if (!metrics) {
-    ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", "—", error ? "Fonte indisponível" : "A carregar…", "");
-    return;
-  }
-  const m = metrics.mttd || {};
-  if (m.available === false) {
-    ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", "—", m.reason === "source_unavailable" ? "Fonte indisponível" : "Sem dados", "");
-    return;
-  }
-  ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", ovwFormatSeconds(m.median_s),
-    `mediana · n=${m.n}${m.small_sample ? " · amostra pequena" : ""}`, "");
+  // Fonte única de MTTD (ui_helpers.js slMttdView, sobre GET /api/metrics).
+  const view = slMttdView(metrics, error);
+  const title = document.getElementById("ovw-kpi-mttd").parentElement.querySelector("h3");
+  if (title) title.textContent = view.label;
+  ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", view.value, view.sub, "");
 }
 
 function ovwRenderRateKpi(metrics, error) {
@@ -255,7 +249,7 @@ async function ovwRefresh() {
     const [h, i, m, v] = await Promise.allSettled([
       ovwRequest("/api/siem/health"),
       ovwRequest(`/api/incidents?hours=${OVW_WINDOW_HOURS}&limit=100`),
-      ovwRequest(`/api/metrics?hours=${OVW_WINDOW_HOURS}`),
+      ovwRequest(`/api/metrics?hours=${SL_MTTD_WINDOW_HOURS}`),
       ovwRequest("/api/vaccines?limit=1"),
     ]);
     const val = (r) => (r.status === "fulfilled" ? r.value : null);

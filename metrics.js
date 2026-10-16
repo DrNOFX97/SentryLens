@@ -44,7 +44,11 @@ function metNote(id, block, label) {
 function metRenderMttd(data) {
   const mttd = data.mttd || {};
   const mttr = data.mttr || {};
-  metText("met-mttd-median", metFormatSeconds(mttd.median_s));
+  // Mesmo valor/rótulo dos outros 3 painéis (ui_helpers.js slMttdView).
+  const view = slMttdView(data, false);
+  metText("met-mttd-median", view.value);
+  const medianCard = document.getElementById("met-mttd-median").parentElement.querySelector("h3");
+  if (medianCard) medianCard.textContent = view.label;
   metText("met-mttd-p90", metFormatSeconds(mttd.p90_s));
   metText("met-mttr-median", metFormatSeconds(mttr.median_s));
   metText("met-mttr-p90", metFormatSeconds(mttr.p90_s));
@@ -114,7 +118,7 @@ function metRenderRate(data) {
 
 async function refreshMetrics() {
   try {
-    const data = await apiRequest("/api/metrics?hours=168");
+    const data = await apiRequest(`/api/metrics?hours=${SL_MTTD_WINDOW_HOURS}`);
     for (const id of ["#mttd-mttr-panel", "#detection-coverage-panel", "#detection-rate-panel"]) renderPanelError(id, null);
     metRenderMttd(data);
     metRenderCoverage(data);

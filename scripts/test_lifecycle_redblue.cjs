@@ -35,7 +35,7 @@ const ctx = vm.createContext({
   clearInterval: (id) => timers.delete(id),
   requestAnimationFrame: (fn) => { rafQueue.push(fn); return rafQueue.length; },
   WebSocket: FakeWS,
-  fetch: () => { fetches++; return Promise.resolve({ ok: true, status: 200, json: async () => ({ configured: true, packets: [], detection_history: [], detections: [] }), text: async () => "{}" }); },
+  fetch: (url) => { fetches++; const tk = String(url).endsWith("/api/ws-ticket"); return Promise.resolve({ ok: true, status: 200, json: async () => (tk ? { ticket: "t-teste", expires_in: 30 } : { configured: true, packets: [], detection_history: [], detections: [] }), text: async () => "{}" }); },
 });
 vm.runInContext(`const API_BASE = "http://x:1"; const API_KEY = "k";
 const WS_RECONNECT_DELAYS_MS = [1];

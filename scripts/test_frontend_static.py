@@ -141,7 +141,7 @@ def section_cleanups() -> None:
     ev = read("ml_evaluation.js")
     check("mleRenderEvaluation declarada uma vez", ev.count("function mleRenderEvaluation(") == 1)
     check("comparação vazia com colspan 8", 'colspan="7"' not in ev)
-    check("activateTab escapa o hash", "CSS.escape(tabName)" in read("shell.js"))
+    check("activateTab não monta seletores CSS com o hash", "querySelector(`.nav-item[data-tab" not in read("shell.js"))
     check("nota Red vs Blue atualizada", "não regista ações de resposta" not in read("redblue.js"))
     check("Live SOC distingue 401", "API key inválida" in read("live_soc.js"))
     css = read("style.css")
@@ -179,7 +179,53 @@ def section_offline() -> None:
         check(f"serve_frontend.py contém {rota}", rota in serve)
 
 
+def section_nav_w51() -> None:
+    """W5.1: menu com no máximo 22 entradas, sem itens planeados, página Roadmap."""
+    index = read("index.html")
+    shell = read("shell.js")
+    nav = re.search(r'<nav class="sidebar".*?</nav>', index, re.S).group(0)
+    entradas = re.findall(r'<button class="nav-item[^"]*"[^>]*>', nav)
+    check(f"menu com no máximo 22 entradas ({len(entradas)})", 0 < len(entradas) <= 22)
+    check("nenhuma entrada is-planned / data-planned / nav-badge",
+          "is-planned" not in index and "data-planned" not in index and "nav-badge" not in nav)
+    check("secção #tab-planned removida", 'id="tab-planned"' not in index and "tab-planned" not in shell)
+    check("página Roadmap presente", 'id="tab-roadmap"' in index and 'data-tab="roadmap"' in nav)
+    secoes = set(re.findall(r'<div class="tab-content[^"]*" id="tab-([\w-]+)"', index))
+    tabs = set(re.findall(r'data-tab="([\w-]+)"', nav))
+    for b in re.findall(r'data-tabs="([^"]+)"', nav):
+        tabs.update(b.split())
+    tabs.update(re.findall(r'class="subnav-item" data-tab="([\w-]+)"', index))
+    check("todo o data-tab do menu tem secção #tab-<id>", bool(tabs) and tabs <= secoes)
+    check("toda a secção tem entrada de menu ou sub-navegação", secoes <= tabs)
+    for t in ("live-soc", "agents", "attack-registry", "attack-timeline", "ml-models", "ml-evaluation",
+              "mttd-mttr", "detection-coverage", "detection-rate"):
+        check(f"sub-navegação alcança {t}", f'class="subnav-item" data-tab="{t}"' in index)
+    check("cada entrada do menu tem cabeçalho de grupo (summary)",
+          nav.count("<summary>") == nav.count('<details class="nav-group"'))
+    check("exatamente uma entrada com aria-current inicial", nav.count('aria-current="page"') == 1)
+    check("sub-navegação sem handlers inline", "onclick" not in index)
+
+
+def section_ws_ticket_csp() -> None:
+    """S2/S3: a chave nunca vai no URL de um WebSocket; sem JS inline (CSP)."""
+    import re as _re
+    for rel in ("realtime.js", "redblue.js"):
+        txt = read(rel)
+        check(f"{rel} não usa api_key= em URLs", "api_key=" not in txt)
+        check(f"{rel} pede /api/ws-ticket antes de abrir o socket", "/api/ws-ticket" in txt)
+        check(f"{rel} liga com ?ticket=", "?ticket=" in txt)
+    for p in ROOT.glob("*.js"):
+        if p.name in ("config.js",):
+            continue
+        check(f"{p.name} sem api_key= no código", "api_key=" not in p.read_text(encoding="utf-8"))
+    index = read("index.html")
+    inline = [m for m in _re.findall(r"<script([^>]*)>", index) if "src=" not in m]
+    check("index.html sem <script> inline (CSP script-src 'self')", not inline)
+    check("index.html sem javascript: URLs", "javascript:" not in index)
+
+
 if __name__ == "__main__":
+    section_ws_ticket_csp()
     section_gitignore()
     section_header()
     section_header_extras()
@@ -192,6 +238,7 @@ if __name__ == "__main__":
     section_ml_models()
     section_cleanups()
     section_offline()
+    section_nav_w51()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

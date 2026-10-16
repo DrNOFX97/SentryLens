@@ -1174,3 +1174,17 @@ tr.rb-stale td { font-style: italic; }
 .data-table .align-center { text-align: center; }
 .table-count { color: var(--text-muted); font-size: var(--fs-sm); margin: 6px 0; }
 .kpi-empty .value { color: var(--text-muted); }
+
+/* W5.1: sub-navegação dentro de uma secção (abas agrupadas numa só entrada do menu) e página Roadmap */
+.subnav { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border-strong); }
+.subnav-item {
+  background: none; border: none; border-bottom: 3px solid transparent; margin-bottom: -1px;
+  padding: 8px 14px; font: 600 var(--fs-sm)/1.3 var(--font-body); color: var(--text-secondary); cursor: pointer;
+}
+.subnav-item:hover { background: var(--surface-hover); color: var(--text); }
+.subnav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.subnav-item[aria-current="page"] { color: var(--text); border-bottom-color: var(--cyan-600); }
+.roadmap-group { font-family: var(--font-display); font-size: var(--fs-sm); color: var(--text-secondary); margin: 16px 0 6px; }
+.roadmap-list { list-style: none; margin: 0; padding: 0; }
+.roadmap-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.roadmap-status { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-xs); }

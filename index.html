@@ -88,42 +88,32 @@
     <button class="sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="false"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg> Menu</button>
     <nav class="sidebar" id="sidebar" aria-label="Navegação principal">
     <details class="nav-group" open>
-      <summary>Visão Geral</summary>
+      <summary>Visão geral</summary>
       <button class="nav-item active" aria-current="page" data-tab="overview"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-chart"/></svg> Overview</button>
     </details>
     <details class="nav-group" open>
-      <summary>SOC</summary>
+      <summary>Operações SOC</summary>
+      <button class="nav-item" data-tab="live-soc" data-tabs="live-soc agents"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Live SOC</button>
       <button class="nav-item" data-tab="alerts"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-siren"/></svg> Alertas</button>
       <button class="nav-item" data-tab="incidents"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-puzzle"/></svg> Incidentes</button>
-      <button class="nav-item" data-tab="soc-team"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-users"/></svg> Equipa SOC</button>
-      <button class="nav-item is-planned" data-planned="R3" data-label="Investigações"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-search"/></svg> Investigações<span class="nav-badge">R3</span></button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Red Team</summary>
-      <button class="nav-item" data-tab="redblue"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-swords"/></svg> Red vs Blue</button>
-      <button class="nav-item" data-tab="attack-library"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Attack Library</button>
-      <button class="nav-item" data-tab="attack-registry"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Attack Registry</button>
-      <button class="nav-item" data-tab="attack-timeline"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg> Attack Timeline</button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Blue Team</summary>
       <button class="nav-item" data-tab="detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Detections</button>
-      <button class="nav-item is-planned" data-planned="R21" data-label="Response"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-wrench"/></svg> Response<span class="nav-badge">R21</span></button>
-      <button class="nav-item is-planned" data-planned="R21" data-label="Playbooks"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Playbooks<span class="nav-badge">R21</span></button>
+      <button class="nav-item" data-tab="soc-team"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-users"/></svg> Equipa SOC</button>
     </details>
     <details class="nav-group" open>
-      <summary>Network</summary>
+      <summary>Validação</summary>
+      <button class="nav-item" data-tab="redblue"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-swords"/></svg> Red vs Blue</button>
+      <button class="nav-item" data-tab="attack-registry" data-tabs="attack-registry attack-timeline"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Ataques</button>
+      <button class="nav-item" data-tab="attack-library"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Attack Library</button>
+      <button class="nav-item" data-tab="vaccines"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-syringe"/></svg> Vaccines</button>
+    </details>
+    <details class="nav-group" open>
+      <summary>Rede</summary>
       <button class="nav-item" data-tab="live-traffic"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Live Traffic</button>
       <button class="nav-item" data-tab="network-detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-traffic"/></svg> Network Detections</button>
       <button class="nav-item" data-tab="pcap-evidence"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-flask"/></svg> PCAP / Evidence</button>
     </details>
     <details class="nav-group" open>
-      <summary>Wazuh</summary>
-      <button class="nav-item" data-tab="agents"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-monitor"/></svg> Agentes</button>
-      <button class="nav-item" data-tab="live-soc"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Live SOC</button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Identidade (IAM)</summary>
+      <summary>Identidade</summary>
       <button class="nav-item" data-tab="lifecycle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clipboard"/></svg> Ciclo de Vida</button>
       <button class="nav-item" data-tab="privileges"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-key"/></svg> Privilégios</button>
       <button class="nav-item" data-tab="admin-activity"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-user"/></svg> Contas Admin</button>
@@ -131,39 +121,17 @@
     <details class="nav-group" open>
       <summary>ML</summary>
       <button class="nav-item" data-tab="ml-anomalies"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-brain"/></svg> Anomalias</button>
-      <button class="nav-item" data-tab="ml-models"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-box"/></svg> Models</button>
-      
-      <button class="nav-item" data-tab="ml-evaluation"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-ruler"/></svg> Evaluation</button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Vaccines</summary>
-      <button class="nav-item" data-tab="vaccines"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-syringe"/></svg> Candidates</button>
-      <button class="nav-item is-planned" data-planned="R12" data-label="Validation"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Validation<span class="nav-badge">R12</span></button>
-      <button class="nav-item is-planned" data-planned="R14" data-label="Approved"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-tag"/></svg> Approved<span class="nav-badge">R14</span></button>
-      <button class="nav-item is-planned" data-planned="R14" data-label="Regression"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-repeat"/></svg> Regression<span class="nav-badge">R14</span></button>
-    </details>
-    <details class="nav-group" open>
-      <summary>MITRE ATT&amp;CK</summary>
-      <button class="nav-item is-planned" data-planned="R16" data-label="Coverage"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-map"/></svg> Coverage<span class="nav-badge">R16</span></button>
-      <button class="nav-item is-planned" data-planned="R16" data-label="Techniques"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-dna"/></svg> Techniques<span class="nav-badge">R16</span></button>
-      <button class="nav-item is-planned" data-planned="R16" data-label="Gaps"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-hole"/></svg> Gaps<span class="nav-badge">R16</span></button>
+      <button class="nav-item" data-tab="ml-models" data-tabs="ml-models ml-evaluation"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-box"/></svg> Modelos</button>
     </details>
     <details class="nav-group" open>
       <summary>Métricas</summary>
-      <button class="nav-item" data-tab="mttd-mttr"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-timer"/></svg> MTTD / MTTR</button>
-      <button class="nav-item" data-tab="detection-coverage"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trend"/></svg> Detection Coverage</button>
-      <button class="nav-item" data-tab="detection-rate"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Detection Rate</button>
+      <button class="nav-item" data-tab="mttd-mttr" data-tabs="mttd-mttr detection-coverage detection-rate"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-timer"/></svg> Métricas de deteção</button>
     </details>
     <details class="nav-group" open>
-      <summary>Relatórios</summary>
+      <summary>Relatórios e sistema</summary>
       <button class="nav-item" data-tab="compliance"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg> Conformidade</button>
-      <button class="nav-item is-planned" data-planned="R19" data-label="Security Reports"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-file"/></svg> Security Reports<span class="nav-badge">R19</span></button>
-      <button class="nav-item is-planned" data-planned="R20" data-label="Executive"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-chart"/></svg> Executive<span class="nav-badge">R20</span></button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Sistema</summary>
       <button class="nav-item" data-tab="system"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-gear"/></svg> Sistema</button>
-      <button class="nav-item is-planned" data-planned="R22" data-label="Settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-wrench"/></svg> Settings<span class="nav-badge">R22</span></button>
+      <button class="nav-item" data-tab="roadmap"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-map"/></svg> Roadmap</button>
     </details>
   </nav>
 
@@ -327,6 +295,10 @@
 
     <!-- ===== Agentes ===== -->
     <div class="tab-content" id="tab-agents">
+      <div class="subnav" role="group" aria-label="Live SOC e agentes">
+        <button type="button" class="subnav-item" data-tab="live-soc">Saúde do SIEM</button>
+        <button type="button" class="subnav-item" data-tab="agents">Agentes</button>
+      </div>
       <section class="panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-monitor"/></svg> Agentes Wazuh</h2>
         <div class="table-scroll">
@@ -644,6 +616,10 @@
 
     <!-- ===== Models ===== -->
     <div class="tab-content" id="tab-ml-models">
+      <div class="subnav" role="group" aria-label="Modelos de ML">
+        <button type="button" class="subnav-item" data-tab="ml-models">Versões</button>
+        <button type="button" class="subnav-item" data-tab="ml-evaluation">Avaliação</button>
+      </div>
       <section class="panel" id="ml-models-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-box"/></svg> Models</h2>
         <p class="panel-note">
@@ -726,6 +702,10 @@
 
     <!-- ===== Evaluation ===== -->
     <div class="tab-content" id="tab-ml-evaluation">
+      <div class="subnav" role="group" aria-label="Modelos de ML">
+        <button type="button" class="subnav-item" data-tab="ml-models">Versões</button>
+        <button type="button" class="subnav-item" data-tab="ml-evaluation">Avaliação</button>
+      </div>
       <section class="panel" id="ml-evaluation-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-ruler"/></svg> Evaluation</h2>
         <p class="panel-note">
@@ -1471,6 +1451,10 @@
 
     <!-- ===== Attack Registry / Attack Timeline (Roadmap v2, R4) ===== -->
     <div class="tab-content" id="tab-attack-registry">
+      <div class="subnav" role="group" aria-label="Ataques">
+        <button type="button" class="subnav-item" data-tab="attack-registry">Registo</button>
+        <button type="button" class="subnav-item" data-tab="attack-timeline">Linha temporal</button>
+      </div>
       <section class="panel" id="attack-registry-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Attack Registry</h2>
         <p class="panel-note">
@@ -1529,6 +1513,10 @@
     </div>
 
     <div class="tab-content" id="tab-attack-timeline">
+      <div class="subnav" role="group" aria-label="Ataques">
+        <button type="button" class="subnav-item" data-tab="attack-registry">Registo</button>
+        <button type="button" class="subnav-item" data-tab="attack-timeline">Linha temporal</button>
+      </div>
       <section class="panel" id="attack-timeline-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg> Attack Timeline</h2>
         <p class="panel-note">
@@ -1543,6 +1531,10 @@
 
     <!-- ===== Live SOC (Roadmap v2, R2): feed ao vivo + saude do SIEM ===== -->
     <div class="tab-content" id="tab-live-soc">
+      <div class="subnav" role="group" aria-label="Live SOC e agentes">
+        <button type="button" class="subnav-item" data-tab="live-soc">Saúde do SIEM</button>
+        <button type="button" class="subnav-item" data-tab="agents">Agentes</button>
+      </div>
       <section class="panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-heart"/></svg> Saúde do SIEM</h2>
         <div class="ls-banner ls-banner-wait" id="ls-status" role="status">Estado do SIEM: a verificar...</div>
@@ -1668,6 +1660,11 @@
 
     <!-- ===== Métricas SOC (Roadmap v2, R8) ===== -->
     <div class="tab-content" id="tab-mttd-mttr">
+      <div class="subnav" role="group" aria-label="Métricas de deteção">
+        <button type="button" class="subnav-item" data-tab="mttd-mttr">MTTD / MTTR</button>
+        <button type="button" class="subnav-item" data-tab="detection-coverage">Cobertura</button>
+        <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
+      </div>
       <section class="panel" id="mttd-mttr-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-timer"/></svg> MTTD / MTTR</h2>
         <p class="panel-note" id="met-mttd-note">A carregar...</p>
@@ -1691,6 +1688,11 @@
     </div>
 
     <div class="tab-content" id="tab-detection-coverage">
+      <div class="subnav" role="group" aria-label="Métricas de deteção">
+        <button type="button" class="subnav-item" data-tab="mttd-mttr">MTTD / MTTR</button>
+        <button type="button" class="subnav-item" data-tab="detection-coverage">Cobertura</button>
+        <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
+      </div>
       <section class="panel" id="detection-coverage-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trend"/></svg> Detection Coverage</h2>
         <p class="panel-note" id="met-cov-note">A carregar...</p>
@@ -1707,6 +1709,11 @@
     </div>
 
     <div class="tab-content" id="tab-detection-rate">
+      <div class="subnav" role="group" aria-label="Métricas de deteção">
+        <button type="button" class="subnav-item" data-tab="mttd-mttr">MTTD / MTTR</button>
+        <button type="button" class="subnav-item" data-tab="detection-coverage">Cobertura</button>
+        <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
+      </div>
       <section class="panel" id="detection-rate-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Detection Rate</h2>
         <p class="panel-note" id="met-rate-note">A carregar...</p>
@@ -1754,12 +1761,38 @@
       </section>
     </div>
 
-    <!-- ===== Secção planeada (sem dados reais ainda) ===== -->
-    <div class="tab-content" id="tab-planned">
-      <section class="panel planned-panel">
-        <h2 id="planned-title">Secção planeada</h2>
-        <p class="empty-state">Sem dados — ainda não implementado.</p>
-        <p class="planned-note">Prevista na fase <strong id="planned-phase">R?</strong> do Roadmap v2. Esta secção só mostrará dados reais quando existir a fonte de dados correspondente (ver <code>docs/ROADMAP_STATUS.md</code>).</p>
+    <!-- ===== Roadmap (funcionalidades ainda não implementadas) ===== -->
+    <div class="tab-content" id="tab-roadmap">
+      <section class="panel" id="roadmap-panel">
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-map"/></svg> Roadmap</h2>
+        <p class="panel-note">
+          Funcionalidades previstas no Roadmap v2 que ainda não existem no dashboard. Nenhuma tem dados
+          nem página própria: o estado de cada uma é o que consta de <code>docs/ROADMAP_STATUS.md</code>.
+        </p>
+        <h3 class="roadmap-group">Deteção e resposta</h3>
+        <ul class="roadmap-list">
+          <li><strong>Investigações</strong> <span class="roadmap-status">Planeado (R3)</span></li>
+          <li><strong>Response</strong> <span class="roadmap-status">Planeado (R21)</span></li>
+          <li><strong>Playbooks</strong> <span class="roadmap-status">Planeado (R21)</span></li>
+        </ul>
+        <h3 class="roadmap-group">Vaccines</h3>
+        <ul class="roadmap-list">
+          <li><strong>Validation</strong> <span class="roadmap-status">Planeado (R12)</span></li>
+          <li><strong>Approved</strong> <span class="roadmap-status">Planeado (R14)</span></li>
+          <li><strong>Regression</strong> <span class="roadmap-status">Planeado (R14)</span></li>
+        </ul>
+        <h3 class="roadmap-group">MITRE ATT&amp;CK</h3>
+        <ul class="roadmap-list">
+          <li><strong>Coverage</strong> <span class="roadmap-status">Planeado (R16)</span></li>
+          <li><strong>Techniques</strong> <span class="roadmap-status">Planeado (R16)</span></li>
+          <li><strong>Gaps</strong> <span class="roadmap-status">Planeado (R16)</span></li>
+        </ul>
+        <h3 class="roadmap-group">Relatórios e sistema</h3>
+        <ul class="roadmap-list">
+          <li><strong>Security Reports</strong> <span class="roadmap-status">Planeado (R19)</span></li>
+          <li><strong>Executive</strong> <span class="roadmap-status">Planeado (R20)</span></li>
+          <li><strong>Settings</strong> <span class="roadmap-status">Planeado (R22)</span></li>
+        </ul>
       </section>
     </div>
 

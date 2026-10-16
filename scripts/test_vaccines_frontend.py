@@ -251,13 +251,15 @@ def run_tracer() -> None:
     linhas = index_html.splitlines()
     candidates = [l for l in linhas if 'data-tab="vaccines"' in l]
     check('exatamente um botão com data-tab="vaccines"', len(candidates) == 1)
-    check("o botão Candidates abre a aba e deixou de ser planeado",
-          len(candidates) == 1 and "Candidates" in candidates[0]
+    check("o botão Vaccines abre a aba e não é planeado",
+          len(candidates) == 1 and "Vaccines" in candidates[0]
           and "is-planned" not in candidates[0] and "nav-badge" not in candidates[0])
+    # W5.1: os itens planeados saíram do menu e vivem na página Roadmap.
+    roadmap = index_html[index_html.index('id="tab-roadmap"'):]
     for label, planned in (("Validation", "R12"), ("Approved", "R14"), ("Regression", "R14")):
-        linha = [l for l in linhas if f'data-label="{label}"' in l]
-        check(f"{label} continua planeado ({planned})",
-              len(linha) == 1 and "is-planned" in linha[0] and f'data-planned="{planned}"' in linha[0])
+        check(f"{label} listado no Roadmap como planeado ({planned}), fora do menu",
+              f"<strong>{label}</strong> <span class=\"roadmap-status\">Planeado ({planned})" in roadmap
+              and f'data-label="{label}"' not in index_html)
     check("index.html já não tem nenhum marcador de planeado R11", 'data-planned="R11"' not in index_html)
 
     # c) markup

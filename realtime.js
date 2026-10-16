@@ -1,9 +1,10 @@
 // Tempo real: WebSocket /ws/alerts, reconexão com backoff, fallback por polling.
 
 // WebSocket de alertas em tempo real (/ws/alerts) — ver connectWebSocket()
-// mais abaixo. Autenticação vai por query param (não header) porque o
-// handshake de WebSocket do browser não permite headers HTTP arbitrários.
-const WS_URL = `${API_BASE.replace(/^http/, "ws")}/ws/alerts?api_key=${encodeURIComponent(API_KEY)}`;
+// mais abaixo. O handshake de WebSocket do browser não permite headers HTTP
+// arbitrários, por isso a autenticação é um ticket de uso único (?ticket=)
+// pedido por REST a cada (re)ligação — a chave da API nunca vai no URL (S2).
+const WS_BASE_URL = `${API_BASE.replace(/^http/, "ws")}/ws/alerts`;
 const WS_RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 // Depois de esgotar as 5 tentativas iniciais, deixa de fazer backoff
 // exponencial (não faz sentido continuar a espaçar mais) e passa a tentar
@@ -87,8 +88,19 @@ function scheduleRealtimeRefresh() {
 // mas continua a tentar recuperar sozinho a cada 30s (startWsRecovery) — só
 // esta função chama new WebSocket(...), tanto nas tentativas iniciais como
 // nas de recuperação, por isso toda a lógica de estado vive só aqui.
-function connectWebSocket() {
-  ws = new WebSocket(WS_URL);
+async function connectWebSocket() {
+  let ticket;
+  try {
+    ticket = (await apiRequest("/api/ws-ticket", { method: "POST" })).ticket;
+  } catch (err) {
+    ticket = null;
+  }
+  if (!ticket) {
+    // Sem ticket não há ligação: segue o mesmo caminho de uma ligação falhada.
+    wsHandleClosed();
+    return;
+  }
+  ws = new WebSocket(`${WS_BASE_URL}?ticket=${encodeURIComponent(ticket)}`);
 
   ws.onopen = () => {
     wsReconnectAttempts = 0;
@@ -120,23 +132,27 @@ function connectWebSocket() {
     ws.close();
   };
 
-  ws.onclose = () => {
-    if (inRealtimeFallback) {
-      // Foi só uma tentativa de recuperação a falhar — startWsRecovery()
-      // já está a correr e tenta outra vez no próximo tick, sem repetir o
-      // aviso nem duplicar o polling (já ativos).
-      return;
-    }
-    if (wsReconnectAttempts < WS_RECONNECT_DELAYS_MS.length) {
-      const delay = WS_RECONNECT_DELAYS_MS[wsReconnectAttempts];
-      wsReconnectAttempts++;
-      setTimeout(connectWebSocket, delay);
-    } else {
-      inRealtimeFallback = true;
-      showRealtimeFallbackWarning();
-      startPollFallback();
-      startWsRecovery();
-    }
-  };
+  ws.onclose = wsHandleClosed;
+}
+
+// Ligação fechada/falhada (incluindo falha a obter o ticket): backoff e,
+// esgotado, fallback por polling + recuperação periódica.
+function wsHandleClosed() {
+  if (inRealtimeFallback) {
+    // Foi só uma tentativa de recuperação a falhar — startWsRecovery()
+    // já está a correr e tenta outra vez no próximo tick, sem repetir o
+    // aviso nem duplicar o polling (já ativos).
+    return;
+  }
+  if (wsReconnectAttempts < WS_RECONNECT_DELAYS_MS.length) {
+    const delay = WS_RECONNECT_DELAYS_MS[wsReconnectAttempts];
+    wsReconnectAttempts++;
+    setTimeout(connectWebSocket, delay);
+  } else {
+    inRealtimeFallback = true;
+    showRealtimeFallbackWarning();
+    startPollFallback();
+    startWsRecovery();
+  }
 }
 

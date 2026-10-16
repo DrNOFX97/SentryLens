@@ -9,7 +9,8 @@ const RB_MAX_PACKET_ROWS = 200;
 const RB_TAB_ID = "redblue"; // o mesmo data-tab do nav em index.html / app.js
 const RB_MAX_PACKETS_MEM = RB_MAX_PACKET_ROWS * 10; // teto em memória (W3.3)
 const RB_MAX_DETECTIONS_MEM = 1000;
-const RB_NETWORK_WS_URL = `${API_BASE.replace(/^http/, "ws")}/ws/network?api_key=${encodeURIComponent(API_KEY)}`;
+// A chave da API não vai no URL: pede-se um ticket de uso único (S2) a cada ligação.
+const RB_NETWORK_WS_BASE = `${API_BASE.replace(/^http/, "ws")}/ws/network`;
 
 let rbMetrics = null;
 let rbAttackLog = null;
@@ -69,6 +70,28 @@ function rbSummarize(fresh) {
   };
 }
 
+// MTTD = fonte única (slMttdView sobre GET /api/metrics, mesma janela de 7 dias
+// e mesma fórmula nos 4 painéis), não a média local das tentativas.
+let rbMttdMetrics = null;
+let rbMttdFailed = false;
+
+function rbRenderMttdKpi(metrics, error) {
+  const view = slMttdView(metrics, error);
+  const valueEl = document.getElementById("kpi-rb-mttd");
+  if (!valueEl) return;
+  valueEl.textContent = view.value;
+  const card = valueEl.parentElement;
+  const title = card.querySelector("h3");
+  if (title) title.textContent = view.label;
+  let subEl = card.querySelector(".ovw-kpi-sub");
+  if (!subEl) {
+    subEl = document.createElement("div");
+    subEl.className = "ovw-kpi-sub";
+    card.appendChild(subEl);
+  }
+  subEl.textContent = view.sub;
+}
+
 function renderRedBlueKpis(data) {
   const overall = data.overall || {};
   const attempts = overall.total_attempts || 0;
@@ -77,7 +100,7 @@ function renderRedBlueKpis(data) {
   const none = sum.count === 0;
   rbSetText("kpi-rb-attempts", attempts);
   rbSetText("kpi-rb-coverage", none ? "—" : rbFormatPercent(sum.detected / sum.count, sum.count));
-  rbSetText("kpi-rb-mttd", none ? "—" : rbFormatSeconds(sum.avgMttd));
+  rbRenderMttdKpi(rbMttdMetrics, rbMttdFailed);
   rbSetText("kpi-rb-network-only", data.network_capture_configured && !none ? sum.networkOnly : "—");
   rbSetText("kpi-rb-neither", none ? "—" : sum.neither);
   rbSetText("kpi-rb-alerts-fetched", data.alerts_fetched ?? "—");
@@ -108,7 +131,11 @@ function renderRedBlueKpis(data) {
 
 async function loadRedBlueMetrics() {
   try {
+    const mttdReq = apiRequest(`/api/metrics?hours=${SL_MTTD_WINDOW_HOURS}`).then(
+      (m) => { rbMttdMetrics = m; rbMttdFailed = false; },
+      () => { rbMttdMetrics = null; rbMttdFailed = true; });
     rbMetrics = await apiRequest(`/api/redblue/metrics?hours=${RB_METRICS_HOURS}`);
+    await mttdReq;
     renderPanelError("#redblue-summary-panel", null);
     renderRedBlueKpis(rbMetrics);
   } catch (err) {
@@ -116,6 +143,7 @@ async function loadRedBlueMetrics() {
     rbMetrics = null;
     ["kpi-rb-attempts", "kpi-rb-coverage", "kpi-rb-mttd", "kpi-rb-network-only", "kpi-rb-neither"]
       .forEach((id) => rbSetText(id, "—"));
+    rbRenderMttdKpi(null, true);
     const noticesEl = document.getElementById("redblue-notices");
     if (noticesEl) noticesEl.replaceChildren();
     const message = err.status === 503
@@ -427,8 +455,29 @@ function rbScheduleNetworkRender() {
   });
 }
 
-function connectNetworkSocket() {
-  rbNetworkWs = new WebSocket(RB_NETWORK_WS_URL);
+let rbNetworkTicketPending = false;
+async function connectNetworkSocket() {
+  if (rbNetworkTicketPending || rbNetworkWs) return;
+  rbNetworkTicketPending = true;
+  let ticket;
+  try {
+    ticket = (await apiRequest("/api/ws-ticket", { method: "POST" })).ticket;
+  } catch (err) {
+    ticket = null;
+  } finally {
+    rbNetworkTicketPending = false;
+  }
+  if (!ticket) {
+    if (rbNetworkReconnectAttempts < WS_RECONNECT_DELAYS_MS.length) {
+      const delay = WS_RECONNECT_DELAYS_MS[rbNetworkReconnectAttempts];
+      rbNetworkReconnectAttempts += 1;
+      setTimeout(() => {
+        if (rbNetwork.configured && !rbNetworkWs) connectNetworkSocket();
+      }, delay);
+    }
+    return;
+  }
+  rbNetworkWs = new WebSocket(`${RB_NETWORK_WS_BASE}?ticket=${encodeURIComponent(ticket)}`);
   rbNetworkWs.onopen = () => {
     rbNetworkReconnectAttempts = 0;
   };

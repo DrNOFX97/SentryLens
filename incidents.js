@@ -71,8 +71,35 @@ function incWindowHours() {
 function renderIncidentsKpis(summary) {
   incSetText("kpi-inc-open", summary.open);
   incSetText("kpi-inc-high", summary.high_or_critical_open);
-  incSetText("kpi-inc-mttd", incFormatSeconds(summary.avg_mttd_seconds));
   incSetText("kpi-inc-total", summary.total);
+}
+
+// MTTD = fonte única (slMttdView sobre GET /api/metrics, janela fixa de 7 dias):
+// já não é a média dos mttd_seconds dos incidentes da janela do seletor.
+function incRenderMttdKpi(metrics, error) {
+  const view = slMttdView(metrics, error);
+  const valueEl = document.getElementById("kpi-inc-mttd");
+  if (!valueEl) return;
+  valueEl.textContent = view.value;
+  const card = valueEl.parentElement;
+  if (!card) return;
+  const title = card.querySelector("h3");
+  if (title) title.textContent = view.label;
+  let subEl = card.querySelector(".ovw-kpi-sub");
+  if (!subEl) {
+    subEl = document.createElement("div");
+    subEl.className = "ovw-kpi-sub";
+    card.appendChild(subEl);
+  }
+  subEl.textContent = view.sub;
+}
+
+async function incLoadMttd() {
+  try {
+    incRenderMttdKpi(await apiRequest(`/api/metrics?hours=${SL_MTTD_WINDOW_HOURS}`), false);
+  } catch (err) {
+    incRenderMttdKpi(null, true);
+  }
 }
 
 function renderIncidentsTable(incidents) {
@@ -138,7 +165,7 @@ function renderIncidentDetail(incident) {
     <span>Ativo: <strong>${incCell(incident.asset)}</strong></span>
     <span>Analista: <strong>${assigned}</strong></span>
     <span>MITRE: ${incCell(incident.techniques.join(", "))}</span>
-    <span>MTTD: ${incFormatSeconds(incident.mttd_seconds)}</span>
+    <span>MTTD deste incidente: ${incFormatSeconds(incident.mttd_seconds)}</span>
     <span>1.ª resposta: ${incFormatSeconds(incident.time_to_first_response_seconds)}</span>
     <span>${ml}</span>`);
 
@@ -247,6 +274,7 @@ async function refreshIncidentsTab() {
     renderPanelError("#incidents-panel", "");
     renderIncidentsKpis(data.summary);
     renderIncidentsTable(data.incidents);
+    incLoadMttd();
   } catch (err) {
     renderPanelError("#incidents-panel", `Não foi possível carregar os incidentes: ${apiErrorMessage(err)}`);
     incTableState("error", null, err);

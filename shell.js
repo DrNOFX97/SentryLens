@@ -116,30 +116,34 @@ severityFilter.addEventListener("change", refreshDashboard);
 // as abas só controlam o que está visível — evita reestruturar a lógica
 // assíncrona por causa da navegação.
 //
-// Navegação em sidebar (Roadmap v2, R1): itens com data-tab abrem um painel
-// real; itens com data-planned (is-planned) ainda não têm fonte de dados e
-// abrem o painel genérico #tab-planned com "Sem dados" — nunca dados
-// inventados.
+// Navegação em sidebar (W5.1): cada entrada do menu tem `data-tab`; uma
+// entrada que agrupa várias abas lista-as em `data-tabs` e as abas
+// secundárias abrem-se pela sub-navegação (`.subnav-item[data-tab]`) dentro
+// da própria secção. O que ainda não existe vive na página #tab-roadmap.
 const navItems = document.querySelectorAll(".nav-item");
+const subnavItems = document.querySelectorAll(".subnav-item");
 const tabContents = document.querySelectorAll(".tab-content");
 const sidebarEl = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebar-toggle");
-const PLANNED_HASH_PREFIX = "planned:";
 
 function setSidebarOpen(open) {
   sidebarEl.classList.toggle("open", open);
   sidebarToggle.setAttribute("aria-expanded", String(open));
 }
 
-function showTab(contentId, activeItem) {
+function showTab(contentId, activeItem, tabId) {
   navItems.forEach((b) => {
     const isActive = b === activeItem;
     b.classList.toggle("active", isActive);
     if (isActive) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
   });
+  subnavItems.forEach((b) => {
+    if (b.dataset.tab === tabId) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   tabContents.forEach((c) => c.classList.toggle("active", c.id === contentId));
-  appCurrentTabId = (activeItem && activeItem.dataset.tab) || null;
+  appCurrentTabId = tabId || null;
   if (appCurrentTabId) rtActivate(appCurrentTabId);
   else rtDeactivate();
   if (activeItem) activeItem.closest("details")?.setAttribute("open", "");
@@ -150,26 +154,20 @@ function showTab(contentId, activeItem) {
   Object.values(charts).forEach((chart) => chart.resize());
 }
 
+// O item do menu que contém a aba: o próprio (data-tab) ou o que a lista em data-tabs.
+function navItemForTab(tabName) {
+  return [...navItems].find((b) => b.dataset.tab === tabName || (b.dataset.tabs || "").split(" ").includes(tabName));
+}
+
 function activateTab(tabName) {
-  const item = document.querySelector(`.nav-item[data-tab="${CSS.escape(tabName)}"]`);
-  if (!item) return;
-  showTab(`tab-${tabName}`, item);
+  const item = navItemForTab(tabName);
+  if (!item || !document.getElementById(`tab-${tabName}`)) return;
+  showTab(`tab-${tabName}`, item, tabName);
   history.replaceState(null, "", `#${tabName}`);
 }
 
-function activatePlanned(item) {
-  document.getElementById("planned-title").textContent = item.dataset.label;
-  document.getElementById("planned-phase").textContent = item.dataset.planned;
-  showTab("tab-planned", item);
-  history.replaceState(null, "", `#${PLANNED_HASH_PREFIX}${item.dataset.label}`);
-}
-
-navItems.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    if (btn.dataset.planned) activatePlanned(btn);
-    else activateTab(btn.dataset.tab);
-  });
-});
+navItems.forEach((btn) => btn.addEventListener("click", () => activateTab(btn.dataset.tab)));
+subnavItems.forEach((btn) => btn.addEventListener("click", () => activateTab(btn.dataset.tab)));
 
 sidebarToggle.addEventListener("click", () => setSidebarOpen(!sidebarEl.classList.contains("open")));
 
@@ -179,7 +177,7 @@ document.getElementById("system-summary-card").addEventListener("click", () => a
 // Formato do id de aba para o router (rtActivate/rtRegisterTab): o valor de
 // `data-tab` do item do nav em index.html, SEM o prefixo "tab-" da secção
 // (nav `data-tab="admin-activity"` <-> `<div id="tab-admin-activity">` <-> id
-// "admin-activity"). Itens `data-planned` não têm id: chamam rtDeactivate().
+// "admin-activity"). Abas sem registo (ex.: roadmap) deixam o router sem aba ativa.
 // "overview" NÃO é registado aqui (é de overview.js); cada módulo regista só
 // as suas abas, um id repetido rebenta o registo.
 let appCurrentTabId = "overview"; // Overview vem ativa no HTML
@@ -236,7 +234,7 @@ document.addEventListener("visibilitychange", appHeaderOnVisibility);
 if (document.visibilityState === "visible") appHeaderStart();
 // --- fim do ciclo de vida das abas ---
 
-// Deep link: #redblue, #alerts, #planned:Incidentes… (sem hash válido fica
+// Deep link: #redblue, #alerts, #ml-evaluation… (sem hash válido fica
 // na Visão Geral, que já vem ativa no HTML).
 function applyHash() {
   let hash = "";
@@ -246,13 +244,7 @@ function applyHash() {
     return; // hash malformado (ex.: #%E0): tratar como sem hash
   }
   if (!hash) return;
-  if (hash.startsWith(PLANNED_HASH_PREFIX)) {
-    const label = hash.slice(PLANNED_HASH_PREFIX.length);
-    const item = [...navItems].find((b) => b.dataset.planned && b.dataset.label === label);
-    if (item) activatePlanned(item);
-  } else {
-    activateTab(hash);
-  }
+  activateTab(hash);
 }
 window.addEventListener("hashchange", applyHash);
 applyHash();

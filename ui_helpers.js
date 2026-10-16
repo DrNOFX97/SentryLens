@@ -153,6 +153,40 @@ function slModalTabTarget(focusables, active, shiftKey) {
   return null;
 }
 
+// ----- MTTD: fonte única (GET /api/metrics, soc_metrics.build_metrics_report) -----
+// Overview, Incidentes, Red vs Blue e Métricas mostram todos a MESMA mediana da
+// MESMA janela (hours=SL_MTTD_WINDOW_HOURS, o máximo da rota) com o mesmo rótulo.
+const SL_MTTD_WINDOW_HOURS = 168;
+
+function slFormatDuration(value) {
+  if (value === null || value === undefined) return "—";
+  const s = Number(value);
+  if (!Number.isFinite(s)) return "—";
+  if (s < 60) return `${s.toFixed(1)} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`;
+  return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+}
+
+function slMttdLabel(hours) {
+  const h = Number(hours) || SL_MTTD_WINDOW_HOURS;
+  return h % 24 === 0 ? `MTTD (mediana, ${h / 24} dias)` : `MTTD (mediana, ${h} h)`;
+}
+
+// metrics = resposta de /api/metrics (ou null); error = o pedido falhou.
+// Devolve {value, label, sub}; sem amostra é sempre "—", nunca 0.
+function slMttdView(metrics, error) {
+  if (!metrics) {
+    return { value: "—", label: slMttdLabel(), sub: error ? "Fonte indisponível" : "A carregar…" };
+  }
+  const label = slMttdLabel(metrics.window_hours);
+  const m = metrics.mttd || {};
+  if (m.available === false || m.median_s === null || m.median_s === undefined) {
+    return { value: "—", label, sub: m.reason === "source_unavailable" ? "Fonte indisponível" : "Sem dados" };
+  }
+  const sub = `n=${m.n}${m.small_sample ? " · amostra pequena" : ""}${metrics.alerts_truncated ? " · limite inferior (alertas truncados)" : ""}`;
+  return { value: slFormatDuration(m.median_s), label, sub };
+}
+
 // Liga o Tab preso a qualquer .modal visível. Só corre no browser (guarda por typeof document).
 function slInstallModalFocusTrap() {
   document.addEventListener("keydown", (ev) => {

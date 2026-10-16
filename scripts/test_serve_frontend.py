@@ -111,8 +111,24 @@ def run() -> None:
         check("Host localhost:porta é aceite", status == 200)
 
         # --- whitelist continua intacta ---
-        status, _, _ = get(port, "/index.html")
+        status, headers, _ = get(port, "/index.html")
         check("/index.html continua a ser servido", status == 200)
+        csp = headers.get("content-security-policy", "")
+        directives = {d.strip().split(" ", 1)[0]: d.strip() for d in csp.split(";") if d.strip()}
+        check("/index.html traz Content-Security-Policy", bool(csp))
+        check("CSP: script-src 'self' sem unsafe-inline/unsafe-eval",
+              directives.get("script-src") == "script-src 'self'")
+        check("CSP: object-src none, base-uri none, frame-ancestors none",
+              directives.get("object-src") == "object-src 'none'"
+              and directives.get("base-uri") == "base-uri 'none'"
+              and directives.get("frame-ancestors") == "frame-ancestors 'none'")
+        check("CSP: connect-src permite o backend loopback http e ws",
+              all(x in directives.get("connect-src", "") for x in
+                  ("'self'", "http://127.0.0.1:*", "http://localhost:*", "ws://127.0.0.1:*", "ws://localhost:*")))
+        check("CSP: img-src e font-src locais", "data:" in directives.get("img-src", "")
+              and directives.get("font-src") == "font-src 'self'")
+        status, headers, _ = get(port, "/app.js")
+        check("/app.js (não-HTML) não leva CSP", status == 200 and "content-security-policy" not in headers)
         status, headers, _ = get(port, "/incidents.js")
         check("/incidents.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/live_soc.js")
