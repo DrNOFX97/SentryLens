@@ -100,6 +100,11 @@ header {
   color: #7be89b;
 }
 
+.status-warn {
+  background: #5c4400;
+  color: #ffd27a;
+}
+
 .status-error {
   background: #5c1e1e;
   color: #ff8080;
@@ -599,7 +604,8 @@ table th {
   height: 100%;
   border-radius: 4px;
   transition: width 0.4s ease, background-color 0.4s ease;
-  background: #27ae60;
+  width: 0;
+  background: transparent;
 }
 
 .progress-fill.level-normal { background: #27ae60; }
@@ -740,7 +746,6 @@ footer {
 .rb-badge.launched { background: #27ae60; }
 .rb-badge.failed { background: #e74c3c; }
 .rb-badge.skipped { background: #7f8c8d; }
-tr.row-gap { background: #fdebd0; }
 
 tr.rb-stale { opacity: 0.6; }
 tr.rb-stale td { font-style: italic; }
@@ -880,7 +885,6 @@ tr.rb-stale td { font-style: italic; }
 .mle-delta-up { color: #155724; font-weight: 600; }
 .mle-delta-down { color: #721c24; font-weight: 600; }
 .mle-delta-flat { color: #6c757d; font-weight: 600; }
-.mle-verdict { font-weight: 600; text-transform: capitalize; }
 
 /* ===== Resultado do treino (R10) — ml_models.js ===== */
 /* O mesmo âmbar do aviso e o mesmo vermelho do badge de erro.
@@ -890,7 +894,7 @@ tr.rb-stale td { font-style: italic; }
 
 /* ===== Modal (genérico) ===== */
 .modal { position: fixed; inset: 0; background: rgba(10,22,34,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal.hidden { display: none; }
+.modal[hidden] { display: none; }
 .modal-content { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 480px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto; }
 .modal-content h3 { margin: 0 0 16px; font-size: 18px; color: var(--ink-900); }
 .form-row { margin-bottom: 12px; }
@@ -930,23 +934,6 @@ tr.rb-stale td { font-style: italic; }
 
 /* Escalation table */
 #escalation-table td { vertical-align: middle; }
-
-/* Tier badge inline in tables */
-.tier-badge-inline { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-.tier-badge-inline.t1 { background: #fdecc8; }
-.tier-badge-inline.t2 { background: #d6ebf5; }
-.tier-badge-inline.t3 { background: #e3d9f3; }
-
-/* Role badge inline */
-.role-badge-inline { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-.role-badge-inline.primary { background: #e3d9f3; }
-.role-badge-inline.secondary { background: #d6ebf5; }
-.role-badge-inline.on_call { background: #fdecc8; }
-
-/* Status badges for active/inactive */
-.status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-.status-badge.active { background: #d4efdf; }
-.status-badge.inactive { background: #e0e0e0; color: #666; }
 
 /* ===== Overview profissional (Fase A) ===== */
 .ovw-status {

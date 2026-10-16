@@ -3,18 +3,6 @@
 // formatTimestamp, renderPanelError, periodSelect) — não redeclarar nenhum aqui.
 // Só mostra dados reais de /api/soc/*; sem dados, estado vazio.
 
-const ST_PANELS = [
-  "analysts-section", "shifts-section", "escalation-section",
-  "oncall-section", "sla-breaches-section", "tier-summary-section",
-];
-
-function stShowPanel(panelId) {
-  ST_PANELS.forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.hidden = id !== panelId;
-  });
-}
-
 function stText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
@@ -29,13 +17,13 @@ function tierBadge(tier) {
   if (!tier) return '<span class="inc-status inc-status-NEW">—</span>';
   const labels = { 1: "Tier 1", 2: "Tier 2", 3: "Tier 3" };
   const cls = { 1: "inc-status-NEW", 2: "inc-status-INVESTIGATING", 3: "inc-status-CONTAINED" };
-  return `<span class="inc-status ${cls[tier]}">${labels[tier] || tier}</span>`;
+  return `<span class="inc-status ${cls[tier]}">${escapeHtml(String(labels[tier] || tier))}</span>`;
 }
 
 function roleBadge(role) {
   const labels = { primary: "Principal", secondary: "Secundário", on_call: "De prevenção" };
   const cls = { primary: "inc-status-CONTAINED", secondary: "inc-status-INVESTIGATING", on_call: "inc-status-NEW" };
-  return `<span class="inc-status ${cls[role]}">${labels[role] || role}</span>`;
+  return `<span class="inc-status ${cls[role]}">${escapeHtml(String(labels[role] || role))}</span>`;
 }
 
 function formatDateTimeLocal(ts) {
@@ -79,14 +67,17 @@ async function loadAnalysts() {
   stText("analyst-notice", "A carregar analistas...");
   try {
     const tier = document.getElementById("analyst-tier-filter").value;
-    const active = document.getElementById("analyst-active-filter").value;
+    const filter = slAnalystActiveFilter(document.getElementById("analyst-active-filter").value);
     const params = new URLSearchParams();
     if (tier) params.set("tier", tier);
-    params.set("active_only", active === "" ? "true" : active);
+    params.set("active_only", filter.activeOnly ? "true" : "false");
     const data = await stRequest("GET", `/api/soc/analysts?${params}`);
-    stAnalystsCache = data.analysts || [];
+    const received = data.analysts || [];
+    // O select de turnos precisa dos analistas ativos da resposta completa,
+    // por isso recebe a lista antes do filtro "Inativos" (feito no cliente).
+    updateShiftAnalystSelect(received);
+    stAnalystsCache = filter.onlyInactive ? received.filter(a => !a.active) : received;
     renderAnalystsTable(stAnalystsCache);
-    updateShiftAnalystSelect(stAnalystsCache);
     stText("analyst-notice", `${stAnalystsCache.length} analista(s)`);
   } catch (err) {
     renderPanelError("#analysts-section", `Falha ao carregar analistas: ${err.message}`);
@@ -108,8 +99,8 @@ function renderAnalystsTable(analysts) {
       <td>${stCell(a.email)}</td>
       <td>${a.active ? '<span class="inc-status inc-status-RESOLVED">Ativo</span>' : '<span class="inc-status inc-status-CLOSED">Inativo</span>'}</td>
       <td>
-        <button class="btn-sm" onclick="openAnalystModal(\'edit\', \'${escapeHtml(a.id)}\')">✏️</button>
-        ${a.active ? `<button class="btn-sm btn-danger" onclick="deactivateAnalyst('${escapeHtml(a.id)}', '${escapeHtml(a.name)}')">⛔ Desativar</button>` : ""}
+        <button class="btn-sm" data-action="edit" data-id="${escapeHtml(a.id)}">Editar</button>
+        ${a.active ? `<button class="btn-sm btn-danger" data-action="deactivate" data-id="${escapeHtml(a.id)}">Desativar</button>` : ""}
       </td>
     </tr>
   `).join("");
@@ -121,6 +112,16 @@ function updateShiftAnalystSelect(analysts) {
   select.innerHTML = '<option value="">Selecione...</option>' +
     analysts.filter(a => a.active).map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} (${tierBadge(a.tier).replace(/<[^>]+>/g, '')})</option>`).join("");
   if (analysts.some(a => a.id === current)) select.value = current;
+}
+
+// Delegação de eventos: o nome do analista nunca passa pelo DOM como código.
+function stOnAnalystsClick(event) {
+  const btn = event.target.closest("button[data-action]");
+  if (!btn) return;
+  const analyst = stAnalystsCache.find((a) => a.id === btn.dataset.id);
+  if (!analyst) return;
+  if (btn.dataset.action === "edit") openAnalystModal("edit", analyst.id);
+  else if (btn.dataset.action === "deactivate") deactivateAnalyst(analyst.id, analyst.name);
 }
 
 document.getElementById("analyst-tier-filter").addEventListener("change", loadAnalysts);
@@ -163,12 +164,12 @@ document.getElementById("analyst-form").addEventListener("submit", async (e) => 
 document.getElementById("analyst-cancel-btn").addEventListener("click", closeAnalystModal);
 
 function openAnalystModal(mode, analystId = null) {
-  const modal = document.getElementById("analyst-modal");
   const form = document.getElementById("analyst-form");
   form.reset();
   document.getElementById("analyst-modal-id").value = "";
   document.getElementById("analyst-active-row").hidden = true;
   document.getElementById("analyst-id").disabled = false;
+  document.getElementById("analyst-name").disabled = false;
 
   if (mode === "edit" && analystId) {
     const analyst = stAnalystsCache.find(a => a.id === analystId);
@@ -178,6 +179,8 @@ function openAnalystModal(mode, analystId = null) {
     document.getElementById("analyst-id").value = analyst.id;
     document.getElementById("analyst-id").disabled = true;
     document.getElementById("analyst-name").value = analyst.name;
+    // O PATCH (AnalystUpdate) não aceita nome: bloquear evita uma alteração perdida em silêncio.
+    document.getElementById("analyst-name").disabled = true;
     document.getElementById("analyst-tier").value = analyst.tier;
     document.getElementById("analyst-email").value = analyst.email || "";
     document.getElementById("analyst-active").value = analyst.active ? "1" : "0";
@@ -186,11 +189,11 @@ function openAnalystModal(mode, analystId = null) {
     document.getElementById("analyst-modal-title").textContent = "Novo Analista";
     document.getElementById("analyst-active-row").hidden = true;
   }
-  modal.hidden = false;
+  stOpenModal("analyst-modal", mode === "edit" ? "analyst-tier" : "analyst-id");
 }
 
 function closeAnalystModal() {
-  document.getElementById("analyst-modal").hidden = true;
+  stCloseModal("analyst-modal");
 }
 
 async function deactivateAnalyst(id, name) {
@@ -224,17 +227,16 @@ async function loadShifts() {
 function renderShiftsTable(shifts) {
   const body = document.getElementById("shifts-body");
   if (!shifts.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Sem turnos.</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem turnos.</td></tr>';
     return;
   }
   body.innerHTML = shifts.map((s) => `
-    <tr data-id="${s.id}">
+    <tr data-id="${escapeHtml(String(s.id))}">
       <td>${stCell(s.analyst_name || s.analyst_id)}</td>
       <td>${tierBadge(s.analyst_tier)}</td>
       <td>${formatDateTimeLocal(s.start_ts)}</td>
       <td>${formatDateTimeLocal(s.end_ts)}</td>
       <td>${roleBadge(s.role)}</td>
-      <td><button class="btn-sm btn-danger" onclick="deleteShift(${s.id})">🗑️</button></td>
     </tr>
   `).join("");
 }
@@ -245,7 +247,6 @@ document.getElementById("shift-create-btn").addEventListener("click", () => open
 
 document.getElementById("shift-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const id = document.getElementById("shift-modal-id").value;
   const analyst_id = document.getElementById("shift-analyst").value;
   const start_ts = document.getElementById("shift-start").value;
   const end_ts = document.getElementById("shift-end").value;
@@ -256,14 +257,8 @@ document.getElementById("shift-form").addEventListener("submit", async (e) => {
   btn.textContent = "A guardar...";
 
   try {
-    if (id) {
-      // Shifts don't have PATCH, so we'd need to delete and recreate or add that endpoint
-      // For now, just show not implemented
-      stText("shift-notice", "⚠️ Edição de turnos não implementada (apagar e recriar)");
-    } else {
-      await stRequest("POST", "/api/soc/shifts", { analyst_id, start_ts, end_ts, role });
-      stText("shift-notice", "✅ Turno criado");
-    }
+    await stRequest("POST", "/api/soc/shifts", { analyst_id, start_ts, end_ts, role });
+    stText("shift-notice", "✅ Turno criado");
     closeShiftModal();
     await loadShifts();
   } catch (err) {
@@ -276,31 +271,17 @@ document.getElementById("shift-form").addEventListener("submit", async (e) => {
 
 document.getElementById("shift-cancel-btn").addEventListener("click", closeShiftModal);
 
-function openShiftModal(mode, shiftId = null) {
-  const modal = document.getElementById("shift-modal");
+function openShiftModal(mode) {
   const form = document.getElementById("shift-form");
   form.reset();
-  document.getElementById("shift-modal-id").value = "";
   document.getElementById("shift-analyst").value = "";
 
-  if (mode === "edit" && shiftId) {
-    document.getElementById("shift-modal-title").textContent = `Editar Turno #${shiftId}`;
-    document.getElementById("shift-modal-id").value = shiftId;
-    // Would need to fetch shift details
-  } else {
-    document.getElementById("shift-modal-title").textContent = "Novo Turno";
-  }
-  modal.hidden = false;
+  document.getElementById("shift-modal-title").textContent = "Novo Turno";
+  stOpenModal("shift-modal", "shift-analyst");
 }
 
 function closeShiftModal() {
-  document.getElementById("shift-modal").hidden = true;
-}
-
-async function deleteShift(id) {
-  if (!confirm("Apagar este turno?")) return;
-  // Would need DELETE endpoint
-  stText("shift-notice", "⚠️ Apagar turnos não implementado");
+  stCloseModal("shift-modal");
 }
 
 // ====== Escalation Rules ======
@@ -320,17 +301,16 @@ async function loadEscalationRules() {
 function renderEscalationTable(rules) {
   const body = document.getElementById("escalation-body");
   if (!rules.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Sem regras de escalamento.</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem regras de escalamento.</td></tr>';
     return;
   }
   body.innerHTML = rules.map((r) => `
-    <tr data-id="${r.id}">
+    <tr data-id="${escapeHtml(String(r.id))}">
       <td>${tierBadge(r.from_tier)}</td>
       <td>${r.to_tier ? tierBadge(r.to_tier) : '<span class="inc-status inc-status-CLOSED">Final</span>'}</td>
       <td>${severityBadge(r.severity)}</td>
       <td>${r.auto_escalate ? '<span class="inc-status inc-status-RESOLVED">Sim</span>' : '<span class="inc-status inc-status-NEW">Não</span>'}</td>
       <td>${stCell(r.sla_minutes)}</td>
-      <td><button class="btn-sm btn-danger" onclick="deleteEscalationRule(${r.id})">🗑️</button></td>
     </tr>
   `).join("");
 }
@@ -339,7 +319,6 @@ document.getElementById("escalation-create-btn").addEventListener("click", () =>
 
 document.getElementById("escalation-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const id = document.getElementById("escalation-modal-id").value;
   const from_tier = parseInt(document.getElementById("escalation-from-tier").value, 10);
   const to_tier = document.getElementById("escalation-to-tier").value;
   const severity = document.getElementById("escalation-severity").value;
@@ -352,12 +331,8 @@ document.getElementById("escalation-form").addEventListener("submit", async (e) 
   btn.textContent = "A guardar...";
 
   try {
-    if (id) {
-      stText("escalation-notice", "⚠️ Edição de regras não implementada (apagar e recriar)");
-    } else {
-      await stRequest("POST", "/api/soc/escalation-rules", { from_tier, to_tier: to_tier ? parseInt(to_tier, 10) : null, severity, auto_escalate, sla_minutes: sla });
-      stText("escalation-notice", "✅ Regra criada");
-    }
+    await stRequest("POST", "/api/soc/escalation-rules", { from_tier, to_tier: to_tier ? parseInt(to_tier, 10) : null, severity, auto_escalate, sla_minutes: sla });
+    stText("escalation-notice", "✅ Regra criada");
     closeEscalationModal();
     await loadEscalationRules();
   } catch (err) {
@@ -370,30 +345,16 @@ document.getElementById("escalation-form").addEventListener("submit", async (e) 
 
 document.getElementById("escalation-cancel-btn").addEventListener("click", closeEscalationModal);
 
-function openEscalationModal(mode, ruleId = null) {
-  const modal = document.getElementById("escalation-modal");
+function openEscalationModal(mode) {
   const form = document.getElementById("escalation-form");
   form.reset();
-  document.getElementById("escalation-modal-id").value = "";
 
-  if (mode === "edit" && ruleId) {
-    document.getElementById("escalation-modal-title").textContent = `Editar Regra #${ruleId}`;
-    document.getElementById("escalation-modal-id").value = ruleId;
-    // Would need to fetch rule details
-  } else {
-    document.getElementById("escalation-modal-title").textContent = "Nova Regra de Escalamento";
-  }
-  modal.hidden = false;
+  document.getElementById("escalation-modal-title").textContent = "Nova Regra de Escalamento";
+  stOpenModal("escalation-modal", "escalation-from-tier");
 }
 
 function closeEscalationModal() {
-  document.getElementById("escalation-modal").hidden = true;
-}
-
-async function deleteEscalationRule(id) {
-  if (!confirm("Apagar esta regra de escalamento?")) return;
-  // Would need DELETE endpoint
-  stText("escalation-notice", "⚠️ Apagar regras não implementado");
+  stCloseModal("escalation-modal");
 }
 
 // ====== On-Call / Primary ======
@@ -468,10 +429,12 @@ function renderSLABreaches(breaches) {
 async function loadTierSummary() {
   stText("tier-summary-notice", "A carregar...");
   try {
-    const hours = parseInt(periodSelect.value, 10) * 24;
+    const days = parseInt(periodSelect.value, 10);
+    const hours = slTierWindowHours(days);
+    const clamped = Number.isFinite(days) && days > 0 && days * 24 > hours;
     const data = await stRequest("GET", `/api/soc/summary-by-tier?hours=${hours}`);
     renderTierSummary(data.by_tier || {});
-    stText("tier-summary-notice", `Janela de ${hours}h`);
+    stText("tier-summary-notice", clamped ? `Janela de ${hours} h (máximo desta fonte)` : `Janela de ${hours} h`);
   } catch (err) {
     stText("tier-summary-notice", `⚠️ ${err.message}`);
   }
@@ -499,9 +462,39 @@ function renderTierSummary(byTier) {
   }).join("");
 }
 
+// ====== Modais ======
+
+const ST_MODAL_IDS = ["analyst-modal", "shift-modal", "escalation-modal"];
+let stModalOpener = null;
+
+function stOpenModal(modalId, focusId) {
+  stModalOpener = document.activeElement;
+  document.getElementById(modalId).hidden = false;
+  const target = document.getElementById(focusId);
+  if (target) target.focus();
+}
+
+function stCloseModal(modalId) {
+  document.getElementById(modalId).hidden = true;
+  if (stModalOpener && typeof stModalOpener.focus === "function" && document.contains(stModalOpener)) {
+    stModalOpener.focus();
+  }
+  stModalOpener = null;
+}
+
 // ====== Main ======
 
 function stInit() {
+  ST_MODAL_IDS.forEach(id => {
+    const modal = document.getElementById(id);
+    modal.addEventListener("click", ev => { if (ev.target === modal) stCloseModal(id); });
+  });
+  document.addEventListener("keydown", ev => {
+    if (ev.key !== "Escape") return;
+    const open = ST_MODAL_IDS.find(id => !document.getElementById(id).hidden);
+    if (open) stCloseModal(open);
+  });
+  document.getElementById("analysts-body").addEventListener("click", stOnAnalystsClick);
   loadAnalysts();
   loadShifts();
   loadEscalationRules();
@@ -534,14 +527,3 @@ if (document.readyState === "loading") {
 } else {
   stInit();
 }
-
-// Expose for inline onclick
-window.openAnalystModal = openAnalystModal;
-window.closeAnalystModal = closeAnalystModal;
-window.deactivateAnalyst = deactivateAnalyst;
-window.openShiftModal = openShiftModal;
-window.closeShiftModal = closeShiftModal;
-window.deleteShift = deleteShift;
-window.openEscalationModal = openEscalationModal;
-window.closeEscalationModal = closeEscalationModal;
-window.deleteEscalationRule = deleteEscalationRule;

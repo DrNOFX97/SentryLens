@@ -47,9 +47,17 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function setStatus(ok) {
-  statusIndicator.textContent = ok ? "● ligado ao Wazuh" : "● sem ligação";
-  statusIndicator.className = "status-indicator " + (ok ? "status-ok" : "status-error");
+// Estado real do SIEM (/api/siem/health); só "sem ligação" se o próprio backend falhar.
+async function refreshHeaderStatus() {
+  let estado;
+  try {
+    estado = slHeaderStatus(await fetchJSON("/api/siem/health"), false);
+  } catch (err) {
+    console.error(err);
+    estado = slHeaderErrorStatus(err);
+  }
+  statusIndicator.textContent = estado.text;
+  statusIndicator.className = "status-indicator " + estado.cls;
 }
 
 // Aviso fixo no topo do dashboard quando o WebSocket de tempo real falha
@@ -196,12 +204,7 @@ function mapSeverity(sev) {
 }
 
 function formatTimestamp(ts) {
-  if (!ts) return "-";
-  try {
-    return new Date(ts).toLocaleString("pt-PT");
-  } catch {
-    return ts;
-  }
+  return slFormatTimestamp(ts);
 }
 
 async function fetchJSON(path) {
@@ -438,8 +441,9 @@ function metricLabel(metric) {
 }
 
 function setProgressBar(barEl, percent, level) {
-  barEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
-  barEl.className = `progress-fill level-${level}`;
+  barEl.style.width = slProgressWidth(percent);
+  // Sem valor a barra fica vazia e sem cor de nível (nunca verde a 100%).
+  barEl.className = slNumberOrNull(percent) === null ? "progress-fill" : `progress-fill level-${level}`;
 }
 
 // Resume os módulos de RAM instalados (ex: "2× 16 GB DDR5 @ 6200 MHz") —
@@ -508,7 +512,7 @@ function renderViolationsHistory(history) {
 }
 
 function renderSystemSummaryCard({
-  cpuPct, cpuLvl, ramPct, ramLvl, worstDisk, worstDiskLevel, downloadLevel, uploadLevel, activeCount, criticalCount,
+  cpuPct, cpuLvl, ramPct, ramLvl, worstDisk, worstDiskLevel, downloadLevel, uploadLevel, networkMeasured, activeCount, criticalCount,
 }) {
   const badge = document.getElementById("summary-health-badge");
   let healthLabel = "OK";
@@ -524,15 +528,14 @@ function renderSystemSummaryCard({
   badge.className = `health-badge level-${healthLevel}`;
 
   setProgressBar(document.getElementById("summary-cpu-bar"), cpuPct, cpuLvl);
-  document.getElementById("summary-cpu-pct").textContent = `${cpuPct.toFixed(0)}%`;
+  document.getElementById("summary-cpu-pct").textContent = slFmtPct(cpuPct);
 
   setProgressBar(document.getElementById("summary-ram-bar"), ramPct, ramLvl);
-  document.getElementById("summary-ram-pct").textContent = `${ramPct.toFixed(0)}%`;
+  document.getElementById("summary-ram-pct").textContent = slFmtPct(ramPct);
 
-  if (worstDisk) {
-    setProgressBar(document.getElementById("summary-disk-bar"), worstDisk.usage_percent, worstDiskLevel);
-    document.getElementById("summary-disk-pct").textContent = `${worstDisk.usage_percent.toFixed(0)}%`;
-  }
+  const diskPct = worstDisk ? worstDisk.usage_percent : null;
+  setProgressBar(document.getElementById("summary-disk-bar"), diskPct, worstDiskLevel);
+  document.getElementById("summary-disk-pct").textContent = slFmtPct(diskPct);
 
   const netLevel =
     downloadLevel === "critico" || uploadLevel === "critico"
@@ -544,135 +547,175 @@ function renderSystemSummaryCard({
   // Download/upload não são naturalmente uma percentagem 0-100; a barra fica
   // sempre cheia, só a cor muda com o nível — mantém o mesmo ritmo visual
   // das outras três métricas em vez de destoar com um formato diferente.
-  setProgressBar(document.getElementById("summary-network-bar"), 100, netLevel);
-  document.getElementById("summary-network-status").textContent = netLabelMap[netLevel];
+  setProgressBar(document.getElementById("summary-network-bar"), networkMeasured ? 100 : null, netLevel);
+  document.getElementById("summary-network-status").textContent = networkMeasured ? netLabelMap[netLevel] : "—";
+}
+
+// Cartão de resumo do Overview sem dados: badge e textos a "—", barras vazias.
+function resetSystemSummaryCard() {
+  const badge = document.getElementById("summary-health-badge");
+  badge.textContent = "—";
+  badge.className = "health-badge";
+  ["cpu", "ram", "disk", "network"].forEach((k) => {
+    setProgressBar(document.getElementById(`summary-${k}-bar`), null, "normal");
+  });
+  ["summary-cpu-pct", "summary-ram-pct", "summary-disk-pct", "summary-network-status"].forEach((id) => {
+    document.getElementById(id).textContent = "—";
+  });
+}
+
+// Painel Sistema sem dados: valores a "—", barras vazias, listas "Sem dados".
+function resetSystemPanelValues() {
+  ["sys-cpu-value", "sys-ram-value", "sys-cpu-detail", "sys-ram-detail",
+    "sys-net-download", "sys-net-upload"].forEach((id) => {
+    document.getElementById(id).textContent = "—";
+  });
+  document.getElementById("sys-net-sub").textContent = "Última medição: —";
+  ["sys-cpu-bar", "sys-ram-bar", "sys-net-bar"].forEach((id) => {
+    setProgressBar(document.getElementById(id), null, "normal");
+  });
+  document.getElementById("sys-disk-cards").innerHTML = "";
+  document.getElementById("network-interfaces-body").innerHTML =
+    '<tr><td colspan="3" class="empty-state">Sem dados</td></tr>';
+  document.getElementById("system-alerts-list").innerHTML = '<p class="empty-state">Sem dados</p>';
+  document.getElementById("violations-history-body").innerHTML =
+    '<tr><td colspan="4" class="empty-state">Sem dados</td></tr>';
 }
 
 async function loadSystemPanel() {
-  const [specs, alertsData, usageHistoryData, historyData] = await Promise.all([
-    fetchJSON("/api/system/specs"),
-    fetchJSON("/api/system/alerts"),
-    fetchJSON("/api/system/usage-history"),
-    fetchJSON("/api/system/history"),
-  ]);
+  try {
+    const [specs, alertsData, usageHistoryData, historyData] = await Promise.all([
+      fetchJSON("/api/system/specs"),
+      fetchJSON("/api/system/alerts"),
+      fetchJSON("/api/system/usage-history"),
+      fetchJSON("/api/system/history"),
+    ]);
 
-  const levelByMetric = {};
-  (alertsData.active_violations || []).forEach((v) => {
-    levelByMetric[v.metric] = v.level;
-  });
-
-  // CPU
-  const cpuPct = specs.cpu.usage_percent;
-  const cpuLvl = levelByMetric["cpu"] || "normal";
-  document.getElementById("sys-cpu-value").textContent = `${cpuPct.toFixed(1)}%`;
-  setProgressBar(document.getElementById("sys-cpu-bar"), cpuPct, cpuLvl);
-  const cpuModelLine = specs.cpu.frequency_mhz
-    ? `${specs.cpu.model} @ ${(specs.cpu.frequency_mhz / 1000).toFixed(2)} GHz`
-    : specs.cpu.model;
-  document.getElementById("sys-cpu-detail").textContent =
-    `${specs.cpu.physical_cores} núcleos físicos / ${specs.cpu.logical_cores} lógicos · ${cpuModelLine}`;
-
-  // RAM
-  const ramPct = specs.ram.usage_percent;
-  const ramLvl = levelByMetric["ram"] || "normal";
-  document.getElementById("sys-ram-value").textContent = `${ramPct.toFixed(1)}%`;
-  setProgressBar(document.getElementById("sys-ram-bar"), ramPct, ramLvl);
-  const ramModules = summarizeRamModules(specs.ram.modules);
-  const ramDetailParts = [
-    `${formatBytes(specs.ram.used_bytes)} / ${formatBytes(specs.ram.total_bytes)}`,
-    ramModules?.sizeLine,
-    ramModules?.modelLine,
-  ].filter(Boolean);
-  document.getElementById("sys-ram-detail").textContent = ramDetailParts.join(" · ");
-
-  // Disco (um card por partição)
-  const diskContainer = document.getElementById("sys-disk-cards");
-  diskContainer.innerHTML = "";
-  let worstDisk = null;
-  let worstDiskLevel = "normal";
-  (specs.disk || []).forEach((disk) => {
-    const metricName = `disk:${disk.mountpoint}`;
-    const level = levelByMetric[metricName] || "normal";
-    if (!worstDisk || disk.usage_percent > worstDisk.usage_percent) {
-      worstDisk = disk;
-      worstDiskLevel = level;
-    }
-    const diskDetailParts = [
-      `${formatBytes(disk.used_bytes)} / ${formatBytes(disk.total_bytes)}`,
-      disk.filesystem,
-      disk.physical_model,
-      disk.bus_type,
-    ].filter(Boolean);
-    const card = document.createElement("div");
-    card.className = "system-card";
-    card.innerHTML = `
-      <div class="system-card-header">
-        <h3>Disco ${escapeHtml(disk.mountpoint)}</h3>
-        ${disk.media_type ? `<span class="media-badge ${escapeHtml(disk.media_type.toLowerCase())}">${escapeHtml(disk.media_type)}</span>` : ""}
-        <span class="system-card-value">${disk.usage_percent.toFixed(1)}%</span>
-      </div>
-      <div class="progress-track"><div class="progress-fill level-${escapeHtml(level)}" style="width:${Math.min(100, disk.usage_percent)}%"></div></div>
-      <div class="system-sub">${escapeHtml(diskDetailParts.join(" · "))}</div>
-    `;
-    diskContainer.appendChild(card);
-  });
-
-  // Rede (velocidade medida)
-  const net = specs.network_speed;
-  const downloadLevel = levelByMetric["network_download"] || "normal";
-  const uploadLevel = levelByMetric["network_upload"] || "normal";
-  const downloadEl = document.getElementById("sys-net-download");
-  const uploadEl = document.getElementById("sys-net-upload");
-  downloadEl.textContent = net ? net.download_mbps.toFixed(0) : "—";
-  uploadEl.textContent = net ? net.upload_mbps.toFixed(0) : "—";
-  downloadEl.className = `level-${downloadLevel}`;
-  uploadEl.className = `level-${uploadLevel}`;
-  const netBarLevel =
-    downloadLevel === "critico" || uploadLevel === "critico"
-      ? "critico"
-      : downloadLevel === "aviso" || uploadLevel === "aviso"
-        ? "aviso"
-        : "normal";
-  setProgressBar(document.getElementById("sys-net-bar"), 100, netBarLevel);
-  document.getElementById("sys-net-sub").textContent = net
-    ? `Última medição: ${formatTimestamp(net.measured_at)} · ping ${net.ping_ms != null ? net.ping_ms.toFixed(0) : "—"} ms · ${net.server || "-"}`
-    : "Ainda sem medição de rede";
-
-  // Interfaces de rede desta máquina (separado da medição de velocidade acima)
-  renderNetworkInterfaces(specs.network || []);
-
-  // Alertas de sistema ativos
-  const list = document.getElementById("system-alerts-list");
-  const active = alertsData.active_violations || [];
-  if (active.length === 0) {
-    list.innerHTML = '<p class="empty-state">Sem violações ativas</p>';
-  } else {
-    list.innerHTML = "";
-    active.forEach((v) => {
-      const item = document.createElement("div");
-      item.className = `system-alert-item level-${v.level}`;
-      item.innerHTML = `
-        <span><strong>${escapeHtml(metricLabel(v.metric))}</strong> — ${v.level === "critico" ? "Crítico" : "Aviso"}</span>
-        <span>a decorrer há ${escapeHtml(formatDuration(v.duration_seconds))}</span>
-      `;
-      list.appendChild(item);
+    const levelByMetric = {};
+    (alertsData.active_violations || []).forEach((v) => {
+      levelByMetric[v.metric] = v.level;
     });
-  }
 
-  renderViolationsHistory(historyData.history || []);
-  renderSystemUsageChart(usageHistoryData.history || []);
-  renderSystemSummaryCard({
-    cpuPct,
-    cpuLvl,
-    ramPct,
-    ramLvl,
-    worstDisk,
-    worstDiskLevel,
-    downloadLevel,
-    uploadLevel,
-    activeCount: active.length,
-    criticalCount: active.filter((v) => v.level === "critico").length,
-  });
+    // CPU
+    const cpuPct = specs.cpu.usage_percent;
+    const cpuLvl = levelByMetric["cpu"] || "normal";
+    document.getElementById("sys-cpu-value").textContent = slFmtPct(cpuPct, 1);
+    setProgressBar(document.getElementById("sys-cpu-bar"), cpuPct, cpuLvl);
+    const cpuModelLine = specs.cpu.frequency_mhz
+      ? `${specs.cpu.model} @ ${(specs.cpu.frequency_mhz / 1000).toFixed(2)} GHz`
+      : specs.cpu.model;
+    document.getElementById("sys-cpu-detail").textContent =
+      `${specs.cpu.physical_cores} núcleos físicos / ${specs.cpu.logical_cores} lógicos · ${cpuModelLine}`;
+
+    // RAM
+    const ramPct = specs.ram.usage_percent;
+    const ramLvl = levelByMetric["ram"] || "normal";
+    document.getElementById("sys-ram-value").textContent = slFmtPct(ramPct, 1);
+    setProgressBar(document.getElementById("sys-ram-bar"), ramPct, ramLvl);
+    const ramModules = summarizeRamModules(specs.ram.modules);
+    const ramDetailParts = [
+      `${formatBytes(specs.ram.used_bytes)} / ${formatBytes(specs.ram.total_bytes)}`,
+      ramModules?.sizeLine,
+      ramModules?.modelLine,
+    ].filter(Boolean);
+    document.getElementById("sys-ram-detail").textContent = ramDetailParts.join(" · ");
+
+    // Disco (um card por partição)
+    const diskContainer = document.getElementById("sys-disk-cards");
+    diskContainer.innerHTML = "";
+    let worstDisk = null;
+    let worstDiskLevel = "normal";
+    (specs.disk || []).forEach((disk) => {
+      const metricName = `disk:${disk.mountpoint}`;
+      const level = levelByMetric[metricName] || "normal";
+      if (!worstDisk || disk.usage_percent > worstDisk.usage_percent) {
+        worstDisk = disk;
+        worstDiskLevel = level;
+      }
+      const diskDetailParts = [
+        `${formatBytes(disk.used_bytes)} / ${formatBytes(disk.total_bytes)}`,
+        disk.filesystem,
+        disk.physical_model,
+        disk.bus_type,
+      ].filter(Boolean);
+      const card = document.createElement("div");
+      card.className = "system-card";
+      card.innerHTML = `
+        <div class="system-card-header">
+          <h3>Disco ${escapeHtml(disk.mountpoint)}</h3>
+          ${disk.media_type ? `<span class="media-badge ${escapeHtml(disk.media_type.toLowerCase())}">${escapeHtml(disk.media_type)}</span>` : ""}
+          <span class="system-card-value">${escapeHtml(slFmtPct(disk.usage_percent, 1))}</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill level-${escapeHtml(level)}" style="width:${slProgressWidth(disk.usage_percent)}"></div></div>
+        <div class="system-sub">${escapeHtml(diskDetailParts.join(" · "))}</div>
+      `;
+      diskContainer.appendChild(card);
+    });
+
+    // Rede (velocidade medida)
+    const net = specs.network_speed;
+    const downloadLevel = levelByMetric["network_download"] || "normal";
+    const uploadLevel = levelByMetric["network_upload"] || "normal";
+    const downloadEl = document.getElementById("sys-net-download");
+    const uploadEl = document.getElementById("sys-net-upload");
+    downloadEl.textContent = slNumberOrNull(net?.download_mbps)?.toFixed(0) ?? "—";
+    uploadEl.textContent = slNumberOrNull(net?.upload_mbps)?.toFixed(0) ?? "—";
+    downloadEl.className = `level-${downloadLevel}`;
+    uploadEl.className = `level-${uploadLevel}`;
+    const netBarLevel =
+      downloadLevel === "critico" || uploadLevel === "critico"
+        ? "critico"
+        : downloadLevel === "aviso" || uploadLevel === "aviso"
+          ? "aviso"
+          : "normal";
+    setProgressBar(document.getElementById("sys-net-bar"), net ? 100 : null, netBarLevel);
+    document.getElementById("sys-net-sub").textContent = net
+      ? `Última medição: ${formatTimestamp(net.measured_at)} · ping ${slNumberOrNull(net.ping_ms)?.toFixed(0) ?? "—"} ms · ${net.server || "-"}`
+      : "Ainda sem medição de rede";
+
+    // Interfaces de rede desta máquina (separado da medição de velocidade acima)
+    renderNetworkInterfaces(specs.network || []);
+
+    // Alertas de sistema ativos
+    const list = document.getElementById("system-alerts-list");
+    const active = alertsData.active_violations || [];
+    if (active.length === 0) {
+      list.innerHTML = '<p class="empty-state">Sem violações ativas</p>';
+    } else {
+      list.innerHTML = "";
+      active.forEach((v) => {
+        const item = document.createElement("div");
+        item.className = `system-alert-item level-${v.level}`;
+        item.innerHTML = `
+          <span><strong>${escapeHtml(metricLabel(v.metric))}</strong> — ${v.level === "critico" ? "Crítico" : "Aviso"}</span>
+          <span>a decorrer há ${escapeHtml(formatDuration(v.duration_seconds))}</span>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    renderViolationsHistory(historyData.history || []);
+    renderSystemUsageChart(usageHistoryData.history || []);
+    renderSystemSummaryCard({
+      cpuPct,
+      cpuLvl,
+      ramPct,
+      ramLvl,
+      worstDisk,
+      worstDiskLevel,
+      downloadLevel,
+      uploadLevel,
+      networkMeasured: Boolean(net),
+      activeCount: active.length,
+      criticalCount: active.filter((v) => v.level === "critico").length,
+    });
+    renderPanelError("#system-panel", null);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#system-panel", err.message || "Não foi possível ler o estado desta máquina.");
+    resetSystemPanelValues();
+    resetSystemSummaryCard();
+  }
 }
 
 async function forceSpeedtest() {
@@ -688,6 +731,7 @@ async function forceSpeedtest() {
     await loadSystemPanel();
   } catch (err) {
     console.error(err);
+    renderPanelError("#system-panel", "Não foi possível medir a rede: " + err.message);
   } finally {
     btn.disabled = false;
     btn.textContent = "🔄 Medir agora";
@@ -1165,15 +1209,17 @@ function renderMlAnomaliesTable(results) {
   results.forEach((r) => {
     const tr = document.createElement("tr");
     tr.className = r.agreement === "diverge" ? "row-diverge" : "";
+    const mlScore = slNumberOrNull(r.ml_score);
+    const agreementLabel = r.agreement === "agree" ? "✅ Concorda" : r.agreement === "diverge" ? "⚡ Diverge" : "—";
     tr.innerHTML = `
       <td class="mono">${escapeHtml(formatTimestamp(r.timestamp))}</td>
       <td>${escapeHtml(r.agent_name)}</td>
       <td>${escapeHtml(r.target_user)}</td>
       <td>${escapeHtml(String(r.windows_event_id))}</td>
       <td>${severityBadge(r.severity)}</td>
-      <td class="mono">${r.ml_score.toFixed(4)}</td>
+      <td class="mono">${escapeHtml(mlScore === null ? "—" : mlScore.toFixed(4))}</td>
       <td>${r.ml_is_anomaly ? "⚠️ Sim" : "Não"}</td>
-      <td><span class="agreement-badge agreement-${r.agreement}">${r.agreement === "agree" ? "✅ Concorda" : "⚡ Diverge"}</span></td>
+      <td><span class="agreement-badge agreement-${escapeHtml(String(r.agreement))}">${escapeHtml(agreementLabel)}</span></td>
     `;
     tbody.appendChild(tr);
   });
@@ -1187,9 +1233,7 @@ async function loadMlAnomaliesPanel(hours) {
     document.getElementById("kpi-ml-total").textContent = data.total ?? 0;
     document.getElementById("kpi-ml-anomalies").textContent = data.ml_anomalies_count ?? 0;
     document.getElementById("kpi-ml-rule-flagged").textContent = data.rule_flagged_count ?? 0;
-    const total = data.total || 0;
-    const agreementPct = total > 0 ? Math.round((data.agree_count / total) * 100) : 0;
-    document.getElementById("kpi-ml-agreement").textContent = `${agreementPct}%`;
+    document.getElementById("kpi-ml-agreement").textContent = slAgreementText(data.agree_count, data.total);
     document.getElementById("kpi-ml-diverge").textContent = data.diverge_count ?? 0;
 
     renderMlAnomaliesTable(data.results || []);
@@ -1214,19 +1258,21 @@ function renderComplianceTable(alerts) {
     return;
   }
 
-  const estadoLabel = (estado) => (estado === "aplicavel" ? "✅ Aplicável" : "➖ N/A");
-
   alerts.forEach((a) => {
     const tr = document.createElement("tr");
     const c = a.compliance || {};
+    const cell = (v) => {
+      const { label, title } = slComplianceVerdict(v);
+      return `<td title="${escapeHtml(title)}">${escapeHtml(label)}</td>`;
+    };
     tr.innerHTML = `
       <td class="mono">${escapeHtml(formatTimestamp(a.timestamp))}</td>
       <td>${escapeHtml(a.agent_name)}</td>
       <td>${escapeHtml(a.friendly_name)}</td>
       <td>${severityBadge(a.severity)}</td>
-      <td>${escapeHtml(estadoLabel(c.rgpd && c.rgpd.estado))}</td>
-      <td>${escapeHtml(estadoLabel(c.nis2 && c.nis2.estado))}</td>
-      <td>${escapeHtml(estadoLabel(c.ai_act && c.ai_act.estado))}</td>
+      ${cell(c.rgpd)}
+      ${cell(c.nis2)}
+      ${cell(c.ai_act)}
     `;
     tbody.appendChild(tr);
   });
@@ -1293,11 +1339,10 @@ async function refreshDashboard() {
       loadBruteForce(hours),
       loadSystemPanel(),
     ]);
-    setStatus(true);
   } catch (err) {
     console.error(err);
-    setStatus(false);
   }
+  await refreshHeaderStatus();
 }
 
 refreshBtn.addEventListener("click", refreshDashboard);
@@ -1341,7 +1386,7 @@ function showTab(contentId, activeItem) {
 }
 
 function activateTab(tabName) {
-  const item = document.querySelector(`.nav-item[data-tab="${tabName}"]`);
+  const item = document.querySelector(`.nav-item[data-tab="${CSS.escape(tabName)}"]`);
   if (!item) return;
   showTab(`tab-${tabName}`, item);
   history.replaceState(null, "", `#${tabName}`);
@@ -1368,7 +1413,12 @@ document.getElementById("system-summary-card").addEventListener("click", () => a
 // Deep link: #redblue, #alerts, #planned:Incidentes… (sem hash válido fica
 // na Visão Geral, que já vem ativa no HTML).
 function applyHash() {
-  const hash = decodeURIComponent(location.hash.slice(1));
+  let hash = "";
+  try {
+    hash = decodeURIComponent(location.hash.slice(1));
+  } catch (_) {
+    return; // hash malformado (ex.: #%E0): tratar como sem hash
+  }
   if (!hash) return;
   if (hash.startsWith(PLANNED_HASH_PREFIX)) {
     const label = hash.slice(PLANNED_HASH_PREFIX.length);
@@ -1386,6 +1436,9 @@ applyHash();
 // WebSocket falhar definitivamente (ver connectWebSocket()).
 refreshDashboard();
 connectWebSocket();
+setInterval(() => {
+  if (document.visibilityState === "visible") refreshHeaderStatus();
+}, 30000);
 
 // Painéis novos (ciclo de vida, privilégios, contas admin) — independentes
 // dos painéis Wazuh acima, correm no seu próprio ciclo de 30s.

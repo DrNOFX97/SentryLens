@@ -121,6 +121,8 @@ def run() -> None:
         check("/attack_registry.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/attack_library.js")
         check("/attack_library.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ui_helpers.js")
+        check("/ui_helpers.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/network_soc.js")
         check("/network_soc.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/detections.js")

@@ -432,11 +432,6 @@ async function mleRequest(path) {
   return response.json();
 }
 
-function mleRenderEvaluation(report) {
-  document.getElementById("mlm-eval-body").innerHTML = mleBuildEvalRows(report);
-  document.getElementById("mlm-eval-notice").textContent = mleEvalNoticeText(report);
-}
-
 // A janela escolhida. O select só oferece 1/24/72/168 (o ge=1, le=168 da
 // rota), mas o valor lido ainda é validado: um select ausente ou adulterado
 // cai no default em vez de fazer um pedido que a rota recusa com 422.
@@ -507,7 +502,7 @@ function mleRenderCompare(report) {
   aviso.textContent = mleCompareNoticeText((report && report.versions) || []);
 
   if (!pares.length) {
-    corpo.innerHTML = '<tr><td colspan="7" class="empty-state">Sem pares para comparar — cada versão precisa de avaliação, e o par exige números consecutivos (vN vs vN−1).</td></tr>';
+    corpo.innerHTML = '<tr><td colspan="8" class="empty-state">Sem pares para comparar — cada versão precisa de avaliação, e o par exige números consecutivos (vN vs vN−1).</td></tr>';
     return;
   }
 

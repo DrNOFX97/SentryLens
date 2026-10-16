@@ -16,7 +16,7 @@
       <img src="logo.png" alt="SentryLens" class="logo">
       <div>
         <h1>SentryLens</h1>
-        <p>SentryLens — ligado ao Wazuh em tempo real</p>
+        <p>Laboratório SOC sobre Wazuh</p>
       </div>
     </div>
     <div class="controls">
@@ -547,8 +547,7 @@
         <h2>🧠 ML Anomalias</h2>
         <p class="panel-note">
           Deteção por Isolation Forest, a correr em paralelo com a classificação por regras
-          (event_catalog.py) — nunca a substitui. Modelo treinado sobre dados sintéticos;
-          ver README para o que isto ainda não valida.
+          (event_catalog.py) — nunca a substitui. A versão do modelo e a origem dos dados de treino estão na aba Models.
           Janela de análise limitada aos últimos 7 dias, independentemente do período
           selecionado acima.
         </p>
@@ -605,14 +604,6 @@
         <p class="panel-note">
           Versões do modelo de ML registadas em <code>scripts/models/vN/</code> (metadados em
           <code>metadata.json</code>); a versão ativa é a indicada por <code>scripts/models/ACTIVE</code>.
-          O botão treina a partir do próprio dashboard e regista o resultado como uma versão
-          nova em <code>scripts/models/vN/</code>, com <code>metadata.json</code> e SHA-256,
-          apontando <code>ACTIVE</code> para ela. O dataset é escolhido pelo servidor
-          (export recente do Wazuh Indexer ou gerador sintético) — o pedido não leva
-          caminhos. Um treino demora alguns segundos e não há cancelamento: o servidor só
-          aceita um de cada vez. <strong>Depois de treinar é preciso reiniciar o backend</strong>
-          (<code>.\scripts\start-backend.ps1</code>): enquanto isso, as deteções continuam a
-          usar a versão anterior. Ativar uma versão já existente continua a não ter botão aqui.
         </p>
 
         <div class="filter-row">
@@ -640,9 +631,9 @@
             </select>
             <label for="mlm-train-origin">Origem declarada</label>
             <select id="mlm-train-origin">
-              <option value="real" selected>dados reais</option>
+              <option value="real">dados reais</option>
               <option value="synthetic">dados sintéticos</option>
-              <option value="unknown">não declarada</option>
+              <option value="unknown" selected>não declarada</option>
             </select>
             <button id="mlm-train-button" type="button">Treinar</button>
           </div>
@@ -1008,7 +999,6 @@
           <label for="inc-assigned-filter">Analista:</label>
           <select id="inc-assigned-filter">
             <option value="">Todos</option>
-            <option value="__mine__">👤 Meus incidentes</option>
           </select>
           <button id="inc-backfill-btn" type="button">📥 Importar histórico</button>
         </div>
@@ -1105,7 +1095,7 @@
 
         <!-- Create/Edit Analyst Modal -->
         <div id="analyst-modal" class="modal" hidden>
-          <div class="modal-content">
+          <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="analyst-modal-title">
             <h3 id="analyst-modal-title">Novo Analista</h3>
             <form id="analyst-form">
               <input type="hidden" id="analyst-modal-id">
@@ -1159,10 +1149,10 @@
           <div class="table-scroll">
             <table id="shifts-table">
               <thead>
-                <tr><th>Analista</th><th>Tier</th><th>Início</th><th>Fim</th><th>Papel</th><th>Ações</th></tr>
+                <tr><th>Analista</th><th>Tier</th><th>Início</th><th>Fim</th><th>Papel</th></tr>
               </thead>
               <tbody id="shifts-body">
-                <tr><td colspan="6" class="empty-state">A carregar...</td></tr>
+                <tr><td colspan="5" class="empty-state">A carregar...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1170,10 +1160,9 @@
 
         <!-- Shift Modal -->
         <div id="shift-modal" class="modal" hidden>
-          <div class="modal-content">
+          <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="shift-modal-title">
             <h3 id="shift-modal-title">Novo Turno</h3>
             <form id="shift-form">
-              <input type="hidden" id="shift-modal-id">
               <div class="form-row">
                 <label for="shift-analyst">Analista *</label>
                 <select id="shift-analyst" required>
@@ -1215,10 +1204,10 @@
           <div class="table-scroll">
             <table id="escalation-table">
               <thead>
-                <tr><th>De Tier</th><th>Para Tier</th><th>Severidade</th><th>Auto-escalamento</th><th>SLA (min)</th><th>Ações</th></tr>
+                <tr><th>De Tier</th><th>Para Tier</th><th>Severidade</th><th>Auto-escalamento</th><th>SLA (min)</th></tr>
               </thead>
               <tbody id="escalation-body">
-                <tr><td colspan="6" class="empty-state">A carregar...</td></tr>
+                <tr><td colspan="5" class="empty-state">A carregar...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1226,10 +1215,9 @@
 
         <!-- Escalation Modal -->
         <div id="escalation-modal" class="modal" hidden>
-          <div class="modal-content">
+          <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="escalation-modal-title">
             <h3 id="escalation-modal-title">Nova Regra de Escalamento</h3>
             <form id="escalation-form">
-              <input type="hidden" id="escalation-modal-id">
               <div class="form-row">
                 <label for="escalation-from-tier">De Tier *</label>
                 <select id="escalation-from-tier" required>
@@ -1734,13 +1722,14 @@
   </div>
 
   <footer>
-    <p>SentryLens — Fase 2 do projeto CET. Ligação em tempo real ao Wazuh.</p>
+    <p>SentryLens — Fase 2 do projeto CET.</p>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"
     integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
     crossorigin="anonymous"></script>
   <script src="config.js"></script>
+  <script src="ui_helpers.js"></script>
   <script src="app.js"></script>
   <script src="overview.js"></script>
   <script src="redblue.js"></script>

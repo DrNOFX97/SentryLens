@@ -195,7 +195,11 @@ async function lsRefreshHealth() {
   lsRefreshing = true;
   try {
     const response = await fetch(`${API_BASE}/api/siem/health`, { headers: { "X-API-Key": API_KEY } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      const e = new Error(`HTTP ${response.status}`);
+      e.status = response.status;
+      throw e;
+    }
     lsHealth = await response.json();
     lsHealthFetchedAt = Date.now();
     lsRenderHealth();
@@ -207,7 +211,12 @@ async function lsRefreshHealth() {
       el.textContent = "Sem dados";
       el.className = el.className.replace(/ls-(ok|down)/g, "").trim();
     });
-    lsText("ls-health-note", `Backend inacessível: ${err.message}`);
+    const nota = err.status === 401
+      ? "API key inválida ou em falta — confirma SENTRYLENS_API_KEY."
+      : err.status
+        ? `O backend respondeu HTTP ${err.status} ao pedir a saúde do SIEM.`
+        : "Sem ligação ao backend (localhost:8001).";
+    lsText("ls-health-note", nota);
   } finally {
     lsRefreshing = false;
   }

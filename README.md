@@ -324,7 +324,7 @@ Ver [`QUICKSTART.md`](QUICKSTART.md).
 
 ## Testes
 
-45 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
+48 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
 
 ```bash
 cd scripts
@@ -334,6 +334,8 @@ python test_compliance.py       # motor RGPD/NIS2/AI Act
 python test_ml_anomalies.py     # /api/ml-anomalies
 python test_redblue.py          # correlação Red vs Blue
 python test_network_detections.py
+python test_frontend_static.py  # frontend: contratos estáticos (gitignore, handlers inline, modais, CSS)
+python test_ui_helpers.py       # frontend: helpers puros de ui_helpers.js (node:vm)
 python test_vaccines_api.py     # vaccines: rotas, ciclo e garantias negativas
 # ... e os restantes test_*.py
 ```
@@ -402,7 +404,7 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 │   ├── detection_event.py, network_soc.py, siem_health.py   deteções unificadas, painéis de rede, saúde do SIEM
 │   ├── history_store.py / history_index.py      histórico JSONL e índice SQLite
 │   ├── deploy/                                  serviço tshark e logrotate da VM
-│   └── test_*.py                                45 testes standalone
+│   └── test_*.py                                48 testes standalone
 └── docs/                                        API, ML e guia do laboratório
 ```
 

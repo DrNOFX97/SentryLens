@@ -11,8 +11,8 @@ scripts/.venv/
 
 # Estado local gerado em runtime (não é código-fonte)
 scripts/system_alerts_history.json
-scripts/*.log
-scripts/*.log.err
+scripts/*.log*
+scripts/*.err
 scripts/attack_log.jsonl
 scripts/attack_targets.json
 scripts/snapshots/
