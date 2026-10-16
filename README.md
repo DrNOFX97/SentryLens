@@ -377,11 +377,25 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 
 ## Segurança
 
-- **API key obrigatória** em todos os endpoints REST, em modo *fail-closed*: sem a variável definida, tudo devolve `401`.
-- **CORS restrito** a `localhost` e `127.0.0.1`.
-- **Sem Swagger nem `/docs`**, de propósito: as rotas automáticas do FastAPI não passam pela proteção por API key.
-- **`WAZUH_VERIFY_SSL=false` por omissão**, porque o laboratório usa o certificado autoassinado gerado pelo instalador do Wazuh. Muda para `true` se tiveres um certificado válido.
+Como o próprio dashboard está protegido (tudo verificado no código; detalhe e histórico de auditorias em [`docs/SECURITY.md`](docs/SECURITY.md)):
+
+- **API key por rota, fail-closed.** Cada rota REST `/api/*` declara `dependencies=_REQUIRE_API_KEY` (header `X-API-Key`), nunca a nível de app. Sem `SENTRYLENS_API_KEY` definida, tudo devolve `401`. A comparação usa `secrets.compare_digest` (sem fuga por tempo). Os WebSockets `/ws/alerts` e `/ws/network` verificam a chave à parte, por `?api_key=`, com a mesma comparação.
+- **Sem Swagger nem `/docs`**, de propósito: as rotas automáticas do FastAPI não passam pela proteção por API key (`docs_url=None`).
+- **CORS restrito** a `localhost` e `127.0.0.1` (qualquer porta), por `allow_origin_regex`. É uma camada adicional, não substitui a API key.
+- **Servidor do frontend com whitelist.** `scripts/serve_frontend.py` só serve ficheiros de uma lista fixa (`ALLOWED_FILES`), liga só a `127.0.0.1` e envia `X-Content-Type-Options: nosniff` e `Cache-Control: no-store`. Por isso não expõe `scripts/.env`, ao contrário de `python -m http.server` na raiz.
+- **Sem handlers inline.** Nenhum `onclick=` (ou outro `on*=`) no HTML ou nos `*.js`; a interação usa `data-action`/`data-id` com listeners delegados. `scripts/test_frontend_static.py` falha se algum reaparecer. Esta regra nasceu de uma XSS confirmada na aba Equipa SOC.
+- **Escape de todo o texto dinâmico.** O frontend passa os dados por `escapeHtml()` antes de os inserir no HTML; o relatório HTML exportado pelo backend usa `html.escape()`, porque é aberto fora do dashboard.
+- **Triagem JEV opt-in.** `POST /api/incidents/{id}/triage` é a única rota que envia dados para fora (`api.typesafe.ai`). Só funciona com `SENTRYLENS_JEV_ENABLED` e `TYPESAFE_API_KEY` definidas; caso contrário não chama a rede. Envia só agregados anonimizados.
+- **Vaccines só em leitura.** Uma vaccine é sempre uma proposta (`proposed`); a API recusa qualquer escrita com `405`.
+- **Sem recursos externos.** O Chart.js 4.5.1 e as fontes são servidos localmente a partir de `vendor/` (o hash SHA-384 do Chart.js é verificado por `test_frontend_static.py`); o dashboard abre sem internet.
+- **`WAZUH_VERIFY_SSL=false` por omissão**, porque o laboratório usa o certificado autoassinado do instalador do Wazuh. Muda para `true` se tiveres um certificado válido.
 - Nunca versiones o `scripts/.env`.
+
+Limitações conhecidas (ainda por fazer, Ondas 2 a 8 da auditoria ao frontend):
+
+- Sem Content-Security-Policy.
+- A chave do WebSocket vai no URL (`?api_key=`), por isso o uvicorn grava-a em claro no access log (`scripts/backend.log.err`, fora do git mas em disco).
+- A chave é entregue ao browser por `/config.js` (só same-origin, gerado a partir de `scripts/.env`).
 
 ---
 
