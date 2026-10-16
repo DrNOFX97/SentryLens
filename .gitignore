@@ -20,6 +20,7 @@ scripts/models/
 scripts/historico/
 scripts/incidents.sqlite3
 scripts/incidents.sqlite3-journal
+scripts/*.sqlite3.bak*
 scripts/vaccines.sqlite3
 scripts/vaccines.sqlite3-journal
 
