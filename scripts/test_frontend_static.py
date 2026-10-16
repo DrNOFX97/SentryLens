@@ -61,10 +61,21 @@ def section_system() -> None:
     check("nenhum .toFixed direto sobre specs.*", re.search(r"specs\.[a-z_.]+\.toFixed", body) is None)
 
 
+def section_no_inline_handlers() -> None:
+    for rel in ["index.html", *sorted(p.name for p in ROOT.glob("*.js"))]:
+        txt = read(rel)
+        check(f"{rel} sem handlers inline", re.search(r"\son[a-z]+\s*=", txt) is None)
+    soc = read("soc_team.js")
+    check("soc_team.js sem ações por implementar", "não implementad" not in soc)
+    check("soc_team.js sem window.* para handlers", "window.deactivateAnalyst" not in soc)
+    check("botões da tabela de analistas por data-action", 'data-action="deactivate"' in soc)
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
     section_system()
+    section_no_inline_handlers()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)
