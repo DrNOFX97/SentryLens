@@ -231,21 +231,18 @@ function ovwRenderAttention(result) {
   const list = document.getElementById("ovw-attention-list");
   const { items, unavailable } = result;
   const shown = items.slice(0, OVW_MAX_ATTENTION);
-  let html = shown.map((it) =>
-    `<li><button type="button" class="ovw-attn ovw-${it.level}" data-tab="${escapeHtml(it.tab)}">` +
-    `<span class="ovw-attn-title">${escapeHtml(it.title)}</span>` +
-    `<span class="ovw-attn-detail">${escapeHtml(it.detail)}</span></button></li>`).join("");
-  if (items.length > shown.length) {
-    html += `<li class="ovw-attn-more">+ ${items.length - shown.length} mais — ver a aba respetiva.</li>`;
-  }
+  const rows = shown.map((it) => htmlT`<li><button type="button" class="ovw-attn ovw-${it.level}" data-tab="${it.tab}"><span class="ovw-attn-title">${it.title}</span><span class="ovw-attn-detail">${it.detail}</span></button></li>`);
+  const more = items.length > shown.length
+    ? htmlT`<li class="ovw-attn-more">+ ${items.length - shown.length} mais — ver a aba respetiva.</li>`
+    : "";
   // Nunca "tudo em ordem" quando uma fonte falhou: não sabemos se está.
-  if (!items.length && !unavailable.length) {
-    html = `<li class="ovw-attn-clear">✓ Nada a exigir atenção neste momento.</li>`;
-  }
-  if (unavailable.length) {
-    html += `<li class="ovw-attn-unavailable">⚠ Sem dados de: ${escapeHtml(unavailable.join(", "))} — esta lista pode estar incompleta.</li>`;
-  }
-  list.innerHTML = html;
+  const clear = !items.length && !unavailable.length
+    ? htmlT`<li class="ovw-attn-clear">✓ Nada a exigir atenção neste momento.</li>`
+    : "";
+  const missing = unavailable.length
+    ? htmlT`<li class="ovw-attn-unavailable">⚠ Sem dados de: ${unavailable.join(", ")} — esta lista pode estar incompleta.</li>`
+    : "";
+  htmRender(list, clear ? htmlT`${clear}${missing}` : htmlT`${rows}${more}${missing}`);
   ovwText("ovw-attention-count", items.length ? String(items.length) : "");
 }
 

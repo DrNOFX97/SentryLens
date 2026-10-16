@@ -4,10 +4,10 @@
 
 function renderMlAnomaliesTable(results) {
   const tbody = document.getElementById("ml-anomalies-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!results || results.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Sem eventos neste período</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="8" class="empty-state">Sem eventos neste período</td></tr>`);
     return;
   }
 
@@ -16,16 +16,16 @@ function renderMlAnomaliesTable(results) {
     tr.className = r.agreement === "diverge" ? "row-diverge" : "";
     const mlScore = slNumberOrNull(r.ml_score);
     const agreementLabel = r.agreement === "agree" ? "✅ Concorda" : r.agreement === "diverge" ? "⚡ Diverge" : "—";
-    tr.innerHTML = `
-      <td class="mono">${escapeHtml(formatTimestamp(r.timestamp))}</td>
-      <td>${escapeHtml(r.agent_name)}</td>
-      <td>${escapeHtml(r.target_user)}</td>
-      <td>${escapeHtml(String(r.windows_event_id))}</td>
-      <td>${severityBadge(r.severity)}</td>
-      <td class="mono">${escapeHtml(mlScore === null ? "—" : mlScore.toFixed(4))}</td>
+    htmRender(tr, htmlT`
+      <td class="mono">${formatTimestamp(r.timestamp)}</td>
+      <td>${r.agent_name}</td>
+      <td>${r.target_user}</td>
+      <td>${String(r.windows_event_id)}</td>
+      <td>${htmlRaw(severityBadge(r.severity))}</td>
+      <td class="mono">${mlScore === null ? "—" : mlScore.toFixed(4)}</td>
       <td>${r.ml_is_anomaly ? "⚠️ Sim" : "Não"}</td>
-      <td><span class="agreement-badge agreement-${escapeHtml(String(r.agreement))}">${escapeHtml(agreementLabel)}</span></td>
-    `;
+      <td><span class="agreement-badge agreement-${String(r.agreement)}">${agreementLabel}</span></td>
+    `);
     tbody.appendChild(tr);
   });
 }

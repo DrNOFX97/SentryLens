@@ -32,7 +32,7 @@ def run() -> None:
         return
 
     proc = subprocess.run(
-        [node, str(Path(__file__).with_name("test_migration_incidents.cjs")), str(ROOT / "api.js"), str(ROOT / "state.js"), str(ROOT / "incidents.js")],
+        [node, str(Path(__file__).with_name("test_migration_incidents.cjs")), str(ROOT / "api.js"), str(ROOT / "state.js"), str(ROOT / "html.js"), str(ROOT / "incidents.js")],
         capture_output=True,
         text=True,
         encoding="utf-8",

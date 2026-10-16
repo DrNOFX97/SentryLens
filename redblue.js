@@ -16,7 +16,7 @@ let rbAttackLog = null;
 
 function rbCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function rbFormatSeconds(seconds) {
@@ -102,9 +102,8 @@ function renderRedBlueKpis(data) {
     const n = (data[key] || []).length;
     if (n > 0) notices.push(`${n} entrada(s) do log ${label} ficaram de fora da correlação.`);
   });
-  document.getElementById("redblue-notices").innerHTML = notices
-    .map((n) => `<div class="rb-notice">⚠️ ${escapeHtml(n)}</div>`)
-    .join("");
+  htmRender(document.getElementById("redblue-notices"),
+    htmlT`${notices.map((n) => htmlT`<div class="rb-notice">⚠️ ${n}</div>`)}`);
 }
 
 async function loadRedBlueMetrics() {
@@ -118,7 +117,7 @@ async function loadRedBlueMetrics() {
     ["kpi-rb-attempts", "kpi-rb-coverage", "kpi-rb-mttd", "kpi-rb-network-only", "kpi-rb-neither"]
       .forEach((id) => rbSetText(id, "—"));
     const noticesEl = document.getElementById("redblue-notices");
-    if (noticesEl) noticesEl.innerHTML = "";
+    if (noticesEl) noticesEl.replaceChildren();
     const message = err.status === 503
       ? "Modelo de ML ainda não foi treinado. Corre scripts/train_anomaly_model.py."
       : apiErrorMessage(err);
@@ -162,20 +161,16 @@ async function loadManagerPanel() {
     const list = agents.agents || [];
     rbSetText("kpi-rb-agents", list.filter((a) => a.status === "active").length);
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Nenhum agente encontrado</td></tr>';
+      htmRender(tbody, htmlT`<tr><td colspan="4" class="empty-state">Nenhum agente encontrado</td></tr>`);
       return;
     }
-    tbody.innerHTML = list
-      .map(
-        (a) => `
+    htmRender(tbody, htmlT`${list.map((a) => htmlT`
       <tr>
         <td>${rbCell(a.name)}</td>
         <td class="mono">${rbCell(a.ip)}</td>
-        <td><span class="agent-status ${escapeHtml(a.status)}">${rbCell(a.status)}</span></td>
-        <td class="mono">${escapeHtml(formatTimestamp(a.last_keep_alive))}</td>
-      </tr>`,
-      )
-      .join("");
+        <td><span class="agent-status ${a.status}">${rbCell(a.status)}</span></td>
+        <td class="mono">${formatTimestamp(a.last_keep_alive)}</td>
+      </tr>`)}`);
   } catch (err) {
     console.error(err);
     renderPanelError("#redblue-manager-panel", apiErrorMessage(err));
@@ -208,32 +203,30 @@ async function loadRedPanel() {
 function renderRedPanel(attackLog) {
   const tbody = document.getElementById("redblue-attack-body");
   if (!attackLog) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Log de ataques indisponível</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="6" class="empty-state">Log de ataques indisponível</td></tr>`);
     return;
   }
   const entries = attackLog.entries || [];
   if (entries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum ataque registado em attack_log.jsonl</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="6" class="empty-state">Nenhum ataque registado em attack_log.jsonl</td></tr>`);
     return;
   }
   const scenarios = attackLog.scenarios || {};
   const sorted = [...entries].sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
-  tbody.innerHTML = sorted
-    .map((e) => {
+  htmRender(tbody, htmlT`${sorted.map((e) => {
       const s = scenarios[e.scenario];
       const mitre = s ? `${s.mitre_technique} — ${s.mitre_tactic}` : null;
       const status = String(e.status);
-      return `
+      return htmlT`
       <tr>
-        <td class="mono">${escapeHtml(formatTimestamp(e.timestamp))}</td>
+        <td class="mono">${formatTimestamp(e.timestamp)}</td>
         <td>${rbCell(e.scenario)}</td>
         <td class="mono">${rbCell(e.target)}</td>
         <td>${rbCell(e.tool)}</td>
-        <td><span class="rb-badge ${escapeHtml(status)}">${escapeHtml(status)}</span></td>
+        <td><span class="rb-badge ${status}">${status}</span></td>
         <td>${rbCell(mitre)}</td>
       </tr>`;
-    })
-    .join("");
+    })}`);
 }
 
 function rbMttdByTechnique(attempts) {
@@ -279,27 +272,26 @@ function renderBluePanel(metrics) {
     "O seguimento (estados, notas, atribuição) está na aba Incidentes.";
 
   if (!metrics) {
-    body.innerHTML = '<tr><td colspan="9" class="empty-state">Correlação indisponível</td></tr>';
-    techBody.innerHTML = '<tr><td colspan="5" class="empty-state">Correlação indisponível</td></tr>';
+    htmRender(body, htmlT`<tr><td colspan="9" class="empty-state">Correlação indisponível</td></tr>`);
+    htmRender(techBody, htmlT`<tr><td colspan="5" class="empty-state">Correlação indisponível</td></tr>`);
     return;
   }
 
   const names = Object.keys(metrics.by_scenario || {}).sort();
   if (names.length === 0) {
-    body.innerHTML = '<tr><td colspan="9" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>';
+    htmRender(body, htmlT`<tr><td colspan="9" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>`);
   } else {
-    body.innerHTML = names
-      .map((name) => {
+    htmRender(body, htmlT`${names.map((name) => {
         const own = (metrics.attempts || []).filter((a) => a.scenario === name);
         const sum = rbSummarize(rbFreshAttempts(own, RB_METRICS_HOURS));
         const total = own.length || (metrics.by_scenario[name] || {}).attempts || 0;
         const allStale = sum.count === 0;
         const dash = "—";
-        const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
-        return `
+        const rowAttr = allStale ? htmlT` class="rb-stale" title="${RB_STALE_TITLE}"` : "";
+        return htmlT`
         <tr${rowAttr}>
           <td>${rbCell(name)}</td>
-          <td>${escapeHtml(rbAttemptsLabel(total, sum.count))}</td>
+          <td>${rbAttemptsLabel(total, sum.count)}</td>
           <td>${allStale ? dash : rbFormatPercent(sum.detected / sum.count, sum.count)}</td>
           <td>${allStale ? dash : rbFormatSeconds(sum.avgMttd)}</td>
           <td>${allStale ? dash : sum.rule}</td>
@@ -308,28 +300,25 @@ function renderBluePanel(metrics) {
           <td>${allStale || !metrics.network_capture_configured ? dash : sum.networkOnly}</td>
           <td>${allStale ? dash : sum.neither}</td>
         </tr>`;
-      })
-      .join("");
+      })}`);
   }
 
   const techniques = rbMttdByTechnique(metrics.attempts);
   if (techniques.length === 0) {
-    techBody.innerHTML = '<tr><td colspan="5" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>';
+    htmRender(techBody, htmlT`<tr><td colspan="5" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>`);
   } else {
-    techBody.innerHTML = techniques
-      .map((t) => {
+    htmRender(techBody, htmlT`${techniques.map((t) => {
         const allStale = t.freshAttempts === 0;
-        const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
-        return `
+        const rowAttr = allStale ? htmlT` class="rb-stale" title="${RB_STALE_TITLE}"` : "";
+        return htmlT`
       <tr${rowAttr}>
         <td>${rbCell(t.technique)}</td>
         <td>${rbCell(t.tactic)}</td>
-        <td>${escapeHtml(rbAttemptsLabel(t.attempts, t.freshAttempts))}</td>
+        <td>${rbAttemptsLabel(t.attempts, t.freshAttempts)}</td>
         <td>${allStale ? "—" : t.detected}</td>
         <td>${allStale ? "—" : rbFormatSeconds(t.avgMttd)}</td>
       </tr>`;
-      })
-      .join("");
+      })}`);
   }
 }
 
@@ -353,8 +342,8 @@ function renderNetworkPanel() {
     rbSetText("kpi-rb-packets", "—");
     rbSetText("kpi-rb-detections", "—");
     rbSetText("kpi-rb-history", "—");
-    detBody.innerHTML = '<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>';
-    pktBody.innerHTML = '<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>';
+    htmRender(detBody, htmlT`<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>`);
+    htmRender(pktBody, htmlT`<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>`);
     return;
   }
 
@@ -364,38 +353,32 @@ function renderNetworkPanel() {
   rbSetText("kpi-rb-history", rbNetwork.history.length);
 
   const dets = [...rbNetwork.history].reverse();
-  detBody.innerHTML = dets.length
-    ? dets
-        .map(
-          (d) => `
+  htmRender(detBody, dets.length
+    ? htmlT`${dets.map((d) => htmlT`
       <tr>
-        <td class="mono">${escapeHtml(formatTimestamp(d.timestamp))}</td>
+        <td class="mono">${formatTimestamp(d.timestamp)}</td>
         <td>${rbCell(d.type)}</td>
         <td class="mono">${rbCell(d.src_ip)}</td>
         <td class="mono">${rbCell(d.dst_ip)}</td>
-        <td>${escapeHtml(rbDetectionDetail(d.detail))}</td>
-      </tr>`,
-        )
-        .join("")
-    : '<tr><td colspan="5" class="empty-state">Nenhuma deteção de rede até agora</td></tr>';
+        <td>${rbDetectionDetail(d.detail)}</td>
+      </tr>`)}`
+    : htmlT`<tr><td colspan="5" class="empty-state">Nenhuma deteção de rede até agora</td></tr>`);
 
   const pkts = rbNetwork.packets.slice(-RB_MAX_PACKET_ROWS).reverse();
-  pktBody.innerHTML = pkts.length
-    ? pkts
-        .map((p) => {
+  htmRender(pktBody, pkts.length
+    ? htmlT`${pkts.map((p) => {
           const src = p.src_port != null ? `${p.src_ip}:${p.src_port}` : p.src_ip;
           const dst = p.dst_port != null ? `${p.dst_ip}:${p.dst_port}` : p.dst_ip;
-          return `
+          return htmlT`
       <tr>
-        <td class="mono">${escapeHtml(formatTimestamp(p.timestamp))}</td>
+        <td class="mono">${formatTimestamp(p.timestamp)}</td>
         <td class="mono">${rbCell(src)}</td>
         <td class="mono">${rbCell(dst)}</td>
         <td>${rbCell(p.protocol)}</td>
         <td>${rbCell(p.length)}</td>
       </tr>`;
-        })
-        .join("")
-    : '<tr><td colspan="5" class="empty-state">Sem pacotes no buffer</td></tr>';
+        })}`
+    : htmlT`<tr><td colspan="5" class="empty-state">Sem pacotes no buffer</td></tr>`);
 }
 
 async function loadNetworkPanel() {

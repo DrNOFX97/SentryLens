@@ -52,7 +52,7 @@ function makeCtx(fetchImpl) {
     renderPanelError: () => {},
   });
   vm.runInContext('const API_BASE = "http://x:1"; const API_KEY = "k";', ctx);
-  for (const f of ["api.js", "state.js", "ml_models.js", "ml_evaluation.js"]) {
+  for (const f of ["api.js", "state.js", "html.js", "ml_models.js", "ml_evaluation.js"]) {
     vm.runInContext(read(f), ctx, { filename: f });
   }
   return { ctx, els };

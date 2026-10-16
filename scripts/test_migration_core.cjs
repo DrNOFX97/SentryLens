@@ -40,7 +40,7 @@ vm.runInContext(`const API_BASE = "http://x:1"; const API_KEY = "k";
 function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>"&#"+c.charCodeAt(0)+";");}
 function renderPanelError(sel,msg){ __out(msg); }
 function formatTimestamp(v){return String(v);}`, Object.assign(ctx, { __out: (m) => out.push(String(m)) }));
-for (const f of ["api.js", "state.js", "attack_registry.js", "attack_library.js", "live_soc.js", "overview.js"]) {
+for (const f of ["html.js", "api.js", "state.js", "attack_registry.js", "attack_library.js", "live_soc.js", "overview.js"]) {
   try { vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f }); }
   catch (e) { check(`carrega ${f}: ${e && e.message}`, false); process.exit(1); }
 }

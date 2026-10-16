@@ -1,11 +1,11 @@
 // Abas "Attack Registry" e "Attack Timeline" (Roadmap v2, R4). Carregado depois
-// de app.js: reutiliza os seus globais (API_BASE, API_KEY, escapeHtml,
+// de app.js: reutiliza os seus globais (API_BASE, API_KEY,
 // severityBadge, formatTimestamp, renderPanelError, periodSelect) — não
 // redeclarar nenhum aqui. As duas abas partilham o mesmo pedido a
 // GET /api/attacks; só mostram dados reais, sem dados -> estado vazio. Só
 // trabalha com uma das abas ativa e o separador visível (sem refresh em
 // segundo plano) e não abre WebSockets. Todo o texto dinâmico (operador,
-// ferramenta, alvo, cenário...) passa por escapeHtml.
+// ferramenta, alvo, cenário...) é escapado pelo htmlT.
 
 const ATK_REFRESH_MS = 30000;
 const ATK_VERDICT_LABELS = {
@@ -30,9 +30,10 @@ function atkIsActive() {
   return atkTabs.some((t) => t.classList.contains("active")) && document.visibilityState === "visible";
 }
 
+// Texto simples: o htmlT escapa na interpolação.
 function atkCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function atkSetText(id, text) {
@@ -46,7 +47,7 @@ function atkSources(list) {
 
 function atkVerdictBadge(verdict) {
   const label = ATK_VERDICT_LABELS[verdict] || verdict;
-  return `<span class="atk-verdict atk-verdict-${escapeHtml(verdict)}">${escapeHtml(label)}</span>`;
+  return htmlT`<span class="atk-verdict atk-verdict-${verdict}">${label}</span>`;
 }
 
 function atkFormatSeconds(seconds) {
@@ -102,40 +103,41 @@ function renderAttackKpis(summary) {
 function renderAttacksTable(attacks) {
   const body = document.getElementById("attacks-body");
   if (!attacks.length) {
-    body.innerHTML = `<tr><td colspan="10" class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</td></tr>`;
+    htmRender(body, htmlT`<tr><td colspan="10" class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</td></tr>`);
     return;
   }
-  body.innerHTML = attacks.map((a) => {
+  htmRender(body, htmlT`${attacks.map((a) => {
     const clickable = a.id !== null;
     const incidents = a.incidents.length ? a.incidents.map((i) => i.id).join(", ") : "—";
-    return `<tr class="${clickable ? "atk-row" : ""}${a.id === atkSelectedId ? " selected" : ""}"${clickable ? ` data-id="${escapeHtml(String(a.id))}" tabindex="0"` : ""}>
-      <td>${a.id === null ? "—" : escapeHtml(String(a.id))}${a.duplicate_id ? " ⚠️" : ""}</td>
-      <td>${escapeHtml(formatTimestamp(a.timestamp))}</td>
+    const rowAttrs = clickable ? htmlT` data-id="${String(a.id)}" tabindex="0"` : "";
+    return htmlT`<tr class="${clickable ? "atk-row" : ""}${a.id === atkSelectedId ? " selected" : ""}"${rowAttrs}>
+      <td>${a.id === null ? "—" : String(a.id)}${a.duplicate_id ? " ⚠️" : ""}</td>
+      <td>${formatTimestamp(a.timestamp)}</td>
       <td>${atkCell(a.scenario)}</td>
       <td>${atkCell(a.mitre_technique)}</td>
       <td>${atkCell(a.tool)}</td>
       <td>${atkCell(a.target)}</td>
       <td>${atkCell(a.operator)}</td>
-      <td>${escapeHtml(atkSources(a.expected.detection))}</td>
+      <td>${atkSources(a.expected.detection)}</td>
       <td>${atkVerdictBadge(a.actual.verdict)}</td>
       <td>${a.id === null ? "—" : atkCell(incidents === "—" ? "" : incidents)}</td>
     </tr>`;
-  }).join("");
+  })}`);
 }
 
 function renderAttackTimeline(attacks) {
   const list = document.getElementById("atk-timeline");
   if (!attacks.length) {
-    list.innerHTML = `<li class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</li>`;
+    htmRender(list, htmlT`<li class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</li>`);
     return;
   }
-  list.innerHTML = [...attacks].reverse().map((a) => `<li>
-    <time>${escapeHtml(formatTimestamp(a.timestamp))}</time>
-    ${a.id === null ? "" : `#${escapeHtml(String(a.id))} `}<strong>${atkCell(a.scenario)}</strong>
+  htmRender(list, htmlT`${[...attacks].reverse().map((a) => htmlT`<li>
+    <time>${formatTimestamp(a.timestamp)}</time>
+    ${a.id === null ? "" : `#${String(a.id)} `}<strong>${atkCell(a.scenario)}</strong>
     (${atkCell(a.mitre_technique)} / ${atkCell(a.tool)}) → ${atkCell(a.target)} · ${atkCell(a.operator)}
     ${atkVerdictBadge(a.actual.verdict)}
-    <span class="panel-note">esperado: ${escapeHtml(atkSources(a.expected.detection))}; observado: ${escapeHtml(atkSources(a.actual.achieved))}${a.incidents.length ? `; incidentes: ${escapeHtml(a.incidents.map((i) => i.id).join(", "))}` : ""}</span>
-  </li>`).join("");
+    <span class="panel-note">esperado: ${atkSources(a.expected.detection)}; observado: ${atkSources(a.actual.achieved)}${a.incidents.length ? `; incidentes: ${a.incidents.map((i) => i.id).join(", ")}` : ""}</span>
+  </li>`)}`);
 }
 
 function renderAttackDetail(payload) {
@@ -143,25 +145,25 @@ function renderAttackDetail(payload) {
   const panel = document.getElementById("attack-detail-panel");
   panel.hidden = false;
   atkSetText("atk-detail-title", `Ataque #${a.id}`);
-  document.getElementById("atk-detail-meta").innerHTML = `
+  htmRender(document.getElementById("atk-detail-meta"), htmlT`
     <span>${atkVerdictBadge(a.actual.verdict)}</span>
-    <span>Hora: ${escapeHtml(formatTimestamp(a.timestamp))}</span>
+    <span>Hora: ${formatTimestamp(a.timestamp)}</span>
     <span>Cenário: <strong>${atkCell(a.scenario)}</strong></span>
     <span>MITRE: ${atkCell(a.mitre_technique)} (${atkCell(a.mitre_tactic)})</span>
     <span>Ferramenta: ${atkCell(a.tool)}</span>
     <span>Origem: ${atkCell(a.source)}</span>
     <span>Alvo: ${atkCell(a.target)}</span>
     <span>Operador: ${atkCell(a.operator)}</span>
-    <span>MTTD: ${escapeHtml(atkFormatSeconds(a.actual.mttd_seconds))}</span>
-    ${a.actual.coverage_gap ? "<span>⚠️ Só a rede detetou (ponto cego Wazuh)</span>" : ""}`;
+    <span>MTTD: ${atkFormatSeconds(a.actual.mttd_seconds)}</span>
+    ${a.actual.coverage_gap ? htmlT`<span>⚠️ Só a rede detetou (ponto cego Wazuh)</span>` : ""}`);
 
   const achieved = a.actual.achieved || [];
   const known = payload.correlation && payload.correlation.available;
-  document.getElementById("atk-detail-compare").innerHTML = ["rule", "ml", "network"].map((src) => {
+  htmRender(document.getElementById("atk-detail-compare"), htmlT`${["rule", "ml", "network"].map((src) => {
     const expected = a.expected.detection.includes(src);
     const seen = known ? (achieved.includes(src) ? "Sim" : "Não") : "Desconhecido";
-    return `<tr><td>${escapeHtml(ATK_SOURCE_LABELS[src])}</td><td>${expected ? "Sim" : "—"}</td><td>${escapeHtml(seen)}</td></tr>`;
-  }).join("");
+    return htmlT`<tr><td>${ATK_SOURCE_LABELS[src]}</td><td>${expected ? "Sim" : "—"}</td><td>${seen}</td></tr>`;
+  })}`);
 
   const ev = a.evidence;
   const items = [
@@ -170,11 +172,9 @@ function renderAttackDetail(payload) {
     `Deteções de rede: ${ev.network_detection_types.length ? ev.network_detection_types.join(", ") : "—"}`,
     `Incidentes ligados: ${a.incidents.length ? a.incidents.map((i) => `${i.id} (${i.status}, ${i.severity})`).join("; ") : "nenhum"}`,
   ];
-  document.getElementById("atk-detail-evidence").innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join("");
-  if (!known) {
-    const note = atkCorrelationNote(payload);
-    if (note) document.getElementById("atk-detail-evidence").innerHTML += `<li>${escapeHtml(note)}</li>`;
-  }
+  const note = known ? "" : atkCorrelationNote(payload);
+  if (note) items.push(note);
+  htmRender(document.getElementById("atk-detail-evidence"), htmlT`${items.map((t) => htmlT`<li>${t}</li>`)}`);
 }
 
 function atkShowDetailError(message) {
@@ -222,8 +222,8 @@ async function refreshAttacks() {
     const message = `Não foi possível carregar os ataques: ${apiErrorMessage(err)}`;
     renderPanelError("#attack-registry-panel", message);
     renderPanelError("#attack-timeline-panel", message);
-    document.getElementById("attacks-body").innerHTML = `<tr><td colspan="10" class="empty-state">Indisponível.</td></tr>`;
-    document.getElementById("atk-timeline").innerHTML = `<li class="empty-state">Indisponível.</li>`;
+    htmRender(document.getElementById("attacks-body"), htmlT`<tr><td colspan="10" class="empty-state">Indisponível.</td></tr>`);
+    htmRender(document.getElementById("atk-timeline"), htmlT`<li class="empty-state">Indisponível.</li>`);
   } finally {
     atkRefreshing = false;
     if (atkPending) { atkPending = false; refreshAttacks(); }

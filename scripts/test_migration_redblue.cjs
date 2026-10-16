@@ -40,7 +40,8 @@ function formatTimestamp(t){return String(t);}
 const __panelErrors = {};
 function renderPanelError(sel, msg){ __panelErrors[sel] = msg; }`, ctx);
 const [api, state, rb] = process.argv.slice(2);
-for (const f of [api, state, rb]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
+const htmlJs = require("node:path").join(require("node:path").dirname(rb), "html.js");
+for (const f of [htmlJs, api, state, rb]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
 
 (async () => {
   await vm.runInContext("refreshRedBlueTab()", ctx);

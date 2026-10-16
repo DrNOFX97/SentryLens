@@ -27,30 +27,30 @@ async function loadAgents() {
     data = await fetchJSON(`/api/agents`);
   } catch (err) {
     console.error(err);
-    document.getElementById("agents-table-body").innerHTML =
-      `<tr><td colspan="5" class="error-state" role="alert">${escapeHtml(panelErrorText(err, "Erro ao carregar agentes."))}</td></tr>`;
+    htmRender(document.getElementById("agents-table-body"),
+      htmlT`<tr><td colspan="5" class="error-state" role="alert">${panelErrorText(err, "Erro ao carregar agentes.")}</td></tr>`);
     return;
   }
   const activeCount = (data.agents || []).filter((a) => a.status === "active").length;
   document.getElementById("kpi-agents").textContent = activeCount;
 
   const tbody = document.getElementById("agents-table-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!data.agents || data.agents.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum agente encontrado</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="5" class="empty-state">Nenhum agente encontrado</td></tr>`);
     return;
   }
 
   data.agents.forEach((agent) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(agent.name)}</td>
-      <td class="mono">${escapeHtml(agent.ip || "-")}</td>
-      <td>${escapeHtml(agent.os || "-")}</td>
-      <td><span class="agent-status ${escapeHtml(agent.status)}">${escapeHtml(agent.status)}</span></td>
-      <td class="mono">${escapeHtml(formatTimestamp(agent.last_keep_alive))}</td>
-    `;
+    htmRender(tr, htmlT`
+      <td>${agent.name}</td>
+      <td class="mono">${agent.ip || "-"}</td>
+      <td>${agent.os || "-"}</td>
+      <td><span class="agent-status ${agent.status}">${agent.status}</span></td>
+      <td class="mono">${formatTimestamp(agent.last_keep_alive)}</td>
+    `);
     tbody.appendChild(tr);
   });
 }
@@ -65,16 +65,16 @@ async function loadAlerts(hours, severity) {
   } catch (err) {
     console.error(err);
     renderPanelError("#alerts-panel", panelErrorText(err, "Erro ao carregar os alertas."));
-    document.getElementById("alerts-table-body").innerHTML =
-      `<tr><td colspan="9" class="empty-state">Indisponível.</td></tr>`;
+    htmRender(document.getElementById("alerts-table-body"),
+      htmlT`<tr><td colspan="9" class="empty-state">Indisponível.</td></tr>`);
     return;
   }
   renderPanelError("#alerts-panel", null);
   const tbody = document.getElementById("alerts-table-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!data.alerts || data.alerts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Sem alertas neste período</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="9" class="empty-state">Sem alertas neste período</td></tr>`);
     renderAlertsTimelineChart([], hours);
     return;
   }
@@ -86,18 +86,18 @@ async function loadAlerts(hours, severity) {
 
   sorted.slice(0, 100).forEach((alert) => {
     const tr = document.createElement("tr");
-    tr.className = `alert-row ${escapeHtml(alert.severity)}`;
-    tr.innerHTML = `
-      <td class="mono">${escapeHtml(formatTimestamp(alert.timestamp))}</td>
-      <td>${severityBadge(alert.severity)}</td>
-      <td>${escapeHtml(alert.agent_name)}</td>
-      <td class="mono">${escapeHtml(alert.agent_ip)}</td>
-      <td class="mono">${alert.windows_event_id != null ? escapeHtml(alert.windows_event_id) : "-"}</td>
-      <td class="wrap">${escapeHtml(alert.friendly_name)}<div class="table-sub">${escapeHtml(alert.rule_description || "")}</div></td>
-      <td>${alert.wazuh_level != null ? escapeHtml(alert.wazuh_level) : "-"}</td>
-      <td class="wrap">${escapeHtml(alert.recommendation)}</td>
-      <td class="log-cell">${escapeHtml(alert.full_log)}</td>
-    `;
+    tr.className = `alert-row ${alert.severity}`;
+    htmRender(tr, htmlT`
+      <td class="mono">${formatTimestamp(alert.timestamp)}</td>
+      <td>${htmlRaw(severityBadge(alert.severity))}</td>
+      <td>${alert.agent_name}</td>
+      <td class="mono">${alert.agent_ip}</td>
+      <td class="mono">${alert.windows_event_id != null ? alert.windows_event_id : "-"}</td>
+      <td class="wrap">${alert.friendly_name}<div class="table-sub">${alert.rule_description || ""}</div></td>
+      <td>${alert.wazuh_level != null ? alert.wazuh_level : "-"}</td>
+      <td class="wrap">${alert.recommendation}</td>
+      <td class="log-cell">${alert.full_log}</td>
+    `);
     tbody.appendChild(tr);
   });
 
@@ -124,14 +124,14 @@ async function loadBruteForce(hours) {
   }
 
   panel.style.display = "block";
-  list.innerHTML = "";
+  list.replaceChildren();
   data.suspects.forEach((s) => {
     const item = document.createElement("div");
     item.className = "bf-item";
-    item.innerHTML = `
-      <span><strong>${escapeHtml(s.user)}</strong> — ${escapeHtml(s.failed_attempts)} tentativas falhadas (${escapeHtml(s.source_agent)})</span>
-      <span>${escapeHtml(formatTimestamp(s.last_attempt))}</span>
-    `;
+    htmRender(item, htmlT`
+      <span><strong>${s.user}</strong> — ${s.failed_attempts} tentativas falhadas (${s.source_agent})</span>
+      <span>${formatTimestamp(s.last_attempt)}</span>
+    `);
     list.appendChild(item);
   });
 }

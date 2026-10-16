@@ -4,10 +4,10 @@
 
 function renderComplianceTable(alerts) {
   const tbody = document.getElementById("compliance-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!alerts || alerts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Sem alertas neste período</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="7" class="empty-state">Sem alertas neste período</td></tr>`);
     return;
   }
 
@@ -16,17 +16,17 @@ function renderComplianceTable(alerts) {
     const c = a.compliance || {};
     const cell = (v) => {
       const { label, title } = slComplianceVerdict(v);
-      return `<td title="${escapeHtml(title)}">${escapeHtml(label)}</td>`;
+      return htmlT`<td title="${title}">${label}</td>`;
     };
-    tr.innerHTML = `
-      <td class="mono">${escapeHtml(formatTimestamp(a.timestamp))}</td>
-      <td>${escapeHtml(a.agent_name)}</td>
-      <td>${escapeHtml(a.friendly_name)}</td>
-      <td>${severityBadge(a.severity)}</td>
+    htmRender(tr, htmlT`
+      <td class="mono">${formatTimestamp(a.timestamp)}</td>
+      <td>${a.agent_name}</td>
+      <td>${a.friendly_name}</td>
+      <td>${htmlRaw(severityBadge(a.severity))}</td>
       ${cell(c.rgpd)}
       ${cell(c.nis2)}
       ${cell(c.ai_act)}
-    `;
+    `);
     tbody.appendChild(tr);
   });
 }

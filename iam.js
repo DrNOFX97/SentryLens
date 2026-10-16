@@ -21,22 +21,22 @@ let lastLifecycleEvents = [];
 
 function renderLifecycleEventsTable(events) {
   const tbody = document.getElementById("lifecycle-events-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!events || events.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Sem eventos neste período</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="5" class="empty-state">Sem eventos neste período</td></tr>`);
     return;
   }
 
   events.forEach((ev) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="mono">${escapeHtml(formatTimestamp(ev.timestamp))}</td>
-      <td>${escapeHtml(lifecycleEventTypeLabel(ev.event_id))}</td>
-      <td>${escapeHtml(ev.target_user)}</td>
-      <td>${escapeHtml(ev.executed_by)}</td>
-      <td>${escapeHtml(ev.agent_name)}</td>
-    `;
+    htmRender(tr, htmlT`
+      <td class="mono">${formatTimestamp(ev.timestamp)}</td>
+      <td>${lifecycleEventTypeLabel(ev.event_id)}</td>
+      <td>${ev.target_user}</td>
+      <td>${ev.executed_by}</td>
+      <td>${ev.agent_name}</td>
+    `);
     tbody.appendChild(tr);
   });
 }
@@ -109,23 +109,23 @@ document.getElementById("lifecycle-user-filter").addEventListener("input", apply
 
 function renderPrivilegesDeviationsTable(deviations) {
   const tbody = document.getElementById("privileges-deviations-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!deviations || deviations.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Sem desvios ao baseline neste período</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="6" class="empty-state">Sem desvios ao baseline neste período</td></tr>`);
     return;
   }
 
   deviations.forEach((d) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(d.user)}</td>
-      <td>${escapeHtml(d.cargo)}</td>
-      <td>${escapeHtml(d.group)}</td>
-      <td class="wrap">${escapeHtml(d.reason)}</td>
-      <td>${escapeHtml(d.executed_by)}</td>
-      <td class="mono">${escapeHtml(formatTimestamp(d.timestamp))}</td>
-    `;
+    htmRender(tr, htmlT`
+      <td>${d.user}</td>
+      <td>${d.cargo}</td>
+      <td>${d.group}</td>
+      <td class="wrap">${d.reason}</td>
+      <td>${d.executed_by}</td>
+      <td class="mono">${formatTimestamp(d.timestamp)}</td>
+    `);
     tbody.appendChild(tr);
   });
 }
@@ -137,20 +137,16 @@ function renderCriticalAdditionsBlock(additions) {
   const container = document.getElementById("privileges-critical-block");
 
   if (!additions || additions.length === 0) {
-    container.innerHTML = '<p class="empty-state">Nenhuma adição a grupo crítico neste período</p>';
+    sttShowEmpty(container, "Nenhuma adição a grupo crítico neste período");
     return;
   }
 
-  container.innerHTML = additions
-    .map(
-      (a) => `
+  htmRender(container, htmlT`${additions.map((a) => htmlT`
         <div class="bf-item">
-          <span><strong>${escapeHtml(a.user)}</strong> adicionado a <strong>${escapeHtml(a.group)}</strong> por ${escapeHtml(a.executed_by)}</span>
-          <span>${escapeHtml(formatTimestamp(a.timestamp))}</span>
+          <span><strong>${a.user}</strong> adicionado a <strong>${a.group}</strong> por ${a.executed_by}</span>
+          <span>${formatTimestamp(a.timestamp)}</span>
         </div>
-      `
-    )
-    .join("");
+      `)}`);
 }
 
 function renderPrivilegesGroupsChart(groupRanking) {
@@ -222,10 +218,10 @@ function findLastActivity(user, scheduledTasks, processes) {
 
 function renderAdminAccountsTable(accounts, specialPrivilegesByUser, scheduledTasks, processes) {
   const tbody = document.getElementById("admin-accounts-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!accounts || accounts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Nenhuma conta administrativa identificada neste período</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="3" class="empty-state">Nenhuma conta administrativa identificada neste período</td></tr>`);
     return;
   }
 
@@ -233,31 +229,31 @@ function renderAdminAccountsTable(accounts, specialPrivilegesByUser, scheduledTa
     const count = specialPrivilegesByUser?.[user] ?? 0;
     const lastActivity = findLastActivity(user, scheduledTasks, processes);
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(user)}</td>
-      <td>${escapeHtml(count)}</td>
-      <td class="mono">${lastActivity ? escapeHtml(formatTimestamp(lastActivity)) : "—"}</td>
-    `;
+    htmRender(tr, htmlT`
+      <td>${user}</td>
+      <td>${count}</td>
+      <td class="mono">${lastActivity ? formatTimestamp(lastActivity) : "—"}</td>
+    `);
     tbody.appendChild(tr);
   });
 }
 
 function renderAdminScheduledTasksTable(tasks) {
   const tbody = document.getElementById("admin-scheduled-tasks-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
 
   if (!tasks || tasks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Sem tarefas agendadas por contas administrativas neste período</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="3" class="empty-state">Sem tarefas agendadas por contas administrativas neste período</td></tr>`);
     return;
   }
 
   tasks.forEach((t) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(t.user)}</td>
-      <td class="mono">${escapeHtml(formatTimestamp(t.timestamp))}</td>
-      <td>${escapeHtml(t.agent_name)}</td>
-    `;
+    htmRender(tr, htmlT`
+      <td>${t.user}</td>
+      <td class="mono">${formatTimestamp(t.timestamp)}</td>
+      <td>${t.agent_name}</td>
+    `);
     tbody.appendChild(tr);
   });
 }

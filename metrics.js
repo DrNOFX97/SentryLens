@@ -55,22 +55,22 @@ function metRenderMttd(data) {
   metText("met-mttd-def", `${(data.definitions || {}).mttd || ""} ${(data.definitions || {}).mttr || ""}`);
 
   const rows = Object.entries(mttd.by_scenario || {});
-  document.getElementById("met-mttd-body").innerHTML = rows.length
-    ? rows.map(([name, b]) => `<tr>
-        <td>${escapeHtml(name)}</td>
+  htmRender(document.getElementById("met-mttd-body"), rows.length
+    ? htmlT`${rows.map(([name, b]) => htmlT`<tr>
+        <td>${name}</td>
         <td>${b.n}</td>
         <td>${metFormatSeconds(b.median_s)}</td>
         <td>${metFormatSeconds(b.p90_s)}</td>
         <td>${metFormatSeconds(b.avg_s)}</td>
-      </tr>`).join("")
-    : `<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`;
+      </tr>`)}`
+    : htmlT`<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`);
 }
 
 function metGapList(id, items, available) {
   // Sem dados != sem lacunas: só afirma "Nenhuma lacuna" se a cobertura foi calculada.
-  document.getElementById(id).innerHTML = items && items.length
-    ? items.map((x) => `<li>${escapeHtml(x)}</li>`).join("")
-    : `<li class="empty-state">${available === false ? "Sem dados." : "Nenhuma lacuna."}</li>`;
+  htmRender(document.getElementById(id), items && items.length
+    ? htmlT`${items.map((x) => htmlT`<li>${x}</li>`)}`
+    : htmlT`<li class="empty-state">${available === false ? "Sem dados." : "Nenhuma lacuna."}</li>`);
 }
 
 function metRenderCoverage(data) {
@@ -107,9 +107,9 @@ function metRenderRate(data) {
   metText("met-rate-def", `${(data.definitions || {}).rate || ""} ${(data.definitions || {}).fn || ""} ${(data.definitions || {}).fp || ""}`);
 
   const by = rate.by_source;
-  document.getElementById("met-rate-body").innerHTML = by
-    ? Object.keys(MET_SOURCE_LABELS).map((k) => `<tr><td>${escapeHtml(MET_SOURCE_LABELS[k])}</td><td>${by[k]}</td></tr>`).join("")
-    : `<tr><td colspan="2" class="empty-state">Sem dados.</td></tr>`;
+  htmRender(document.getElementById("met-rate-body"), by
+    ? htmlT`${Object.keys(MET_SOURCE_LABELS).map((k) => htmlT`<tr><td>${MET_SOURCE_LABELS[k]}</td><td>${by[k]}</td></tr>`)}`
+    : htmlT`<tr><td colspan="2" class="empty-state">Sem dados.</td></tr>`);
 }
 
 async function refreshMetrics() {

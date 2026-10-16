@@ -1,6 +1,6 @@
 // Aba "📐 Evaluation" (marco R9, Fase 2 — avaliação ligada à versão; R11: comparação vN vs vN−1).
 // Carregado DEPOIS de app.js e de ml_models.js: reutiliza os globais de
-// app.js (API_BASE, API_KEY, escapeHtml, renderPanelError) e os helpers puros
+// app.js (API_BASE, API_KEY, htmlT/htmRender de html.js, renderPanelError) e os helpers puros
 // de ml_models.js (mlmErrorText, mlmCodeFromResponse) — não redeclara nenhum
 // deles, porque os scripts clássicos partilham um só escopo global.
 //
@@ -28,7 +28,7 @@
 // Cada linha lê o `evaluation` da SUA PRÓPRIA entrada: nunca um valor global.
 // Com duas versões com avaliações diferentes, a linha de cada uma tem de
 // trazer as métricas dela (Pitfall 1 — o critério 2 do ROADMAP). Todo o texto
-// que vem do metadata.json do utilizador passa por escapeHtml.
+// que vem do metadata.json do utilizador é interpolado em htmlT (escapado).
 //
 // O bloco de concordância ao vivo faz o SEGUNDO pedido desta aba, a
 // /api/ml-anomalies (D-10). Os dois pedidos são independentes: uma falha de um
@@ -181,7 +181,7 @@ function mleFeatureStatsNotice(entry) {
   const linhas = chaves.map((k) => {
     const v = stats[k];
     if (!v || typeof v !== "object" || typeof v.mean !== "number" || typeof v.std !== "number") return null;
-    return `${escapeHtml(k)}: mean ${v.mean.toFixed(3).replace(".", ",")}, std ${v.std.toFixed(3).replace(".", ",")}`;
+    return `${k}: mean ${v.mean.toFixed(3).replace(".", ",")}, std ${v.std.toFixed(3).replace(".", ",")}`;
   }).filter(Boolean).join("; ");
   if (!linhas) return "";
   return `⚠ Feature stats do lote de treino: ${linhas}. Estes números descrevem o lote de treino (média e desvio populacional de cada feature no lote), não o comportamento do modelo. O mesmo evento pode mudar de feature — e de veredicto — conforme o lote que o acompanha (medido: ~9,6 % dos eventos mudam de feature, ~8,7 % mudam de veredicto só por isso).`;
@@ -197,8 +197,8 @@ function mleLiveModelText(mlReport) {
   const v = mlReport?.model_version;
   if (v === "legacy") return "Modelo: legado (sem metadados nem verificação SHA-256).";
   if (v === null || v === undefined) return "Modelo: (não carregado / indeterminado).";
-  if (typeof v === "string") return `Modelo: ${escapeHtml(v)} (versão que mediu esta janela).`;
-  return `Modelo: ${escapeHtml(String(v))} (versão que mediu esta janela).`;
+  if (typeof v === "string") return `Modelo: ${v} (versão que mediu esta janela).`;
+  return `Modelo: ${String(v)} (versão que mediu esta janela).`;
 }
 
 // ======================= camada pura (sem DOM) ==============================
@@ -240,12 +240,12 @@ function mleNumero(valor) {
 
 function mleContagem(valor) {
   const numero = mleNumero(valor);
-  return numero === null ? "—" : escapeHtml(String(numero));
+  return numero === null ? "—" : String(numero);
 }
 
 // "Etiqueta 12" para as contagens da concordância ao vivo.
-function mleMetrica(rotulo, htmlValor) {
-  return `<span class="mle-metric"><span class="mle-metric-label">${escapeHtml(rotulo)}</span> ${htmlValor}</span>`;
+function mleMetrica(rotulo, valor) {
+  return htmlT`<span class="mle-metric"><span class="mle-metric-label">${rotulo}</span> ${valor}</span>`;
 }
 
 // A percentagem pt-PT, com uma casa. Um valor em falta nunca é desenhado
@@ -261,18 +261,18 @@ function mlePercent(value) {
 // As três métricas de um lado (ML ou regras) numa célula. Sem objeto, "—".
 function mleMetricCell(metrics) {
   if (!metrics || typeof metrics !== "object") return "—";
-  return [
+  return htmlT`${[
     ["P", metrics.precision],
     ["R", metrics.recall],
     ["F", metrics.f1],
-  ].map(([sigla, valor]) =>
-    `<span class="mle-metric"><span class="mle-metric-label">${sigla}</span> ${mlePercent(valor)}</span>`
-  ).join(" ");
+  ].map(([sigla, valor], i) =>
+    htmlT`${i ? " " : ""}<span class="mle-metric"><span class="mle-metric-label">${sigla}</span> ${mlePercent(valor)}</span>`
+  )}`;
 }
 
 function mleEmptyState(colspan, texto) {
   const col = Number(colspan) > 0 ? Number(colspan) : 1;
-  return `<tr><td colspan="${col}" class="empty-state">${escapeHtml(texto)}</td></tr>`;
+  return htmlT`<tr><td colspan="${col}" class="empty-state">${texto}</td></tr>`;
 }
 
 // O badge da origem DECLARADA do dataset da avaliação. Só existem três
@@ -280,17 +280,16 @@ function mleEmptyState(colspan, texto) {
 // desenhado, T-02-28), e o badge de "não declarada" carrega sempre o aviso
 // que diz o que isso significa.
 function mleOriginHtml(dataset_origin) {
-  const titulo = ` title="${escapeHtml(MLE_ORIGIN_AVISO)}"`;
   if (dataset_origin === "real") {
-    return `<span class="mle-origin mle-origin-real">${MLE_ORIGEM_REAL}</span>`;
+    return htmlT`<span class="mle-origin mle-origin-real">${MLE_ORIGEM_REAL}</span>`;
   }
   if (dataset_origin === "synthetic") {
-    return `<span class="mle-origin mle-origin-synthetic">${MLE_ORIGEM_SINTETICOS}</span>`;
+    return htmlT`<span class="mle-origin mle-origin-synthetic">${MLE_ORIGEM_SINTETICOS}</span>`;
   }
   if (dataset_origin === "unknown") {
-    return `<span class="mle-origin mle-origin-unknown"${titulo}>${MLE_ORIGEM_NAO_DECLARADA}</span>`;
+    return htmlT`<span class="mle-origin mle-origin-unknown" title="${MLE_ORIGIN_AVISO}">${MLE_ORIGEM_NAO_DECLARADA}</span>`;
   }
-  return `<span class="mle-origin mle-origin-unknown"${titulo}>${MLE_ORIGEM_DESCONHECIDA}</span>`;
+  return htmlT`<span class="mle-origin mle-origin-unknown" title="${MLE_ORIGIN_AVISO}">${MLE_ORIGEM_DESCONHECIDA}</span>`;
 }
 
 // O aviso de amostra pequena (D-05): dois limiares nomeados, eventos E
@@ -316,16 +315,16 @@ function mleSmallSampleNotice(evaluation) {
 function mleBuildEvalRows(report) {
   const versions = (report && report.versions) || [];
   if (!versions.length) return mleEmptyState(MLE_COLUNAS, MLE_EMPTY_TEXT);
-  return versions.map((entry) => {
-    const ativa = entry.active ? '<span class="mlm-badge mlm-badge-active">ativa</span>' : "—";
-    const versao = escapeHtml(entry.id || entry.label || "");
+  return htmlT`${versions.map((entry) => {
+    const ativa = entry.active ? htmlT`<span class="mlm-badge mlm-badge-active">ativa</span>` : "—";
+    const versao = entry.id || entry.label || "";
     const avaliacao = entry.evaluation;
     const semAvaliacao = avaliacao === null || avaliacao === undefined;
     const dataset = semAvaliacao
       ? "—"
       : `${mleContagem(avaliacao.total_events)} eventos · `
         + `${mleContagem(avaliacao.attacks_in_dataset)} ataques`;
-    const linha = `<tr>
+    const linha = htmlT`<tr>
       <td>${versao}</td>
       <td>${ativa}</td>
       <td>${dataset}</td>
@@ -333,12 +332,11 @@ function mleBuildEvalRows(report) {
       <td>${mleMetricCell(avaliacao && avaliacao.ml)}</td>
       <td>${mleMetricCell(avaliacao && avaliacao.rules)}</td>
     </tr>`;
-    if (semAvaliacao) return linha + mleEmptyState(MLE_COLUNAS, MLE_SEM_AVALIACAO);
+    if (semAvaliacao) return htmlT`${linha}${mleEmptyState(MLE_COLUNAS, MLE_SEM_AVALIACAO)}`;
     const aviso = mleSmallSampleNotice(avaliacao);
     if (!aviso) return linha;
-    return linha
-      + `<tr><td colspan="${MLE_COLUNAS}" class="mle-warning">${escapeHtml(aviso)}</td></tr>`;
-  }).join("");
+    return htmlT`${linha}<tr><td colspan="${MLE_COLUNAS}" class="mle-warning">${aviso}</td></tr>`;
+  })}`;
 }
 
 // Uma frase com as contagens que o analista precisa antes de ler números:
@@ -362,7 +360,7 @@ function mleEvalNoticeText(report) {
 function mleBuildLiveAgreement(mlReport) {
   const semDados = {
     state: "sem_dados",
-    html: `<div class="empty-state">${escapeHtml(MLE_LIVE_SEM_DADOS)}</div>`,
+    html: htmlT`<div class="empty-state">${MLE_LIVE_SEM_DADOS}</div>`,
   };
   if (!mlReport || typeof mlReport !== "object" || Array.isArray(mlReport)) return semDados;
   const total = mleNumero(mlReport.total);
@@ -378,9 +376,9 @@ function mleBuildLiveAgreement(mlReport) {
     mleMetrica("Modelo que mediu", mleLiveModelText(mlReport)),
   ];
   if (mlReport.alerts_truncated === true) {
-    linhas.push(`<div class="mle-warning">${escapeHtml(MLE_LIVE_TRUNCADO)}</div>`);
+    linhas.push(htmlT`<div class="mle-warning">${MLE_LIVE_TRUNCADO}</div>`);
   }
-  return { state: "ok", html: linhas.join(" ") };
+  return { state: "ok", html: htmlT`${linhas.map((l, i) => htmlT`${i ? " " : ""}${l}`)}` };
 }
 
 // Um ERRO no pedido à concordância nunca é desenhado como "Sem dados" (D-10):
@@ -406,7 +404,7 @@ function mleLiveErrorMessage(code) {
 }
 
 function mleLiveErrorHtml(code) {
-  return `<div class="empty-state mle-live-error">${escapeHtml(mleLiveErrorMessage(code))}</div>`;
+  return htmlT`<div class="empty-state mle-live-error">${mleLiveErrorMessage(code)}</div>`;
 }
 
 // ======================= camada DOM (só via mleInit) ========================
@@ -447,7 +445,7 @@ async function mleRefreshLive() {
   try {
     const relatorio = await mleRequest(`/api/ml-anomalies?hours=${horas}`);
     const resultado = mleBuildLiveAgreement(relatorio);
-    corpo.innerHTML = resultado.html;
+    htmRender(corpo, resultado.html);
     aviso.textContent = resultado.state === "sem_dados"
       ? `Janela de ${horas} h: ${MLE_LIVE_SEM_DADOS}`
       : `Janela de ${horas} h: o ML e as regras comparados em cada evento processado.`;
@@ -495,13 +493,13 @@ function mleRenderCompare(report) {
   aviso.textContent = mleCompareNoticeText((report && report.versions) || []);
 
   if (!pares.length) {
-    corpo.innerHTML = '<tr><td colspan="8" class="empty-state">Sem pares para comparar — cada versão precisa de avaliação, e o par exige números consecutivos (vN vs vN−1).</td></tr>';
+    htmRender(corpo, htmlT`<tr><td colspan="8" class="empty-state">Sem pares para comparar — cada versão precisa de avaliação, e o par exige números consecutivos (vN vs vN−1).</td></tr>`);
     return;
   }
 
   const linhas = mleCompareRows(mleComparePairs((report && report.versions) || []));
-  corpo.innerHTML = linhas.map((l) =>
-    `<tr>
+  htmRender(corpo, htmlT`${linhas.map((l) =>
+    htmlT`<tr>
       <td>${l.versaoNova}</td>
       <td>${l.versaoVelha}</td>
       <td>${l.lado === "ml" ? "ML" : "Regras"}</td>
@@ -511,29 +509,29 @@ function mleRenderCompare(report) {
       <td>${l.delta}</td>
       <td class="${l.veredictoClass}">${l.veredicto}</td>
     </tr>`
-  ).join("");
+  )}`);
 }
 
 function mleRenderFeatureStats(report) {
   const versions = (report && report.versions) || [];
   const container = document.getElementById("mle-feature-stats");
   if (!container) return;
-  let html = "";
+  const avisos = [];
   for (const entry of (report && report.versions) || []) {
     const notice = mleFeatureStatsNotice(entry);
     if (notice) {
-      html += `<div class="mle-warning" style="margin-bottom: 8px;">${escapeHtml(entry.id || entry.label)}: ${notice}</div>`;
+      avisos.push(htmlT`<div class="mle-warning" style="margin-bottom: 8px;">${entry.id || entry.label}: ${notice}</div>`);
     }
   }
-  if (!html) {
+  if (!avisos.length) {
     sttShowEmpty(container, "Nenhuma feature_stats disponível nas versões avaliadas.");
   } else {
-    container.innerHTML = html;
+    htmRender(container, htmlT`${avisos}`);
   }
 }
 
 function mleRenderEvaluation(report) {
-  document.getElementById("mlm-eval-body").innerHTML = mleBuildEvalRows(report);
+  htmRender(document.getElementById("mlm-eval-body"), mleBuildEvalRows(report));
   document.getElementById("mlm-eval-notice").textContent = mleEvalNoticeText(report);
   mleRenderCompare(report);
   mleRenderFeatureStats(report);

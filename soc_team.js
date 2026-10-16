@@ -10,33 +10,33 @@ function stText(id, text) {
 
 function stCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function tierBadge(tier) {
-  if (!tier) return '<span class="inc-status inc-status-NEW">—</span>';
+  if (!tier) return htmlT`<span class="inc-status inc-status-NEW">—</span>`;
   const labels = { 1: "Tier 1", 2: "Tier 2", 3: "Tier 3" };
   const cls = { 1: "inc-status-NEW", 2: "inc-status-INVESTIGATING", 3: "inc-status-CONTAINED" };
-  return `<span class="inc-status ${cls[tier]}">${escapeHtml(String(labels[tier] || tier))}</span>`;
+  return htmlT`<span class="inc-status ${cls[tier]}">${String(labels[tier] || tier)}</span>`;
 }
 
 function roleBadge(role) {
   const labels = { primary: "Principal", secondary: "Secundário", on_call: "De prevenção" };
   const cls = { primary: "inc-status-CONTAINED", secondary: "inc-status-INVESTIGATING", on_call: "inc-status-NEW" };
-  return `<span class="inc-status ${cls[role]}">${escapeHtml(String(labels[role] || role))}</span>`;
+  return htmlT`<span class="inc-status ${cls[role]}">${String(labels[role] || role)}</span>`;
 }
 
 function formatDateTimeLocal(ts) {
   if (!ts) return "—";
   const d = new Date(ts.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
-  if (isNaN(d.getTime())) return escapeHtml(ts);
+  if (isNaN(d.getTime())) return String(ts);
   return d.toLocaleString("pt-PT");
 }
 
 function formatTimeOnly(ts) {
   if (!ts) return "—";
   const d = new Date(ts.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
-  if (isNaN(d.getTime())) return escapeHtml(ts);
+  if (isNaN(d.getTime())) return String(ts);
   return d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
 }
 
@@ -103,26 +103,27 @@ function renderAnalystsTable(analysts) {
     return;
   }
   body.dataset.stReady = "1";
-  body.innerHTML = analysts.map((a) => `
-    <tr data-id="${escapeHtml(a.id)}">
-      <td>${escapeHtml(a.id)}</td>
-      <td>${escapeHtml(a.name)}</td>
+  htmRender(body, htmlT`${analysts.map((a) => htmlT`
+    <tr data-id="${a.id}">
+      <td>${a.id}</td>
+      <td>${a.name}</td>
       <td>${tierBadge(a.tier)}</td>
       <td>${stCell(a.email)}</td>
-      <td>${a.active ? '<span class="inc-status inc-status-RESOLVED">Ativo</span>' : '<span class="inc-status inc-status-CLOSED">Inativo</span>'}</td>
+      <td>${a.active ? htmlT`<span class="inc-status inc-status-RESOLVED">Ativo</span>` : htmlT`<span class="inc-status inc-status-CLOSED">Inativo</span>`}</td>
       <td>
-        <button class="btn-sm" data-action="edit" data-id="${escapeHtml(a.id)}">Editar</button>
-        ${a.active ? `<button class="btn-sm btn-danger" data-action="deactivate" data-id="${escapeHtml(a.id)}">Desativar</button>` : ""}
+        <button class="btn-sm" data-action="edit" data-id="${a.id}">Editar</button>
+        ${a.active ? htmlT`<button class="btn-sm btn-danger" data-action="deactivate" data-id="${a.id}">Desativar</button>` : ""}
       </td>
     </tr>
-  `).join("");
+  `)}`);
 }
 
 function updateShiftAnalystSelect(analysts) {
   const select = document.getElementById("shift-analyst");
   const current = select.value;
-  select.innerHTML = '<option value="">Selecione...</option>' +
-    analysts.filter(a => a.active).map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} (${tierBadge(a.tier).replace(/<[^>]+>/g, '')})</option>`).join("");
+  const tierLabels = { 1: "Tier 1", 2: "Tier 2", 3: "Tier 3" };
+  htmRender(select, htmlT`<option value="">Selecione...</option>${analysts.filter(a => a.active).map(a =>
+    htmlT`<option value="${a.id}">${a.name} (${a.tier ? String(tierLabels[a.tier] || a.tier) : "—"})</option>`)}`);
   if (analysts.some(a => a.id === current)) select.value = current;
 }
 
@@ -243,15 +244,15 @@ function renderShiftsTable(shifts) {
     return;
   }
   body.dataset.stReady = "1";
-  body.innerHTML = shifts.map((s) => `
-    <tr data-id="${escapeHtml(String(s.id))}">
+  htmRender(body, htmlT`${shifts.map((s) => htmlT`
+    <tr data-id="${String(s.id)}">
       <td>${stCell(s.analyst_name || s.analyst_id)}</td>
       <td>${tierBadge(s.analyst_tier)}</td>
       <td>${formatDateTimeLocal(s.start_ts)}</td>
       <td>${formatDateTimeLocal(s.end_ts)}</td>
       <td>${roleBadge(s.role)}</td>
     </tr>
-  `).join("");
+  `)}`);
 }
 
 document.getElementById("shift-analyst-filter").addEventListener("change", loadShifts);
@@ -318,15 +319,15 @@ function renderEscalationTable(rules) {
     return;
   }
   body.dataset.stReady = "1";
-  body.innerHTML = rules.map((r) => `
-    <tr data-id="${escapeHtml(String(r.id))}">
+  htmRender(body, htmlT`${rules.map((r) => htmlT`
+    <tr data-id="${String(r.id)}">
       <td>${tierBadge(r.from_tier)}</td>
-      <td>${r.to_tier ? tierBadge(r.to_tier) : '<span class="inc-status inc-status-CLOSED">Final</span>'}</td>
-      <td>${severityBadge(r.severity)}</td>
-      <td>${r.auto_escalate ? '<span class="inc-status inc-status-RESOLVED">Sim</span>' : '<span class="inc-status inc-status-NEW">Não</span>'}</td>
+      <td>${r.to_tier ? tierBadge(r.to_tier) : htmlT`<span class="inc-status inc-status-CLOSED">Final</span>`}</td>
+      <td>${htmlRaw(severityBadge(r.severity))}</td>
+      <td>${r.auto_escalate ? htmlT`<span class="inc-status inc-status-RESOLVED">Sim</span>` : htmlT`<span class="inc-status inc-status-NEW">Não</span>`}</td>
       <td>${stCell(r.sla_minutes)}</td>
     </tr>
-  `).join("");
+  `)}`);
 }
 
 document.getElementById("escalation-create-btn").addEventListener("click", () => openEscalationModal("create"));
@@ -400,7 +401,7 @@ function renderOnCallList(analysts, listId) {
     return;
   }
   list.dataset.stReady = "1";
-  list.innerHTML = analysts.map(a => `<li>${escapeHtml(a.name)} (${escapeHtml(a.id)})${a.email ? ` — ${escapeHtml(a.email)}` : ""}</li>`).join("");
+  htmRender(list, htmlT`${analysts.map(a => htmlT`<li>${a.name} (${a.id})${a.email ? ` — ${a.email}` : ""}</li>`)}`);
 }
 
 document.getElementById("oncall-tier-filter").addEventListener("change", loadOnCall);
@@ -428,21 +429,21 @@ function renderSLABreaches(breaches) {
   }
   const now = new Date();
   body.dataset.stReady = "1";
-  body.innerHTML = breaches.map((b) => {
+  htmRender(body, htmlT`${breaches.map((b) => {
     const deadline = new Date(b.sla_deadline.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
     const overdue = now > deadline;
-    return `
+    return htmlT`
       <tr>
-        <td>${escapeHtml(b.id)}</td>
-        <td>${severityBadge(b.severity)}</td>
+        <td>${b.id}</td>
+        <td>${htmlRaw(severityBadge(b.severity))}</td>
         <td>${stCell(b.asset)}</td>
         <td>${tierBadge(b.assigned_team_tier)}</td>
         <td>${stCell(b.assigned_to)}</td>
-        <td>${formatDateTimeLocal(b.sla_deadline)} ${overdue ? '<span class="sla-overdue">⚠️ ULTRAPASSADO</span>' : ""}</td>
+        <td>${formatDateTimeLocal(b.sla_deadline)} ${overdue ? htmlT`<span class="sla-overdue">⚠️ ULTRAPASSADO</span>` : ""}</td>
         <td>${b.status}</td>
       </tr>
     `;
-  }).join("");
+  })}`);
 }
 
 // ====== Summary by Tier ======
@@ -470,19 +471,19 @@ function renderTierSummary(byTier) {
     return;
   }
   body.dataset.stReady = "1";
-  body.innerHTML = tiers.map(t => {
+  htmRender(body, htmlT`${tiers.map(t => {
     const d = byTier[t];
     const statusStr = Object.entries(d.by_status || {}).map(([s, c]) => `${s}: ${c}`).join(", ") || "—";
     const sevStr = Object.entries(d.by_severity || {}).map(([s, c]) => `${s}: ${c}`).join(", ") || "—";
     const tierLabel = t === 0 ? "Sem tier" : `Tier ${t}`;
-    return `<tr>
+    return htmlT`<tr>
       <td>${tierLabel}</td>
       <td>${d.total}</td>
       <td>${d.open}</td>
       <td>${statusStr}</td>
       <td>${sevStr}</td>
     </tr>`;
-  }).join("");
+  })}`);
 }
 
 // ====== Modais ======

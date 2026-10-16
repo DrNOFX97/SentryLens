@@ -5,6 +5,7 @@
 
 const fs = require("node:fs");
 const vm = require("node:vm");
+const path = require("node:path");
 
 const failures = [];
 function check(label, condition) {
@@ -102,6 +103,7 @@ function boot(visibility) {
   const ctx = vm.createContext(env.sandbox);
   try {
     vm.runInContext(fs.readFileSync(routerPath, "utf8"), ctx, { filename: "router.js" });
+    vm.runInContext(fs.readFileSync(path.join(path.dirname(routerPath), "html.js"), "utf8"), ctx, { filename: "html.js" });
     vm.runInContext(fs.readFileSync(incPath, "utf8"), ctx, { filename: "incidents.js" });
   } catch (err) {
     check("router.js + incidents.js carregam: " + err.message, false);

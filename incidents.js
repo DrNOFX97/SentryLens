@@ -2,7 +2,7 @@
 // reutiliza os seus globais (API_BASE, API_KEY, escapeHtml, severityBadge,
 // formatTimestamp, renderPanelError, periodSelect) — não redeclarar nenhum
 // aqui. Só mostra dados reais de /api/incidents/*; sem dados, estado vazio.
-// Todo o texto dinâmico passa por escapeHtml (notas e payloads vêm do analista
+// Todo o texto dinâmico é escapado pelo htmlT (notas e payloads vêm do analista
 // e do Wazuh).
 
 const INC_REFRESH_MS = 30000;
@@ -24,7 +24,7 @@ let incAnalystsLoaded = false;
 
 function incCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function incSetText(id, text) {
@@ -40,7 +40,7 @@ function incFormatSeconds(seconds) {
 
 function incStatusBadge(status) {
   const label = INC_STATUS_LABELS[status] || status;
-  return `<span class="inc-status inc-status-${escapeHtml(status)}">${escapeHtml(label)}</span>`;
+  return htmlT`<span class="inc-status inc-status-${status}">${label}</span>`;
 }
 
 // Cliente HTTP único (api.js): erros já vêm em PT com ação sugerida e
@@ -81,20 +81,20 @@ function renderIncidentsTable(incidents) {
     incTableState("empty", "Sem incidentes nesta janela. Se ainda não importaste o histórico, usa «Importar histórico».");
     return;
   }
-  body.innerHTML = incidents.map((i) => {
+  htmRender(body, htmlT`${incidents.map((i) => {
     const mitre = i.techniques.length ? i.techniques.join(", ") : "—";
     const attack = i.attack_ids.length ? ` (ataque #${i.attack_ids.join(", #")})` : "";
-    return `<tr class="inc-row${i.id === incSelectedId ? " selected" : ""}" data-id="${escapeHtml(i.id)}" tabindex="0">
-      <td>${escapeHtml(i.id)}</td>
-      <td>${severityBadge(i.severity)}</td>
+    return htmlT`<tr class="inc-row${i.id === incSelectedId ? " selected" : ""}" data-id="${i.id}" tabindex="0">
+      <td>${i.id}</td>
+      <td>${htmlRaw(severityBadge(i.severity))}</td>
       <td>${incStatusBadge(i.status)}</td>
       <td>${incCell(i.asset)}</td>
-      <td>${escapeHtml(formatTimestamp(i.first_evidence_at))}</td>
-      <td>${escapeHtml(formatTimestamp(i.last_evidence_at))}</td>
+      <td>${formatTimestamp(i.first_evidence_at)}</td>
+      <td>${formatTimestamp(i.last_evidence_at)}</td>
       <td>${incCell(i.evidence_count)}</td>
-      <td>${escapeHtml(mitre + attack)}</td>
+      <td>${mitre + attack}</td>
     </tr>`;
-  }).join("");
+  })}`);
 }
 
 function incEvidenceDescription(e) {
@@ -132,34 +132,37 @@ function renderIncidentDetail(incident) {
   const ml = incident.ml_summary
     ? `${incident.ml_summary.ml_anomalies}/${incident.ml_summary.scored} anomalias ML · ${incident.ml_summary.rule_flagged} por regra`
     : "sem modelo ML";
-  const assigned = incident.assigned_to ? `👤 ${escapeHtml(incident.assigned_to)}` : "👤 Não atribuído";
-  document.getElementById("inc-detail-meta").innerHTML = `
-    <span>${severityBadge(incident.severity)}</span> <span>${incStatusBadge(incident.status)}</span>
+  const assigned = incident.assigned_to ? `👤 ${incident.assigned_to}` : "👤 Não atribuído";
+  htmRender(document.getElementById("inc-detail-meta"), htmlT`
+    <span>${htmlRaw(severityBadge(incident.severity))}</span> <span>${incStatusBadge(incident.status)}</span>
     <span>Ativo: <strong>${incCell(incident.asset)}</strong></span>
     <span>Analista: <strong>${assigned}</strong></span>
     <span>MITRE: ${incCell(incident.techniques.join(", "))}</span>
-    <span>MTTD: ${escapeHtml(incFormatSeconds(incident.mttd_seconds))}</span>
-    <span>1.ª resposta: ${escapeHtml(incFormatSeconds(incident.time_to_first_response_seconds))}</span>
-    <span>${escapeHtml(ml)}</span>`;
+    <span>MTTD: ${incFormatSeconds(incident.mttd_seconds)}</span>
+    <span>1.ª resposta: ${incFormatSeconds(incident.time_to_first_response_seconds)}</span>
+    <span>${ml}</span>`);
 
-  document.getElementById("inc-actions").innerHTML = incident.available_transitions.map((s) =>
-    `<button type="button" class="inc-transition" data-status="${escapeHtml(s)}">→ ${escapeHtml(INC_STATUS_LABELS[s] || s)}</button>`
-  ).join("") || `<span class="panel-note">Estado final — sem transições.</span>`;
+  const transitions = incident.available_transitions.map((s) =>
+    htmlT`<button type="button" class="inc-transition" data-status="${s}">→ ${INC_STATUS_LABELS[s] || s}</button>`
+  );
+  htmRender(document.getElementById("inc-actions"), transitions.length
+    ? htmlT`${transitions}`
+    : htmlT`<span class="panel-note">Estado final — sem transições.</span>`);
 
-  document.getElementById("inc-evidence-body").innerHTML = incident.evidence.map((e) => `<tr>
-    <td>${escapeHtml(formatTimestamp(e.ts))}</td><td>${escapeHtml(e.kind)}</td>
-    <td>${severityBadge(e.severity)}</td><td>${escapeHtml(incEvidenceDescription(e))}</td></tr>`).join("");
+  htmRender(document.getElementById("inc-evidence-body"), htmlT`${incident.evidence.map((e) => htmlT`<tr>
+    <td>${formatTimestamp(e.ts)}</td><td>${e.kind}</td>
+    <td>${htmlRaw(severityBadge(e.severity))}</td><td>${incEvidenceDescription(e)}</td></tr>`)}`);
 
-  document.getElementById("inc-timeline").innerHTML = incident.timeline.map((ev) =>
-    `<li><time>${escapeHtml(formatTimestamp(ev.ts))}</time> <em>${escapeHtml(ev.actor)}</em> — ${escapeHtml(incTimelineText(ev))}</li>`
-  ).join("");
+  htmRender(document.getElementById("inc-timeline"), htmlT`${incident.timeline.map((ev) =>
+    htmlT`<li><time>${formatTimestamp(ev.ts)}</time> <em>${ev.actor}</em> — ${incTimelineText(ev)}</li>`
+  )}`);
 
   // Populate assignment input
   const assignmentInput = document.getElementById("inc-assignment-input");
   const assignmentStatus = document.getElementById("inc-assignment-status");
   if (incident.assigned_to) {
     assignmentInput.value = incident.assigned_to;
-    assignmentStatus.textContent = `Atribuído a ${escapeHtml(incident.assigned_to)}`;
+    assignmentStatus.textContent = `Atribuído a ${incident.assigned_to}`;
   } else {
     assignmentInput.value = "";
     assignmentStatus.textContent = "";
@@ -223,8 +226,7 @@ async function incLoadAnalystFilter() {
   } catch (err) {
     nomes = [];
   }
-  select.innerHTML = `<option value="">Todos</option>` +
-    nomes.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  htmRender(select, htmlT`<option value="">Todos</option>${nomes.map((n) => htmlT`<option value="${n}">${n}</option>`)}`);
   select.value = nomes.includes(atual) ? atual : "";
 }
 
@@ -391,7 +393,7 @@ function incRenderTriageResult(container, data) {
     severity: "Severidade geral"
   };
   
-  let html = "";
+  const parts = [];
   
   for (const [key, answer] of Object.entries(answers)) {
     const label = questionLabels[key] || key;
@@ -400,9 +402,9 @@ function incRenderTriageResult(container, data) {
       // NOUL question (sim/não)
       const prob = Math.round(answer.probability * 100);
       const fillClass = prob >= 50 ? "yes" : "no";
-      html += `
+      parts.push(htmlT`
         <div class="inc-triage-question">
-          <h4>${escapeHtml(label)}</h4>
+          <h4>${label}</h4>
           <div class="inc-triage-prob">
             <span class="inc-triage-prob-label">Sim</span>
             <div class="inc-triage-prob-bar"><div class="inc-triage-prob-fill ${fillClass}" style="width: ${prob}%"></div></div>
@@ -413,32 +415,32 @@ function incRenderTriageResult(container, data) {
             <div class="inc-triage-prob-bar"><div class="inc-triage-prob-fill ${prob >= 50 ? "no" : "yes"}" style="width: ${100 - prob}%"></div></div>
             <span class="inc-triage-prob-value">${100 - prob}%</span>
           </div>
-        </div>`;
+        </div>`);
     } else if (answer.choice) {
       // CHOICE question
       const probs = answer.probabilities || {};
       const confidence = answer.confidence !== undefined ? Math.round(answer.confidence * 100) : null;
-      html += `
+      parts.push(htmlT`
         <div class="inc-triage-question">
-          <h4>${escapeHtml(label)}</h4>
-          <div class="inc-triage-choice">Classificação: ${escapeHtml(answer.choice)}</div>
-          ${confidence !== null ? `<div class="inc-triage-confidence">Confidence (concentração): ${confidence}%</div>` : ""}
+          <h4>${label}</h4>
+          <div class="inc-triage-choice">Classificação: ${answer.choice}</div>
+          ${confidence !== null ? htmlT`<div class="inc-triage-confidence">Confidence (concentração): ${confidence}%</div>` : ""}
           <div style="margin-top: 8px;">Probabilidades:</div>
           ${Object.entries(probs).map(([choice, p]) => {
             const pct = Math.round(p * 100);
-            return `<div class="inc-triage-prob">
-              <span class="inc-triage-prob-label">${escapeHtml(choice)}</span>
+            return htmlT`<div class="inc-triage-prob">
+              <span class="inc-triage-prob-label">${choice}</span>
               <div class="inc-triage-prob-bar"><div class="inc-triage-prob-fill choice" style="width: ${pct}%"></div></div>
               <span class="inc-triage-prob-value">${pct}%</span>
             </div>`;
-          }).join("")}
-        </div>`;
+          })}
+        </div>`);
     }
   }
   
-  html += `<div class="inc-triage-model">Modelo: ${escapeHtml(model)} · <em>Confidence = concentração da distribuição, não probabilidade de acerto</em></div>`;
+  parts.push(htmlT`<div class="inc-triage-model">Modelo: ${model} · <em>Confidence = concentração da distribuição, não probabilidade de acerto</em></div>`);
   
-  container.innerHTML = html;
+  htmRender(container, htmlT`${parts}`);
 }
 
 // --- Atribuição de analista ---

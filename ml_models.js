@@ -1,6 +1,6 @@
 // Aba "📦 Models" (marco R9, registo de modelos; R10: treinar a partir do dashboard).
 // Carregado depois de app.js e metrics.js: reutiliza os seus globais (API_BASE,
-// API_KEY, escapeHtml, renderPanelError) — não redeclarar nenhum aqui.
+// API_KEY, htmlT/htmRender de html.js, renderPanelError) — não redeclarar nenhum aqui.
 //
 // A aba "📐 Evaluation" NÃO vive aqui desde a Fase 2: saiu para
 // ml_evaluation.js, com o seu próprio prefixo `mle` e o seu próprio ciclo de
@@ -196,7 +196,7 @@ function mlmTrainErrorText(codigo) {
 
 function mlmCell(value) {
   if (value === null || value === undefined || value === "") return "desconhecido";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 // --- estados, datas e origem (texto simples ou HTML já escapado) -------------
@@ -223,7 +223,7 @@ function mlmStatusText(entry) {
 function mlmFormatDate(iso) {
   if (iso === null || iso === undefined || iso === "") return "desconhecido";
   const data = new Date(iso);
-  if (Number.isNaN(data.getTime())) return escapeHtml(String(iso));
+  if (Number.isNaN(data.getTime())) return String(iso);
   return data.toLocaleString("pt-PT");
 }
 
@@ -239,14 +239,14 @@ function mlmOriginText(entry) {
 
 function mlmOriginHtml(entry) {
   const meta = (entry && entry.metadata) || null;
-  const texto = escapeHtml(mlmOriginText(entry));
+  const texto = mlmOriginText(entry);
   if (entry && entry.kind === "legacy") {
-    return `<span class="mlm-badge mlm-badge-legacy">${texto}</span>`;
+    return htmlT`<span class="mlm-badge mlm-badge-legacy">${texto}</span>`;
   }
   if (meta && meta.adopted === true) {
-    return `<span class="mlm-badge mlm-badge-adopted">${texto}</span>`;
+    return htmlT`<span class="mlm-badge mlm-badge-adopted">${texto}</span>`;
   }
-  return texto;
+  return htmlT`${texto}`;
 }
 
 // A data de treino do legado é a mtime do ficheiro — não é a data em que o
@@ -272,32 +272,32 @@ function mlmTrainedAtText(entry) {
 function mlmBuildModelsRows(report) {
   const versions = (report && report.versions) || [];
   if (!versions.length) {
-    return '<tr><td colspan="5" class="empty-state">Sem dados — ainda não há modelos registados.</td></tr>';
+    return htmlT`<tr><td colspan="5" class="empty-state">Sem dados — ainda não há modelos registados.</td></tr>`;
   }
-  return versions.map((entry, indice) => {
-    const ativa = entry.active ? '<span class="mlm-badge mlm-badge-active">ativa</span> ' : "";
+  return htmlT`${versions.map((entry, indice) => {
+    const ativa = entry.active ? htmlT`<span class="mlm-badge mlm-badge-active">ativa</span> ` : "";
     const estadoTexto = mlmStatusText(entry);
     // O badge de erro só entra quando há mesmo um erro. O legado tem
     // status "no_metadata" e error_code null porque o modelo está a ser
     // usado à vontade: pintá-lo de vermelho (e com a mensagem genérica, já
     // que não há código) diria ao analista que o modelo avariou.
     const estado = (entry.status === "ok" || entry.status === "no_metadata")
-      ? escapeHtml(estadoTexto)
-      : `<span class="mlm-badge mlm-badge-error">${escapeHtml(estadoTexto)}</span>`;
+      ? htmlT`${estadoTexto}`
+      : htmlT`<span class="mlm-badge mlm-badge-error">${estadoTexto}</span>`;
     const versao = entry.kind === "legacy"
-      ? `<span class="mlm-badge mlm-badge-legacy">${escapeHtml(entry.label || "legado, sem metadados")}</span>`
-      : escapeHtml(entry.id || entry.label || "");
+      ? htmlT`<span class="mlm-badge mlm-badge-legacy">${entry.label || "legado, sem metadados"}</span>`
+      : htmlT`${entry.id || entry.label || ""}`;
     const avaliacao = entry.evaluation === null || entry.evaluation === undefined
       ? "Sem avaliação"
       : "Registada";
-    return `<tr class="atk-row" data-index="${indice}" tabindex="0">
+    return htmlT`<tr class="atk-row" data-index="${indice}" tabindex="0">
       <td>${versao}</td>
       <td>${ativa}${estado}</td>
       <td>${mlmOriginHtml(entry)}</td>
       <td>${mlmTrainedAtText(entry)}</td>
       <td>${avaliacao}</td>
     </tr>`;
-  }).join("");
+  })}`;
 }
 
 // Uma frase por condição, todas a dizer o que fazer. A diferença entre
@@ -395,7 +395,7 @@ function mlmLibraryVersionsText(libraryVersions) {
   const chaves = Object.keys(libraryVersions).sort();
   if (!chaves.length) return "desconhecido";
   return chaves
-    .map((chave) => `${escapeHtml(chave)}=${escapeHtml(String(libraryVersions[chave]))}`)
+    .map((chave) => `${chave}=${String(libraryVersions[chave])}`)
     .join(", ");
 }
 
@@ -408,56 +408,52 @@ function mlmArtifactsHtml(entry) {
     const artefacto = registados ? registados[nome] : null;
     if (artefacto) {
       const hash = typeof artefacto.sha256 === "string" && artefacto.sha256
-        ? `<code>${escapeHtml(artefacto.sha256)}</code>`
+        ? htmlT`<code>${artefacto.sha256}</code>`
         : "hash em falta no metadata.json";
       const tamanho = (artefacto.size_bytes === null || artefacto.size_bytes === undefined)
         ? "desconhecido" : `${mlmCell(artefacto.size_bytes)} bytes`;
-      linhas.push(`<li><strong>${escapeHtml(nome)}</strong> — ${hash} — ${tamanho}</li>`);
+      linhas.push(htmlT`<li><strong>${nome}</strong> — ${hash} — ${tamanho}</li>`);
       continue;
     }
     if (entry && entry.kind === "legacy") {
       const ficheiro = entry.files ? entry.files[nome] : null;
       if (!ficheiro) {
-        linhas.push(`<li class="empty-state">${escapeHtml(nome)}: sem ficheiro registado.</li>`);
+        linhas.push(htmlT`<li class="empty-state">${nome}: sem ficheiro registado.</li>`);
         continue;
       }
       const tamanho = (ficheiro.size_bytes === null || ficheiro.size_bytes === undefined)
         ? "desconhecido" : `${mlmCell(ficheiro.size_bytes)} bytes`;
-      linhas.push(`<li><strong>${escapeHtml(nome)}</strong> — sem hash registado — ${tamanho}`
-        + ` — ${mlmFormatDate(ficheiro.modified_at)}</li>`);
+      linhas.push(htmlT`<li><strong>${nome}</strong> — sem hash registado — ${tamanho} — ${mlmFormatDate(ficheiro.modified_at)}</li>`);
       continue;
     }
-    return `<li class="empty-state">${escapeHtml(mlmErrorText(entry && entry.error_code))}</li>`;
+    return htmlT`<li class="empty-state">${mlmErrorText(entry && entry.error_code)}</li>`;
   }
-  return linhas.join("\n");
+  return htmlT`${linhas.map((l, i) => htmlT`${i ? "\n" : ""}${l}`)}`;
 }
 
 function mlmParamsHtml(parameters) {
   if (!parameters || typeof parameters !== "object") {
-    return '<li class="empty-state">desconhecido</li>';
+    return htmlT`<li class="empty-state">desconhecido</li>`;
   }
   const chaves = Object.keys(parameters).sort();
-  if (!chaves.length) return '<li class="empty-state">desconhecido</li>';
-  return chaves
-    .map((chave) => `<li>${escapeHtml(chave)} = ${escapeHtml(String(parameters[chave]))}</li>`)
-    .join("\n");
+  if (!chaves.length) return htmlT`<li class="empty-state">desconhecido</li>`;
+  return htmlT`${chaves.map((chave, i) =>
+    htmlT`${i ? "\n" : ""}<li>${chave} = ${String(parameters[chave])}</li>`)}`;
 }
 
 function mlmDatasetHtml(dataset) {
   const d = dataset && typeof dataset === "object" ? dataset : {};
   const sintetico = (d.synthetic === null || d.synthetic === undefined)
     ? "desconhecido" : (d.synthetic ? "Sim" : "Não");
-  return [
-    `<li>Nome: ${mlmCell(d.name)}</li>`,
-    `<li>Tamanho: ${mlmCell(d.size)}</li>`,
-    `<li>Ataques: ${mlmCell(d.attacks)}</li>`,
-    `<li>Sintético: ${sintetico}</li>`,
-  ].join("\n");
+  return htmlT`<li>Nome: ${mlmCell(d.name)}</li>
+<li>Tamanho: ${mlmCell(d.size)}</li>
+<li>Ataques: ${mlmCell(d.attacks)}</li>
+<li>Sintético: ${sintetico}</li>`;
 }
 
 // Devolve {title, metaHtml, artifactsHtml, paramsHtml, datasetHtml, evalText}.
-// `title` e `evalText` são texto simples (vão por textContent); os *Html já
-// vêm escapados.
+// `title` e `evalText` são texto simples (vão por textContent); os *Html são
+// SafeHtml (htmlT), escapados na interpolação.
 function mlmBuildDetail(entry) {
   const meta = (entry && entry.metadata) || null;
   const criadoEm = meta ? mlmFormatDate(meta.created_at) : "desconhecido";
@@ -465,15 +461,13 @@ function mlmBuildDetail(entry) {
   const bibliotecas = mlmLibraryVersionsText(meta ? meta.library_versions : null);
   return {
     title: (entry && (entry.id || entry.label)) || "Versão",
-    metaHtml: [
-      `<span>Estado: <strong>${escapeHtml(mlmStatusText(entry))}</strong></span>`,
-      `<span>Ativa: <strong>${entry && entry.active ? "Sim" : "Não"}</strong></span>`,
-      `<span>Origem: <strong>${escapeHtml(mlmOriginText(entry))}</strong></span>`,
-      `<span>Criado em: <strong>${criadoEm}</strong></span>`,
-      `<span>Treinado em: <strong>${mlmTrainedAtText(entry)}</strong></span>`,
-      `<span>Tipo de modelo: <strong>${tipo}</strong></span>`,
-      `<span>Versões das bibliotecas: <strong>${bibliotecas}</strong></span>`,
-    ].join("\n"),
+    metaHtml: htmlT`<span>Estado: <strong>${mlmStatusText(entry)}</strong></span>
+<span>Ativa: <strong>${entry && entry.active ? "Sim" : "Não"}</strong></span>
+<span>Origem: <strong>${mlmOriginText(entry)}</strong></span>
+<span>Criado em: <strong>${criadoEm}</strong></span>
+<span>Treinado em: <strong>${mlmTrainedAtText(entry)}</strong></span>
+<span>Tipo de modelo: <strong>${tipo}</strong></span>
+<span>Versões das bibliotecas: <strong>${bibliotecas}</strong></span>`,
     artifactsHtml: mlmArtifactsHtml(entry),
     paramsHtml: mlmParamsHtml(meta ? meta.parameters : null),
     datasetHtml: mlmDatasetHtml(meta ? meta.dataset : null),
@@ -574,14 +568,14 @@ function mlmTrainOrigin() {
 }
 
 function mlmRenderModels(report) {
-  document.getElementById("mlm-models-body").innerHTML = mlmBuildModelsRows(report);
+  htmRender(document.getElementById("mlm-models-body"), mlmBuildModelsRows(report));
   document.getElementById("mlm-models-notice").textContent = mlmModelsNoticeText(report);
   // A tabela acabou de ser redesenhada, o que apagou a linha marcada: volta
   // a marcá-la se a versão selecionada ainda existir.
   mlmReapplySelection();
 }
 
-// Todo o conteúdo do painel vem de mlmBuildDetail, que já escapou tudo. O
+// Todo o conteúdo do painel vem de mlmBuildDetail (htmlT, escapado). O
 // title e o texto de avaliação são texto simples (textContent).
 function mlmRenderDetail(entry) {
   const painel = document.getElementById("ml-models-detail-panel");
@@ -590,10 +584,10 @@ function mlmRenderDetail(entry) {
   renderPanelError("#ml-models-detail-panel", "");
   painel.hidden = false;
   document.getElementById("mlm-detail-title").textContent = detalhe.title;
-  document.getElementById("mlm-detail-meta").innerHTML = detalhe.metaHtml;
-  document.getElementById("mlm-detail-artifacts").innerHTML = detalhe.artifactsHtml;
-  document.getElementById("mlm-detail-params").innerHTML = detalhe.paramsHtml;
-  document.getElementById("mlm-detail-dataset").innerHTML = detalhe.datasetHtml;
+  htmRender(document.getElementById("mlm-detail-meta"), detalhe.metaHtml);
+  htmRender(document.getElementById("mlm-detail-artifacts"), detalhe.artifactsHtml);
+  htmRender(document.getElementById("mlm-detail-params"), detalhe.paramsHtml);
+  htmRender(document.getElementById("mlm-detail-dataset"), detalhe.datasetHtml);
   document.getElementById("mlm-detail-eval").textContent = detalhe.evalText;
 }
 

@@ -116,7 +116,8 @@ def section_soc_filters() -> None:
           "updateShiftAnalystSelect(received)" in body
           and "updateShiftAnalystSelect(stAnalystsCache)" not in body
           and body.index("updateShiftAnalystSelect(") < body.index("onlyInactive"))
-    check("badges escapam o fallback", "escapeHtml(String(labels[tier] || tier))" in soc and "escapeHtml(String(labels[role] || role))" in soc)
+    check("badges escapam o fallback", "htmlT`<span class=\"inc-status ${cls[tier]}\">${String(labels[tier] || tier)}</span>`" in soc
+          and "htmlT`<span class=\"inc-status ${cls[role]}\">${String(labels[role] || role)}</span>`" in soc)
 
 
 def section_incidents_filter() -> None:

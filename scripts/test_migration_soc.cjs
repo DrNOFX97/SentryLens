@@ -20,6 +20,7 @@ async function run(file, ids) {
   };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(root, "api.js"), "utf8") + "\nthis.apiErrorMessage=apiErrorMessage;this.apiRequest=apiRequest;", ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, "html.js"), "utf8") + ";this.htmlT=htmlT;this.htmlRaw=htmlRaw;this.htmRender=htmRender;", ctx);
   vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), ctx);
   await new Promise((r) => setTimeout(r, 50));
   const dom = JSON.stringify(Object.values(els).map((e) => [e.textContent, e.innerHTML]));

@@ -43,7 +43,8 @@ function escapeHtml(s){return String(s);}
 function formatTimestamp(t){return String(t);}
 function renderPanelError(){}`, ctx);
 const [router, api, state, rb] = process.argv.slice(2);
-for (const f of [router, api, state, rb]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
+const htmlJs = require("node:path").join(require("node:path").dirname(rb), "html.js");
+for (const f of [htmlJs, router, api, state, rb]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
 
 function tick(ms) { // avança o relógio e dispara os intervalos devidos
   for (let t = 0; t < ms; t += 1000) { now += 1000; for (const { fn, ms: iv } of [...timers.values()]) if (now % iv === 0) fn(); }

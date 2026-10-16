@@ -16,7 +16,7 @@ const API_KEY = (window.SENTRYLENS_CONFIG && window.SENTRYLENS_CONFIG.apiKey) ||
 
 // Dados do Wazuh (nomes de agente, descrições de regra, username de logons
 // falhados, etc.) podem conter texto controlado por um atacante — escapamos
-// tudo antes de meter em innerHTML para evitar XSS armazenado.
+// tudo antes de o meter em HTML para evitar XSS armazenado.
 function escapeHtml(value) {
   if (value === null || value === undefined) return "";
   return String(value)
@@ -81,17 +81,12 @@ function renderDetections(containerId, detections) {
     return;
   }
 
-  container.innerHTML = detections
-    .map((d) => {
-      const level = escapeHtml(mapSeverity(d.severity));
-      return `
-        <div class="detection-item level-${level}">
-          <strong>${escapeHtml(d.name)}</strong>
-          <span>${escapeHtml(d.explanation)}</span>
+  htmRender(container, htmlT`${detections.map((d) => htmlT`
+        <div class="detection-item level-${mapSeverity(d.severity)}">
+          <strong>${d.name}</strong>
+          <span>${d.explanation}</span>
         </div>
-      `;
-    })
-    .join("");
+      `)}`);
 }
 
 // Mostra (ou, com message vazio/null, esconde) um banner de erro dentro do

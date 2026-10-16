@@ -56,7 +56,7 @@ function tblColumnSortable(st, col) {
 
 function tblFillCell(td, col, row) {
   const v = typeof col.render === "function" ? col.render(row) : row[col.key];
-  if (v && v.htmSafe === true) td.innerHTML = v.toString();
+  if (htmIsSafe(v)) htmRender(td, v);
   else td.textContent = tblIsMissing(v) ? "—" : String(v);
 }
 

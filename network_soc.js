@@ -24,12 +24,12 @@ function nsIsActive(tabEl) {
 
 function nsCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function nsDetail(detail) {
   if (!detail || typeof detail !== "object" || Object.keys(detail).length === 0) return "—";
-  return escapeHtml(JSON.stringify(detail));
+  return JSON.stringify(detail);
 }
 
 function nsTypeLabel(type) {
@@ -41,10 +41,10 @@ function nsTypeLabel(type) {
 function nsRenderCountTable(bodyId, rows, labelKey, countKey, colspan) {
   const body = document.getElementById(bodyId);
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="${colspan}" class="empty-state">Sem dados.</td></tr>`;
+    htmRender(body, htmlT`<tr><td colspan="${colspan}" class="empty-state">Sem dados.</td></tr>`);
     return;
   }
-  body.innerHTML = rows.map((r) => `<tr><td>${nsCell(r[labelKey])}</td><td>${nsCell(r[countKey])}</td></tr>`).join("");
+  htmRender(body, htmlT`${rows.map((r) => htmlT`<tr><td>${nsCell(r[labelKey])}</td><td>${nsCell(r[countKey])}</td></tr>`)}`);
 }
 
 async function refreshLiveTraffic() {
@@ -71,7 +71,7 @@ async function refreshLiveTraffic() {
     renderPanelError("#live-traffic-panel", message);
     document.getElementById("nst-note").textContent = "Sem dados.";
     ["nst-protocol-body", "nst-talkers-body", "nst-ports-body"].forEach((id) => {
-      document.getElementById(id).innerHTML = `<tr><td colspan="2" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+      htmRender(document.getElementById(id), htmlT`<tr><td colspan="2" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
     });
   }
 }
@@ -93,21 +93,21 @@ async function refreshNetworkDetections() {
 
     const body = document.getElementById("nsd-recent-body");
     const recent = data.recent || [];
-    body.innerHTML = recent.length
-      ? recent.map((d) => `<tr>
+    htmRender(body, recent.length
+      ? htmlT`${recent.map((d) => htmlT`<tr>
           <td>${d.timestamp ? formatTimestamp(d.timestamp) : "—"}</td>
           <td>${nsCell(nsTypeLabel(d.type))}</td>
           <td>${nsCell(d.src_ip)}</td>
           <td>${nsCell(d.dst_ip)}</td>
           <td>${nsDetail(d.detail)}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`;
+        </tr>`)}`
+      : htmlT`<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`);
   } catch (err) {
     const message = `Não foi possível carregar as Network Detections: ${apiErrorMessage(err)}`;
     renderPanelError("#network-detections-panel", message);
     document.getElementById("nsd-note").textContent = "Sem dados.";
-    document.getElementById("nsd-bytype-body").innerHTML = `<tr><td colspan="2" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
-    document.getElementById("nsd-recent-body").innerHTML = `<tr><td colspan="5" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+    htmRender(document.getElementById("nsd-bytype-body"), htmlT`<tr><td colspan="2" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
+    htmRender(document.getElementById("nsd-recent-body"), htmlT`<tr><td colspan="5" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
   }
 }
 
@@ -132,21 +132,21 @@ async function refreshPcapEvidence() {
 
     const body = document.getElementById("nse-body");
     const entries = data.entries || [];
-    body.innerHTML = entries.length
-      ? entries.map((e) => `<tr>
+    htmRender(body, entries.length
+      ? htmlT`${entries.map((e) => htmlT`<tr>
           <td>${nsCell(e.date)}</td>
           <td>${nsCell(e.time)}</td>
           <td>${nsCell(nsTypeLabel(e.type))}</td>
           <td>${nsCell(e.src_ip)}</td>
           <td>${nsCell(e.dst_ip)}</td>
           <td>${nsDetail(e.detail)}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="6" class="empty-state">Sem dados para este dia.</td></tr>`;
+        </tr>`)}`
+      : htmlT`<tr><td colspan="6" class="empty-state">Sem dados para este dia.</td></tr>`);
   } catch (err) {
     const message = `Não foi possível carregar a evidência: ${apiErrorMessage(err)}`;
     renderPanelError("#pcap-evidence-panel", message);
     document.getElementById("nse-notice").textContent = "";
-    document.getElementById("nse-body").innerHTML = `<tr><td colspan="6" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+    htmRender(document.getElementById("nse-body"), htmlT`<tr><td colspan="6" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
   }
 }
 

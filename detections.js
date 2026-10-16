@@ -1,11 +1,11 @@
 // Aba "Detections" (Roadmap v2, R7 — Detection Engine). Carregado depois de
-// app.js: reutiliza os seus globais (escapeHtml,
+// app.js: reutiliza os seus globais (
 // formatTimestamp, severityBadge, renderPanelError) — não redeclarar nenhum
 // aqui. Consome só GET /api/detections (vista unificada regra/ML/rede via
 // DetectionEvent); o dado bruto de origem nunca chega ao cliente. Só pede
 // dados com a aba ativa e o separador visível (nunca em segundo plano). Só
 // mostra dados reais; fonte em baixo -> "indisponível". Todo o texto
-// dinâmico passa por escapeHtml. O filtro de fonte é feito no cliente
+// dinâmico é escapado pelo htmlT. O filtro de fonte é feito no cliente
 // (a rota já devolve as 3 fontes, capadas a `limit`).
 
 const DET_REFRESH_MS = 30000;
@@ -18,9 +18,10 @@ function detIsActive() {
   return detTab.classList.contains("active") && document.visibilityState === "visible";
 }
 
+// Texto simples: o htmlT escapa na interpolação.
 function detCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function detSourceCount(sources, name) {
@@ -46,20 +47,20 @@ async function refreshDetections() {
     }
 
     const events = (data.events || []).filter((e) => !source || e.source === source);
-    document.getElementById("det-body").innerHTML = events.length
-      ? events.map((e) => `<tr>
+    htmRender(document.getElementById("det-body"), events.length
+      ? htmlT`${events.map((e) => htmlT`<tr>
           <td>${detCell(e.ts ? formatTimestamp(e.ts) : null)}</td>
           <td>${detCell(DET_SOURCE_LABELS[e.source] || e.source)}</td>
-          <td>${severityBadge(e.severity || "info")}</td>
+          <td>${htmlRaw(severityBadge(e.severity || "info"))}</td>
           <td>${detCell(e.asset)}</td>
           <td>${detCell(e.label)}</td>
           <td>${detCell(e.description)}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="6" class="empty-state">Sem dados.</td></tr>`;
+        </tr>`)}`
+      : htmlT`<tr><td colspan="6" class="empty-state">Sem dados.</td></tr>`);
   } catch (err) {
     renderPanelError("#detections-panel", `Não foi possível carregar as deteções: ${apiErrorMessage(err)}`);
     document.getElementById("det-note").textContent = "Sem dados.";
-    document.getElementById("det-body").innerHTML = `<tr><td colspan="6" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+    htmRender(document.getElementById("det-body"), htmlT`<tr><td colspan="6" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
   }
 }
 

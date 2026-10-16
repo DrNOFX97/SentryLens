@@ -57,38 +57,38 @@ function summarizeRamModules(modules) {
 
 function renderNetworkInterfaces(interfaces) {
   const tbody = document.getElementById("network-interfaces-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
   if (!interfaces || interfaces.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Nenhuma interface ativa encontrada</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="3" class="empty-state">Nenhuma interface ativa encontrada</td></tr>`);
     return;
   }
   interfaces.forEach((iface) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(iface.interface)}</td>
-      <td class="mono">${escapeHtml(iface.ip)}</td>
-      <td class="mono">${iface.speed_mbps ? escapeHtml(iface.speed_mbps) + " Mbps" : "-"}</td>
-    `;
+    htmRender(tr, htmlT`
+      <td>${iface.interface}</td>
+      <td class="mono">${iface.ip}</td>
+      <td class="mono">${iface.speed_mbps ? `${iface.speed_mbps} Mbps` : "-"}</td>
+    `);
     tbody.appendChild(tr);
   });
 }
 
 function renderViolationsHistory(history) {
   const tbody = document.getElementById("violations-history-body");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
   if (!history || history.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sem violações resolvidas ainda</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="4" class="empty-state">Sem violações resolvidas ainda</td></tr>`);
     return;
   }
   const sorted = [...history].sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
   sorted.slice(0, 50).forEach((v) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(metricLabel(v.metric))}</td>
+    htmRender(tr, htmlT`
+      <td>${metricLabel(v.metric)}</td>
       <td>${v.level === "critico" ? "Crítico" : "Aviso"}</td>
-      <td class="mono">${escapeHtml(formatTimestamp(v.started_at))}</td>
-      <td class="mono">${escapeHtml(formatDuration(v.duration_seconds))}</td>
-    `;
+      <td class="mono">${formatTimestamp(v.started_at)}</td>
+      <td class="mono">${formatDuration(v.duration_seconds)}</td>
+    `);
     tbody.appendChild(tr);
   });
 }
@@ -156,12 +156,10 @@ function resetSystemPanelValues() {
   ["sys-cpu-bar", "sys-ram-bar", "sys-net-bar"].forEach((id) => {
     setProgressBar(document.getElementById(id), null, "normal");
   });
-  document.getElementById("sys-disk-cards").innerHTML = "";
-  document.getElementById("network-interfaces-body").innerHTML =
-    '<tr><td colspan="3" class="empty-state">Sem dados</td></tr>';
-  document.getElementById("system-alerts-list").innerHTML = '<p class="empty-state">Sem dados</p>';
-  document.getElementById("violations-history-body").innerHTML =
-    '<tr><td colspan="4" class="empty-state">Sem dados</td></tr>';
+  document.getElementById("sys-disk-cards").replaceChildren();
+  htmRender(document.getElementById("network-interfaces-body"), htmlT`<tr><td colspan="3" class="empty-state">Sem dados</td></tr>`);
+  sttShowEmpty(document.getElementById("system-alerts-list"), "Sem dados");
+  htmRender(document.getElementById("violations-history-body"), htmlT`<tr><td colspan="4" class="empty-state">Sem dados</td></tr>`);
 }
 
 async function loadSystemPanel() {
@@ -204,7 +202,7 @@ async function loadSystemPanel() {
 
     // Disco (um card por partição)
     const diskContainer = document.getElementById("sys-disk-cards");
-    diskContainer.innerHTML = "";
+    diskContainer.replaceChildren();
     let worstDisk = null;
     let worstDiskLevel = "normal";
     (specs.disk || []).forEach((disk) => {
@@ -222,15 +220,15 @@ async function loadSystemPanel() {
       ].filter(Boolean);
       const card = document.createElement("div");
       card.className = "system-card";
-      card.innerHTML = `
+      htmRender(card, htmlT`
         <div class="system-card-header">
-          <h3>Disco ${escapeHtml(disk.mountpoint)}</h3>
-          ${disk.media_type ? `<span class="media-badge ${escapeHtml(disk.media_type.toLowerCase())}">${escapeHtml(disk.media_type)}</span>` : ""}
-          <span class="system-card-value">${escapeHtml(slFmtPct(disk.usage_percent, 1))}</span>
+          <h3>Disco ${disk.mountpoint}</h3>
+          ${disk.media_type ? htmlT`<span class="media-badge ${disk.media_type.toLowerCase()}">${disk.media_type}</span>` : ""}
+          <span class="system-card-value">${slFmtPct(disk.usage_percent, 1)}</span>
         </div>
-        <div class="progress-track"><div class="progress-fill level-${escapeHtml(level)}" style="width:${slProgressWidth(disk.usage_percent)}"></div></div>
-        <div class="system-sub">${escapeHtml(diskDetailParts.join(" · "))}</div>
-      `;
+        <div class="progress-track"><div class="progress-fill level-${level}" style="width:${slProgressWidth(disk.usage_percent)}"></div></div>
+        <div class="system-sub">${diskDetailParts.join(" · ")}</div>
+      `);
       diskContainer.appendChild(card);
     });
 
@@ -262,16 +260,16 @@ async function loadSystemPanel() {
     const list = document.getElementById("system-alerts-list");
     const active = alertsData.active_violations || [];
     if (active.length === 0) {
-      list.innerHTML = '<p class="empty-state">Sem violações ativas</p>';
+      sttShowEmpty(list, "Sem violações ativas");
     } else {
-      list.innerHTML = "";
+      list.replaceChildren();
       active.forEach((v) => {
         const item = document.createElement("div");
         item.className = `system-alert-item level-${v.level}`;
-        item.innerHTML = `
-          <span><strong>${escapeHtml(metricLabel(v.metric))}</strong> — ${v.level === "critico" ? "Crítico" : "Aviso"}</span>
-          <span>a decorrer há ${escapeHtml(formatDuration(v.duration_seconds))}</span>
-        `;
+        htmRender(item, htmlT`
+          <span><strong>${metricLabel(v.metric)}</strong> — ${v.level === "critico" ? "Crítico" : "Aviso"}</span>
+          <span>a decorrer há ${formatDuration(v.duration_seconds)}</span>
+        `);
         list.appendChild(item);
       });
     }

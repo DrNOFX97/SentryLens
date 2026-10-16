@@ -5,7 +5,7 @@
 // app.js dispara a partir da ligação /ws/alerts já existente (detail = alerta
 // enriquecido). A saúde do SIEM vem de GET /api/siem/health; sem dados
 // reais mostra "Indisponível"/"Sem dados", nunca números inventados.
-// Todo o texto dinâmico (agente, regra, erros) passa por escapeHtml.
+// Todo o texto dinâmico (agente, regra, erros) é escapado pelo htmlT.
 
 const LS_FEED_MAX = 50;
 const LS_PENDING_MAX = 200;
@@ -67,15 +67,15 @@ function lsAddToFeed(alerts) {
 function lsRenderFeed() {
   const body = document.getElementById("ls-feed-body");
   if (!lsFeed.length) {
-    body.innerHTML = '<tr><td colspan="4" class="empty-state">Sem alertas recebidos ainda.</td></tr>';
+    htmRender(body, htmlT`<tr><td colspan="4" class="empty-state">Sem alertas recebidos ainda.</td></tr>`);
   } else {
-    body.innerHTML = lsFeed.map((a) => `
+    htmRender(body, htmlT`${lsFeed.map((a) => htmlT`
       <tr>
-        <td>${escapeHtml(lsFormatTime(a.timestamp))}</td>
-        <td>${severityBadge(a.severity)}</td>
-        <td>${escapeHtml(a.agent_name)}</td>
-        <td>${escapeHtml(a.windows_event_id ? `${a.windows_event_id} — ${a.friendly_name}` : (a.rule_description || a.friendly_name))}</td>
-      </tr>`).join("");
+        <td>${lsFormatTime(a.timestamp)}</td>
+        <td>${htmlRaw(severityBadge(a.severity))}</td>
+        <td>${a.agent_name}</td>
+        <td>${a.windows_event_id ? `${a.windows_event_id} — ${a.friendly_name}` : (a.rule_description || a.friendly_name)}</td>
+      </tr>`)}`);
   }
   document.getElementById("ls-pause-btn").textContent = lsPaused ? "▶ Retomar" : "⏸ Pausar";
   lsText("ls-pending", lsPaused && lsPending.length ? `${lsPending.length} novo(s) em pausa` : "");
@@ -110,8 +110,8 @@ async function lsLoadInitialFeed() {
     else lsAddToFeed(history);
   } catch (err) {
     if (!lsFeed.length) {
-      document.getElementById("ls-feed-body").innerHTML =
-        `<tr><td colspan="4" class="empty-state">Sem dados: ${escapeHtml(apiErrorMessage(err))}</td></tr>`;
+      htmRender(document.getElementById("ls-feed-body"),
+        htmlT`<tr><td colspan="4" class="empty-state">Sem dados: ${apiErrorMessage(err)}</td></tr>`);
     }
     return false;
   } finally {
