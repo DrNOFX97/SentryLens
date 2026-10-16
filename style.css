@@ -1073,3 +1073,7 @@ tr.rb-stale td { font-style: italic; }
   color: #888;
   margin: 4px 0 8px;
 }
+
+/* ===== Estados partilhados (state.js, Onda 2) ===== */
+.loading-state { color: #666; text-align: center; padding: 30px 10px; font-size: 13px; }
+.error-state { color: #9b1c1c; background: #fdecec; border: 1px solid #f3b8b8; border-radius: 6px; text-align: center; padding: 16px 12px; font-size: 13px; }
