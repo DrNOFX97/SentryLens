@@ -1160,5 +1160,5 @@ tr.rb-stale td { font-style: italic; }
 .icon-blue { color: var(--sev-info); }
 
 /* ===== Avisos e SLA (cores via tokens, sem literais em JS) ===== */
-.realtime-fallback-banner { background: var(--sev-medium-bg); color: var(--sev-medium-fg); text-align: center; padding: 8px; font-size: 14px; position: sticky; top: 0; z-index: 1000; }
+.realtime-fallback-banner { background: var(--sev-medium-bg); color: var(--sev-medium-fg); text-align: center; padding: 8px; font-size: var(--fs-md); position: sticky; top: 0; z-index: 1000; }
 .sla-overdue { color: var(--sev-critical-fg); }
