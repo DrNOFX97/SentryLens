@@ -98,6 +98,11 @@ def section_soc_filters() -> None:
     check("filtro de estado usa slAnalystActiveFilter", "slAnalystActiveFilter(" in soc)
     check("resumo por tier usa slTierWindowHours", "slTierWindowHours(" in soc)
     check("sem active_only forçado a true para Todos", 'active === "" ? "true"' not in soc)
+    body = re.search(r"async function loadAnalysts\(\)\s*\{(.*?)\n\}", soc, re.S).group(1)
+    check("select de turnos recebe a lista sem filtro Inativos",
+          "updateShiftAnalystSelect(received)" in body
+          and "updateShiftAnalystSelect(stAnalystsCache)" not in body
+          and body.index("updateShiftAnalystSelect(") < body.index("onlyInactive"))
     check("badges escapam o fallback", "escapeHtml(String(labels[tier] || tier))" in soc and "escapeHtml(String(labels[role] || role))" in soc)
 
 

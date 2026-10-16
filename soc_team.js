@@ -72,10 +72,12 @@ async function loadAnalysts() {
     if (tier) params.set("tier", tier);
     params.set("active_only", filter.activeOnly ? "true" : "false");
     const data = await stRequest("GET", `/api/soc/analysts?${params}`);
-    stAnalystsCache = data.analysts || [];
-    if (filter.onlyInactive) stAnalystsCache = stAnalystsCache.filter(a => !a.active);
+    const received = data.analysts || [];
+    // O select de turnos precisa dos analistas ativos da resposta completa,
+    // por isso recebe a lista antes do filtro "Inativos" (feito no cliente).
+    updateShiftAnalystSelect(received);
+    stAnalystsCache = filter.onlyInactive ? received.filter(a => !a.active) : received;
     renderAnalystsTable(stAnalystsCache);
-    updateShiftAnalystSelect(stAnalystsCache);
     stText("analyst-notice", `${stAnalystsCache.length} analista(s)`);
   } catch (err) {
     renderPanelError("#analysts-section", `Falha ao carregar analistas: ${err.message}`);
