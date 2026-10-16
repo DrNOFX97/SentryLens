@@ -30,7 +30,22 @@ if (!helpersPath) {
   finish();
 }
 
-const ctx = vm.createContext({ console });
+// Emula o Firefox/Safari: rejeita ±HHMM sem dois pontos (o V8 aceita-o), para
+// o teste de datas falhar se a reescrita ±HHMM -> ±HH:MM for removida.
+const RealDate = Date;
+function StrictDate(...args) {
+  if (!new.target) return RealDate(...args);
+  if (typeof args[0] === "string" && /[+-]\d{4}$/.test(args[0])) return new RealDate(NaN);
+  return new RealDate(...args);
+}
+StrictDate.prototype = RealDate.prototype;
+StrictDate.now = RealDate.now;
+StrictDate.parse = RealDate.parse;
+StrictDate.UTC = RealDate.UTC;
+
+const iso = (d) => (d ? d.toISOString() : null);
+
+const ctx = vm.createContext({ console, Date: StrictDate });
 try {
   vm.runInContext(fs.readFileSync(helpersPath, "utf8"), ctx, { filename: helpersPath });
   check("ui_helpers.js carrega sem DOM (sem document no contexto)", true);
@@ -39,9 +54,15 @@ try {
   finish();
 }
 
+check("o Date emulado rejeita +0000 (sensibilidade do teste)",
+  Number.isNaN(vm.runInContext('new Date("2026-10-16T10:00:00.000+0000").getTime()', ctx)));
 check("slParseDate aceita +0000 do Wazuh",
-  ctx.slParseDate("2026-10-16T10:00:00.000+0000").toISOString() === "2026-10-16T10:00:00.000Z");
-check("slParseDate aceita +01:00", ctx.slParseDate("2026-10-16T11:00:00+01:00").toISOString() === "2026-10-16T10:00:00.000Z");
+  iso(ctx.slParseDate("2026-10-16T10:00:00.000+0000")) === "2026-10-16T10:00:00.000Z");
+check("slParseDate aceita -0300", iso(ctx.slParseDate("2026-10-16T10:00:00-0300")) === "2026-10-16T13:00:00.000Z");
+check("slParseDate aceita Z", iso(ctx.slParseDate("2026-10-16T10:00:00Z")) === "2026-10-16T10:00:00.000Z");
+check("slParseDate aceita só data", iso(ctx.slParseDate("2026-10-16")) === "2026-10-16T00:00:00.000Z");
+check("slParseDate aceita sem fuso", ctx.slParseDate("2026-10-16T10:00:00") !== null);
+check("slParseDate aceita +01:00", iso(ctx.slParseDate("2026-10-16T11:00:00+01:00")) === "2026-10-16T10:00:00.000Z");
 check("slParseDate inválido -> null", ctx.slParseDate("não é data") === null);
 check("slParseDate vazio -> null", ctx.slParseDate("") === null && ctx.slParseDate(null) === null && ctx.slParseDate(undefined) === null);
 check("slFormatTimestamp inválido -> travessão", ctx.slFormatTimestamp("xyz") === "—");
