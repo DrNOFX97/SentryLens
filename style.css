@@ -1162,3 +1162,15 @@ tr.rb-stale td { font-style: italic; }
 /* ===== Avisos e SLA (cores via tokens, sem literais em JS) ===== */
 .realtime-fallback-banner { background: var(--sev-medium-bg); color: var(--sev-medium-fg); text-align: center; padding: 8px; font-size: var(--fs-md); position: sticky; top: 0; z-index: 1000; }
 .sla-overdue { color: var(--sev-critical-fg); }
+
+/* ===== Tabela partilhada (table.js) ===== */
+.data-table th[aria-sort] { cursor: pointer; }
+.data-table th[aria-sort="ascending"]::after { content: " ▲"; font-size: var(--fs-xs); }
+.data-table th[aria-sort="descending"]::after { content: " ▼"; font-size: var(--fs-xs); }
+.data-table tr[aria-selected="true"] { background: var(--accent-soft); }
+.data-table tr[role="button"] { cursor: pointer; }
+.data-table tr[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.data-table .align-right { text-align: right; }
+.data-table .align-center { text-align: center; }
+.table-count { color: var(--text-muted); font-size: var(--fs-sm); margin: 6px 0; }
+.kpi-empty .value { color: var(--text-muted); }

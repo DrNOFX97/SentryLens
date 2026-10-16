@@ -1,5 +1,5 @@
 """
-Wrapper do teste Node de o ciclo de vida das abas em app.js (W3.2).
+Wrapper do teste Node de o ciclo de vida das abas em shell.js (W3.2).
 
 O run_all_tests.py só descobre test_*.py, por isso este ficheiro é a ponte
 para scripts/test_lifecycle_app.cjs. Não importa `main` (não precisa do backend).
@@ -28,7 +28,7 @@ def check(label: str, condition: bool) -> None:
 def run() -> None:
     node = shutil.which("node")
     if node is None:
-        check("node não encontrado no PATH — instala Node.js (necessário para testar app.js)", False)
+        check("node não encontrado no PATH — instala Node.js (necessário para testar shell.js)", False)
         return
 
     proc = subprocess.run(

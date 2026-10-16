@@ -1,0 +1,348 @@
+// Painel Sistema: CPU/RAM/disco/rede da máquina local.
+
+function formatBytes(bytes) {
+  if (bytes == null) return "-";
+  const gb = bytes / 1024 ** 3;
+  return `${gb.toFixed(1)} GB`;
+}
+
+function formatDuration(seconds) {
+  const totalMinutes = Math.max(0, Math.floor(seconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function metricLabel(metric) {
+  if (metric === "cpu") return "CPU";
+  if (metric === "ram") return "RAM";
+  if (metric === "network_download") return "Rede (download)";
+  if (metric === "network_upload") return "Rede (upload)";
+  if (metric.startsWith("disk:")) return `Disco ${metric.slice(5)}`;
+  return metric;
+}
+
+function setProgressBar(barEl, percent, level) {
+  barEl.style.width = slProgressWidth(percent);
+  // Sem valor a barra fica vazia e sem cor de nível (nunca verde a 100%).
+  barEl.className = slNumberOrNull(percent) === null ? "progress-fill" : `progress-fill level-${level}`;
+}
+
+// Resume os módulos de RAM instalados (ex: "2× 16 GB DDR5 @ 6200 MHz") —
+// agrupa módulos idênticos em vez de listar linha a linha, que é o caso
+// comum (kits parelhos).
+function summarizeRamModules(modules) {
+  if (!modules || modules.length === 0) return null;
+
+  const groups = new Map();
+  modules.forEach((m) => {
+    const key = `${m.capacity_bytes}|${m.speed_mhz}|${m.memory_type}`;
+    groups.set(key, (groups.get(key) || 0) + 1);
+  });
+  const sizeLine = [...groups.entries()]
+    .map(([key, count]) => {
+      const [capacityBytes, speed, type] = key.split("|");
+      const gb = (Number(capacityBytes) / 1024 ** 3).toFixed(0);
+      return `${count}× ${gb} GB ${type} @ ${speed} MHz`;
+    })
+    .join(" + ");
+
+  const first = modules[0];
+  const modelLine = first.manufacturer && first.part_number
+    ? `${first.manufacturer} • ${first.part_number}`
+    : null;
+
+  return { sizeLine, modelLine };
+}
+
+function renderNetworkInterfaces(interfaces) {
+  const tbody = document.getElementById("network-interfaces-body");
+  tbody.innerHTML = "";
+  if (!interfaces || interfaces.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Nenhuma interface ativa encontrada</td></tr>';
+    return;
+  }
+  interfaces.forEach((iface) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(iface.interface)}</td>
+      <td class="mono">${escapeHtml(iface.ip)}</td>
+      <td class="mono">${iface.speed_mbps ? escapeHtml(iface.speed_mbps) + " Mbps" : "-"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderViolationsHistory(history) {
+  const tbody = document.getElementById("violations-history-body");
+  tbody.innerHTML = "";
+  if (!history || history.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sem violações resolvidas ainda</td></tr>';
+    return;
+  }
+  const sorted = [...history].sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+  sorted.slice(0, 50).forEach((v) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(metricLabel(v.metric))}</td>
+      <td>${v.level === "critico" ? "Crítico" : "Aviso"}</td>
+      <td class="mono">${escapeHtml(formatTimestamp(v.started_at))}</td>
+      <td class="mono">${escapeHtml(formatDuration(v.duration_seconds))}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderSystemSummaryCard({
+  cpuPct, cpuLvl, ramPct, ramLvl, worstDisk, worstDiskLevel, downloadLevel, uploadLevel, networkMeasured, activeCount, criticalCount,
+}) {
+  const badge = document.getElementById("summary-health-badge");
+  let healthLabel = "OK";
+  let healthLevel = "normal";
+  if (criticalCount > 0) {
+    healthLabel = "Crítico";
+    healthLevel = "critico";
+  } else if (activeCount > 0) {
+    healthLabel = "Aviso";
+    healthLevel = "aviso";
+  }
+  badge.textContent = healthLabel;
+  badge.className = `health-badge level-${healthLevel}`;
+
+  setProgressBar(document.getElementById("summary-cpu-bar"), cpuPct, cpuLvl);
+  document.getElementById("summary-cpu-pct").textContent = slFmtPct(cpuPct);
+
+  setProgressBar(document.getElementById("summary-ram-bar"), ramPct, ramLvl);
+  document.getElementById("summary-ram-pct").textContent = slFmtPct(ramPct);
+
+  const diskPct = worstDisk ? worstDisk.usage_percent : null;
+  setProgressBar(document.getElementById("summary-disk-bar"), diskPct, worstDiskLevel);
+  document.getElementById("summary-disk-pct").textContent = slFmtPct(diskPct);
+
+  const netLevel =
+    downloadLevel === "critico" || uploadLevel === "critico"
+      ? "critico"
+      : downloadLevel === "aviso" || uploadLevel === "aviso"
+        ? "aviso"
+        : "normal";
+  const netLabelMap = { normal: "OK", aviso: "Aviso", critico: "Crítico" };
+  // Download/upload não são naturalmente uma percentagem 0-100; a barra fica
+  // sempre cheia, só a cor muda com o nível — mantém o mesmo ritmo visual
+  // das outras três métricas em vez de destoar com um formato diferente.
+  setProgressBar(document.getElementById("summary-network-bar"), networkMeasured ? 100 : null, netLevel);
+  document.getElementById("summary-network-status").textContent = networkMeasured ? netLabelMap[netLevel] : "—";
+}
+
+// Cartão de resumo do Overview sem dados: badge e textos a "—", barras vazias.
+function resetSystemSummaryCard() {
+  const badge = document.getElementById("summary-health-badge");
+  badge.textContent = "—";
+  badge.className = "health-badge";
+  ["cpu", "ram", "disk", "network"].forEach((k) => {
+    setProgressBar(document.getElementById(`summary-${k}-bar`), null, "normal");
+  });
+  ["summary-cpu-pct", "summary-ram-pct", "summary-disk-pct", "summary-network-status"].forEach((id) => {
+    document.getElementById(id).textContent = "—";
+  });
+}
+
+// Painel Sistema sem dados: valores a "—", barras vazias, listas "Sem dados".
+function resetSystemPanelValues() {
+  ["sys-cpu-value", "sys-ram-value", "sys-cpu-detail", "sys-ram-detail",
+    "sys-net-download", "sys-net-upload"].forEach((id) => {
+    document.getElementById(id).textContent = "—";
+  });
+  document.getElementById("sys-net-sub").textContent = "Última medição: —";
+  ["sys-cpu-bar", "sys-ram-bar", "sys-net-bar"].forEach((id) => {
+    setProgressBar(document.getElementById(id), null, "normal");
+  });
+  document.getElementById("sys-disk-cards").innerHTML = "";
+  document.getElementById("network-interfaces-body").innerHTML =
+    '<tr><td colspan="3" class="empty-state">Sem dados</td></tr>';
+  document.getElementById("system-alerts-list").innerHTML = '<p class="empty-state">Sem dados</p>';
+  document.getElementById("violations-history-body").innerHTML =
+    '<tr><td colspan="4" class="empty-state">Sem dados</td></tr>';
+}
+
+async function loadSystemPanel() {
+  try {
+    const [specs, alertsData, usageHistoryData, historyData] = await Promise.all([
+      fetchJSON("/api/system/specs"),
+      fetchJSON("/api/system/alerts"),
+      fetchJSON("/api/system/usage-history"),
+      fetchJSON("/api/system/history"),
+    ]);
+
+    const levelByMetric = {};
+    (alertsData.active_violations || []).forEach((v) => {
+      levelByMetric[v.metric] = v.level;
+    });
+
+    // CPU
+    const cpuPct = specs.cpu.usage_percent;
+    const cpuLvl = levelByMetric["cpu"] || "normal";
+    document.getElementById("sys-cpu-value").textContent = slFmtPct(cpuPct, 1);
+    setProgressBar(document.getElementById("sys-cpu-bar"), cpuPct, cpuLvl);
+    const cpuModelLine = specs.cpu.frequency_mhz
+      ? `${specs.cpu.model} @ ${(specs.cpu.frequency_mhz / 1000).toFixed(2)} GHz`
+      : specs.cpu.model;
+    document.getElementById("sys-cpu-detail").textContent =
+      `${specs.cpu.physical_cores} núcleos físicos / ${specs.cpu.logical_cores} lógicos · ${cpuModelLine}`;
+
+    // RAM
+    const ramPct = specs.ram.usage_percent;
+    const ramLvl = levelByMetric["ram"] || "normal";
+    document.getElementById("sys-ram-value").textContent = slFmtPct(ramPct, 1);
+    setProgressBar(document.getElementById("sys-ram-bar"), ramPct, ramLvl);
+    const ramModules = summarizeRamModules(specs.ram.modules);
+    const ramDetailParts = [
+      `${formatBytes(specs.ram.used_bytes)} / ${formatBytes(specs.ram.total_bytes)}`,
+      ramModules?.sizeLine,
+      ramModules?.modelLine,
+    ].filter(Boolean);
+    document.getElementById("sys-ram-detail").textContent = ramDetailParts.join(" · ");
+
+    // Disco (um card por partição)
+    const diskContainer = document.getElementById("sys-disk-cards");
+    diskContainer.innerHTML = "";
+    let worstDisk = null;
+    let worstDiskLevel = "normal";
+    (specs.disk || []).forEach((disk) => {
+      const metricName = `disk:${disk.mountpoint}`;
+      const level = levelByMetric[metricName] || "normal";
+      if (!worstDisk || disk.usage_percent > worstDisk.usage_percent) {
+        worstDisk = disk;
+        worstDiskLevel = level;
+      }
+      const diskDetailParts = [
+        `${formatBytes(disk.used_bytes)} / ${formatBytes(disk.total_bytes)}`,
+        disk.filesystem,
+        disk.physical_model,
+        disk.bus_type,
+      ].filter(Boolean);
+      const card = document.createElement("div");
+      card.className = "system-card";
+      card.innerHTML = `
+        <div class="system-card-header">
+          <h3>Disco ${escapeHtml(disk.mountpoint)}</h3>
+          ${disk.media_type ? `<span class="media-badge ${escapeHtml(disk.media_type.toLowerCase())}">${escapeHtml(disk.media_type)}</span>` : ""}
+          <span class="system-card-value">${escapeHtml(slFmtPct(disk.usage_percent, 1))}</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill level-${escapeHtml(level)}" style="width:${slProgressWidth(disk.usage_percent)}"></div></div>
+        <div class="system-sub">${escapeHtml(diskDetailParts.join(" · "))}</div>
+      `;
+      diskContainer.appendChild(card);
+    });
+
+    // Rede (velocidade medida)
+    const net = specs.network_speed;
+    const downloadLevel = levelByMetric["network_download"] || "normal";
+    const uploadLevel = levelByMetric["network_upload"] || "normal";
+    const downloadEl = document.getElementById("sys-net-download");
+    const uploadEl = document.getElementById("sys-net-upload");
+    downloadEl.textContent = slNumberOrNull(net?.download_mbps)?.toFixed(0) ?? "—";
+    uploadEl.textContent = slNumberOrNull(net?.upload_mbps)?.toFixed(0) ?? "—";
+    downloadEl.className = `level-${downloadLevel}`;
+    uploadEl.className = `level-${uploadLevel}`;
+    const netBarLevel =
+      downloadLevel === "critico" || uploadLevel === "critico"
+        ? "critico"
+        : downloadLevel === "aviso" || uploadLevel === "aviso"
+          ? "aviso"
+          : "normal";
+    setProgressBar(document.getElementById("sys-net-bar"), net ? 100 : null, netBarLevel);
+    document.getElementById("sys-net-sub").textContent = net
+      ? `Última medição: ${formatTimestamp(net.measured_at)} · ping ${slNumberOrNull(net.ping_ms)?.toFixed(0) ?? "—"} ms · ${net.server || "-"}`
+      : "Ainda sem medição de rede";
+
+    // Interfaces de rede desta máquina (separado da medição de velocidade acima)
+    renderNetworkInterfaces(specs.network || []);
+
+    // Alertas de sistema ativos
+    const list = document.getElementById("system-alerts-list");
+    const active = alertsData.active_violations || [];
+    if (active.length === 0) {
+      list.innerHTML = '<p class="empty-state">Sem violações ativas</p>';
+    } else {
+      list.innerHTML = "";
+      active.forEach((v) => {
+        const item = document.createElement("div");
+        item.className = `system-alert-item level-${v.level}`;
+        item.innerHTML = `
+          <span><strong>${escapeHtml(metricLabel(v.metric))}</strong> — ${v.level === "critico" ? "Crítico" : "Aviso"}</span>
+          <span>a decorrer há ${escapeHtml(formatDuration(v.duration_seconds))}</span>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    renderViolationsHistory(historyData.history || []);
+    renderSystemUsageChart(usageHistoryData.history || []);
+    renderSystemSummaryCard({
+      cpuPct,
+      cpuLvl,
+      ramPct,
+      ramLvl,
+      worstDisk,
+      worstDiskLevel,
+      downloadLevel,
+      uploadLevel,
+      networkMeasured: Boolean(net),
+      activeCount: active.length,
+      criticalCount: active.filter((v) => v.level === "critico").length,
+    });
+    renderPanelError("#system-panel", null);
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#system-panel", panelErrorText(err, "Não foi possível ler o estado desta máquina."));
+    resetSystemPanelValues();
+    resetSystemSummaryCard();
+  }
+}
+
+async function forceSpeedtest() {
+  const btn = document.getElementById("speedtest-btn");
+  btn.disabled = true;
+  btn.textContent = "⏳ A medir...";
+  try {
+    await apiRequest("/api/system/speedtest", { method: "POST" });
+    await loadSystemPanel();
+  } catch (err) {
+    console.error(err);
+    renderPanelError("#system-panel", "Não foi possível medir a rede. " + panelErrorText(err, "Tenta de novo daqui a pouco."));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔄 Medir agora";
+  }
+}
+
+document.getElementById("speedtest-btn").addEventListener("click", forceSpeedtest);
+
+// Histórico de uso de CPU/RAM/disco: vem de /api/system/usage-history, um
+// buffer em memória no backend (~1h a 30s/amostra) alimentado pelo loop de
+// background — persiste entre recargas da página e é partilhado por
+// qualquer separador que abra o dashboard.
+function renderSystemUsageChart(history) {
+  const diskLabel = history.length && history[history.length - 1].disk_mountpoint
+    ? `Disco ${history[history.length - 1].disk_mountpoint} %`
+    : "Disco %";
+
+  renderChart("chart-system-usage", {
+    type: "line",
+    data: {
+      labels: history.map((s) => new Date(s.timestamp).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })),
+      datasets: [
+        { label: "CPU %", data: history.map((s) => s.cpu_percent), borderColor: chartColor("--cat-1"), backgroundColor: chartColor("--cat-1", 0.08), fill: true, tension: 0.3 },
+        { label: "RAM %", data: history.map((s) => s.ram_percent), borderColor: chartColor("--cat-7"), backgroundColor: chartColor("--cat-7", 0.08), fill: true, tension: 0.3 },
+        { label: diskLabel, data: history.map((s) => s.disk_percent), borderColor: chartColor("--cat-3"), backgroundColor: chartColor("--cat-3", 0.08), fill: true, tension: 0.3 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: { y: { beginAtZero: true, max: 100 } },
+    },
+  });
+}
+

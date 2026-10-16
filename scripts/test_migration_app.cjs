@@ -12,6 +12,7 @@ function check(l, c) { console.log(`[${c ? "OK   " : "FALHOU"}] ${l}`); if (!c) 
 const read = (f) => fs.readFileSync(path.join(root, f), "utf8");
 
 const app = read("app.js").split(String.fromCharCode(13)).join("");
+const all = ["app.js", "overview-alerts.js", "system.js", "iam.js", "ml-anomalies.js", "compliance.js", "realtime.js", "shell.js"].map((f) => read(f).split(String.fromCharCode(13)).join("")).join(String.fromCharCode(10));
 function grab(re, name) { const m = app.match(re); if (!m) { check(`app.js define ${name}`, false); return ""; } return m[0]; }
 const code = [
   grab(/async function fetchJSON\(path\) \{[\s\S]*?\n\}\n/, "fetchJSON"),
@@ -64,8 +65,8 @@ vm.runInContext(code + "\nthis.fetchJSON=fetchJSON;this.panelErrorText=panelErro
   ctx.renderPanelError("#p", null);
   check("renderPanelError(null) remove o banner", panel.banner && panel.children.length === 0 || true);
 
-  check("app.js já não chama fetch( diretamente para JSON", (app.match(/\bfetch\(/g) || []).length === 1);
-  check("app.js sem err.message em bruto", !/[^.\w]err\.message/.test(app.replace(/instanceof ApiError \? err\.message/g, "")));
+  check("app.js e ficheiros de domínio só chamam fetch( no export do relatório", (all.match(/\bfetch\(/g) || []).length === 1);
+  check("app.js e ficheiros de domínio sem err.message em bruto", !/[^.\w]err\.message/.test(all.replace(/instanceof ApiError \? err\.message/g, "")));
   if (failures.length) { console.log(`\n[FALHOU] ${failures.length}`); process.exit(1); }
   console.log("\n[OK] Todos os testes passaram");
 })();

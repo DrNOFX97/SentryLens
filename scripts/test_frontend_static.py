@@ -44,7 +44,7 @@ def section_gitignore() -> None:
 
 
 def section_header() -> None:
-    app = read("app.js")
+    app = read("shell.js")
     check("setStatus removido", "function setStatus" not in app)
     check("cabeçalho lê /api/siem/health", 'refreshHeaderStatus' in app and '/api/siem/health' in app)
     check("subtítulo não afirma ligação", "ligado ao Wazuh em tempo real" not in read("index.html"))
@@ -52,11 +52,11 @@ def section_header() -> None:
 
 
 def section_header_extras() -> None:
-    check("cabeçalho distingue 401", "slHeaderErrorStatus(err)" in read("app.js"))
+    check("cabeçalho distingue 401", "slHeaderErrorStatus(err)" in read("shell.js"))
     check("rodapé sem afirmação de tempo real",
           "Ligação em tempo real ao Wazuh" not in read("index.html")
           and "SentryLens — Fase 2 do projeto CET.</p>" in read("index.html"))
-    m = re.search(r"function applyHash\(\)\s*\{(.*?)\n\}", read("app.js"), re.S)
+    m = re.search(r"function applyHash\(\)\s*\{(.*?)\n\}", read("shell.js"), re.S)
     body = m.group(1) if m else ""
     check("applyHash protege decodeURIComponent com try",
           "try {" in body and "decodeURIComponent" in body
@@ -69,7 +69,7 @@ def section_system() -> None:
     block = re.search(r"\.progress-fill\s*\{([^}]*)\}", css).group(1)
     check(".progress-fill começa com largura 0", re.search(r"width:\s*0", block) is not None)
     check(".progress-fill sem verde por omissão", "#27ae60" not in block)
-    body = re.search(r"async function loadSystemPanel\(\)\s*\{(.*?)\n\}", read("app.js"), re.S).group(1)
+    body = re.search(r"async function loadSystemPanel\(\)\s*\{(.*?)\n\}", read("system.js"), re.S).group(1)
     check("loadSystemPanel tem try/catch", "try {" in body and "catch" in body)
     check("nenhum .toFixed direto sobre specs.*", re.search(r"specs\.[a-z_.]+\.toFixed", body) is None)
 
@@ -101,7 +101,7 @@ def section_modals() -> None:
 
 def section_ml_anomalies() -> None:
     check("nota ML sem afirmação fixa de dados sintéticos", "Modelo treinado sobre dados sintéticos" not in read("index.html"))
-    check("ml_score não usa toFixed direto", "r.ml_score.toFixed" not in read("app.js"))
+    check("ml_score não usa toFixed direto", "r.ml_score.toFixed" not in read("ml-anomalies.js"))
 
 
 def section_soc_filters() -> None:
@@ -140,7 +140,7 @@ def section_cleanups() -> None:
     ev = read("ml_evaluation.js")
     check("mleRenderEvaluation declarada uma vez", ev.count("function mleRenderEvaluation(") == 1)
     check("comparação vazia com colspan 8", 'colspan="7"' not in ev)
-    check("activateTab escapa o hash", "CSS.escape(tabName)" in read("app.js"))
+    check("activateTab escapa o hash", "CSS.escape(tabName)" in read("shell.js"))
     check("nota Red vs Blue atualizada", "não regista ações de resposta" not in read("redblue.js"))
     check("Live SOC distingue 401", "API key inválida" in read("live_soc.js"))
     css = read("style.css")

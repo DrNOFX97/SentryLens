@@ -1,6 +1,6 @@
 "use strict";
-// Teste node:vm do ciclo de vida das abas em app.js (W3.2): router.js REAL +
-// o bloco "Ciclo de vida das abas" do app.js REAL, com timers/relógio falsos.
+// Teste node:vm do ciclo de vida das abas em shell.js (W3.2): router.js REAL +
+// o bloco "Ciclo de vida das abas" do shell.js REAL, com timers/relógio falsos.
 // Uso: node test_lifecycle_app.cjs <raiz-do-repo>
 const fs = require("node:fs");
 const path = require("node:path");
@@ -10,9 +10,9 @@ const failures = [];
 function check(l, c) { console.log(`[${c ? "OK   " : "FALHOU"}] ${l}`); if (!c) failures.push(l); }
 const read = (f) => fs.readFileSync(path.join(root, f), "utf8").split(String.fromCharCode(13)).join("");
 
-const app = read("app.js");
+const app = read("shell.js");
 const m = app.match(/\/\/ --- Ciclo de vida das abas \(W3\.2\) ---[\s\S]*?\/\/ --- fim do ciclo de vida das abas ---/);
-check("app.js tem o bloco de ciclo de vida delimitado", !!m);
+check("shell.js tem o bloco de ciclo de vida delimitado", !!m);
 if (!m) { process.exit(1); }
 
 function makeEnv(visibility) {
@@ -65,7 +65,7 @@ function makeEnv(visibility) {
   check("hidden: 0 pedidos em 120 s", e.requests.length === 0);
 }
 
-// 2) Overview visível (nenhuma aba de app.js ativa): só o cabeçalho, <= 4 pedidos / 30 s.
+// 2) Overview visível (nenhuma aba de shell.js ativa): só o cabeçalho, <= 4 pedidos / 30 s.
 {
   const e = makeEnv("visible");
   e.ctx.rtActivate("overview");
@@ -74,7 +74,7 @@ function makeEnv(visibility) {
   check("overview visível: o cabeçalho corre", e.requests.includes("header"));
 }
 
-// 3) Aba de app.js ativa: só os pedidos dessa aba; trocar pára a anterior.
+// 3) Aba de shell.js ativa: só os pedidos dessa aba; trocar pára a anterior.
 {
   const e = makeEnv("visible");
   e.ctx.rtActivate("lifecycle");
@@ -103,14 +103,14 @@ function makeEnv(visibility) {
   check("voltar a visível: retoma o intervalo", e.requests.filter((r) => r === "header").length === 2);
 }
 
-// 5) Todos os ids registados existem como data-tab no index.html; app.js não deixa setIntervals soltos de painéis.
+// 5) Todos os ids registados existem como data-tab no index.html; shell.js não deixa setIntervals soltos de painéis.
 {
   const html = read("index.html");
   const ids = [...m[0].matchAll(/id: "([a-z-]+)"/g)].map((x) => x[1]);
   check("8 abas registadas", ids.length === 8);
   check("ids = data-tab do nav", ids.every((id) => html.includes(`data-tab="${id}"`)));
-  check("overview não é registado em app.js", !ids.includes("overview"));
-  check("refreshNewPanels já não tem setInterval", !/setInterval\(refreshNewPanels/.test(app));
+  check("overview não é registado em shell.js", !ids.includes("overview"));
+  check("refreshNewPanels já não tem setInterval", !/setInterval\(refreshNewPanels/.test(["app.js", "shell.js", "iam.js", "ml-anomalies.js", "compliance.js", "overview-alerts.js", "system.js", "realtime.js"].map(read).join("\n")));
 }
 
 if (failures.length) { console.log(`\n[FALHOU] ${failures.length} teste(s) falharam`); process.exit(1); }
