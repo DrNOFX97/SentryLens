@@ -15,6 +15,7 @@ Correr:
     python test_frontend_static.py
 """
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -50,9 +51,20 @@ def section_header() -> None:
     check("estilo status-warn existe", ".status-warn" in read("style.css"))
 
 
+def section_system() -> None:
+    css = read("style.css")
+    block = re.search(r"\.progress-fill\s*\{([^}]*)\}", css).group(1)
+    check(".progress-fill começa com largura 0", re.search(r"width:\s*0", block) is not None)
+    check(".progress-fill sem verde por omissão", "#27ae60" not in block)
+    body = re.search(r"async function loadSystemPanel\(\)\s*\{(.*?)\n\}", read("app.js"), re.S).group(1)
+    check("loadSystemPanel tem try/catch", "try {" in body and "catch" in body)
+    check("nenhum .toFixed direto sobre specs.*", re.search(r"specs\.[a-z_.]+\.toFixed", body) is None)
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
+    section_system()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

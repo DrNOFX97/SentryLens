@@ -59,4 +59,13 @@ check("slHeaderStatus outro estado -> desconhecido", hsEq({ status: "xpto" }, fa
 check("slHeaderStatus({}, false).cls é status-unknown", ctx.slHeaderStatus({}, false).cls === "status-unknown");
 check("slHeaderStatus com resposta ignora failed", ctx.slHeaderStatus({ status: "ok" }, true).text === "● Wazuh operacional");
 
+check("slFmtPct(null) -> —", ctx.slFmtPct(null) === "—");
+check("slFmtPct(12.34,1) -> 12.3%", ctx.slFmtPct(12.34, 1) === "12.3%");
+check("slFmtPct(true) -> —", ctx.slFmtPct(true) === "—");
+check("slProgressWidth(null) -> 0%", ctx.slProgressWidth(null) === "0%");
+check("slProgressWidth(150) -> 100%", ctx.slProgressWidth(150) === "100%");
+check("slProgressWidth(-5) -> 0%", ctx.slProgressWidth(-5) === "0%");
+check("slNumberOrNull vazio/NaN/bool -> null", ctx.slNumberOrNull("") === null && ctx.slNumberOrNull(NaN) === null && ctx.slNumberOrNull(false) === null && ctx.slNumberOrNull(Infinity) === null);
+check("slNumberOrNull(0) -> 0", ctx.slNumberOrNull(0) === 0);
+
 finish();

@@ -41,3 +41,23 @@ function slHeaderStatus(health, failed) {
     default: return { text: "● estado do Wazuh desconhecido", cls: "status-unknown" };
   }
 }
+
+// Número finito ou null. Rejeita null/undefined/""/booleanos/NaN/Infinity,
+// para que "sem valor" nunca vire 0.
+function slNumberOrNull(v) {
+  if (v === null || v === undefined || v === "" || typeof v === "boolean") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Percentagem formatada ("12%") ou "—" sem valor.
+function slFmtPct(v, digits = 0) {
+  const n = slNumberOrNull(v);
+  return n === null ? "—" : `${n.toFixed(digits)}%`;
+}
+
+// Largura CSS de uma barra de progresso: "0%" sem valor, senão limitada a 0-100.
+function slProgressWidth(v) {
+  const n = slNumberOrNull(v);
+  return n === null ? "0%" : `${Math.min(100, Math.max(0, n))}%`;
+}
