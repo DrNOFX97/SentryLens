@@ -68,4 +68,8 @@ check("slProgressWidth(-5) -> 0%", ctx.slProgressWidth(-5) === "0%");
 check("slNumberOrNull vazio/NaN/bool -> null", ctx.slNumberOrNull("") === null && ctx.slNumberOrNull(NaN) === null && ctx.slNumberOrNull(false) === null && ctx.slNumberOrNull(Infinity) === null);
 check("slNumberOrNull(0) -> 0", ctx.slNumberOrNull(0) === 0);
 
+check("concordância sem eventos -> —", ctx.slAgreementText(0, 0) === "—");
+check("concordância total null -> —", ctx.slAgreementText(3, null) === "—");
+check("concordância 3/4 -> 75%", ctx.slAgreementText(3, 4) === "75%");
+
 finish();

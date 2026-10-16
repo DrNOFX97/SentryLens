@@ -1209,15 +1209,17 @@ function renderMlAnomaliesTable(results) {
   results.forEach((r) => {
     const tr = document.createElement("tr");
     tr.className = r.agreement === "diverge" ? "row-diverge" : "";
+    const mlScore = slNumberOrNull(r.ml_score);
+    const agreementLabel = r.agreement === "agree" ? "✅ Concorda" : r.agreement === "diverge" ? "⚡ Diverge" : "—";
     tr.innerHTML = `
       <td class="mono">${escapeHtml(formatTimestamp(r.timestamp))}</td>
       <td>${escapeHtml(r.agent_name)}</td>
       <td>${escapeHtml(r.target_user)}</td>
       <td>${escapeHtml(String(r.windows_event_id))}</td>
       <td>${severityBadge(r.severity)}</td>
-      <td class="mono">${r.ml_score.toFixed(4)}</td>
+      <td class="mono">${escapeHtml(mlScore === null ? "—" : mlScore.toFixed(4))}</td>
       <td>${r.ml_is_anomaly ? "⚠️ Sim" : "Não"}</td>
-      <td><span class="agreement-badge agreement-${r.agreement}">${r.agreement === "agree" ? "✅ Concorda" : "⚡ Diverge"}</span></td>
+      <td><span class="agreement-badge agreement-${escapeHtml(String(r.agreement))}">${escapeHtml(agreementLabel)}</span></td>
     `;
     tbody.appendChild(tr);
   });
@@ -1231,9 +1233,7 @@ async function loadMlAnomaliesPanel(hours) {
     document.getElementById("kpi-ml-total").textContent = data.total ?? 0;
     document.getElementById("kpi-ml-anomalies").textContent = data.ml_anomalies_count ?? 0;
     document.getElementById("kpi-ml-rule-flagged").textContent = data.rule_flagged_count ?? 0;
-    const total = data.total || 0;
-    const agreementPct = total > 0 ? Math.round((data.agree_count / total) * 100) : 0;
-    document.getElementById("kpi-ml-agreement").textContent = `${agreementPct}%`;
+    document.getElementById("kpi-ml-agreement").textContent = slAgreementText(data.agree_count, data.total);
     document.getElementById("kpi-ml-diverge").textContent = data.diverge_count ?? 0;
 
     renderMlAnomaliesTable(data.results || []);

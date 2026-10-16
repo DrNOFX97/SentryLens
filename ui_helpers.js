@@ -61,3 +61,11 @@ function slProgressWidth(v) {
   const n = slNumberOrNull(v);
   return n === null ? "0%" : `${Math.min(100, Math.max(0, n))}%`;
 }
+
+// Concordância regra/ML em percentagem inteira, ou "—" sem amostra válida.
+function slAgreementText(agree, total) {
+  const a = slNumberOrNull(agree);
+  const t = slNumberOrNull(total);
+  if (a === null || t === null || t <= 0) return "—";
+  return `${Math.round((a / t) * 100)}%`;
+}

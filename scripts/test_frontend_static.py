@@ -86,12 +86,18 @@ def section_modals() -> None:
     check("sem modal.hidden = direto", re.search(r"modal\.hidden\s*=|-modal\"\)\.hidden\s*=", soc) is None)
 
 
+def section_ml_anomalies() -> None:
+    check("nota ML sem afirmação fixa de dados sintéticos", "Modelo treinado sobre dados sintéticos" not in read("index.html"))
+    check("ml_score não usa toFixed direto", "r.ml_score.toFixed" not in read("app.js"))
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
     section_system()
     section_no_inline_handlers()
     section_modals()
+    section_ml_anomalies()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)
