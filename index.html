@@ -1105,7 +1105,7 @@
 
         <!-- Create/Edit Analyst Modal -->
         <div id="analyst-modal" class="modal" hidden>
-          <div class="modal-content">
+          <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="analyst-modal-title">
             <h3 id="analyst-modal-title">Novo Analista</h3>
             <form id="analyst-form">
               <input type="hidden" id="analyst-modal-id">
@@ -1170,10 +1170,9 @@
 
         <!-- Shift Modal -->
         <div id="shift-modal" class="modal" hidden>
-          <div class="modal-content">
+          <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="shift-modal-title">
             <h3 id="shift-modal-title">Novo Turno</h3>
             <form id="shift-form">
-              <input type="hidden" id="shift-modal-id">
               <div class="form-row">
                 <label for="shift-analyst">Analista *</label>
                 <select id="shift-analyst" required>
@@ -1226,10 +1225,9 @@
 
         <!-- Escalation Modal -->
         <div id="escalation-modal" class="modal" hidden>
-          <div class="modal-content">
+          <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="escalation-modal-title">
             <h3 id="escalation-modal-title">Nova Regra de Escalamento</h3>
             <form id="escalation-form">
-              <input type="hidden" id="escalation-modal-id">
               <div class="form-row">
                 <label for="escalation-from-tier">De Tier *</label>
                 <select id="escalation-from-tier" required>

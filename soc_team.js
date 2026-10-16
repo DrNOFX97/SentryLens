@@ -161,7 +161,6 @@ document.getElementById("analyst-form").addEventListener("submit", async (e) => 
 document.getElementById("analyst-cancel-btn").addEventListener("click", closeAnalystModal);
 
 function openAnalystModal(mode, analystId = null) {
-  const modal = document.getElementById("analyst-modal");
   const form = document.getElementById("analyst-form");
   form.reset();
   document.getElementById("analyst-modal-id").value = "";
@@ -184,11 +183,11 @@ function openAnalystModal(mode, analystId = null) {
     document.getElementById("analyst-modal-title").textContent = "Novo Analista";
     document.getElementById("analyst-active-row").hidden = true;
   }
-  modal.hidden = false;
+  stOpenModal("analyst-modal", mode === "edit" ? "analyst-tier" : "analyst-id");
 }
 
 function closeAnalystModal() {
-  document.getElementById("analyst-modal").hidden = true;
+  stCloseModal("analyst-modal");
 }
 
 async function deactivateAnalyst(id, name) {
@@ -267,17 +266,16 @@ document.getElementById("shift-form").addEventListener("submit", async (e) => {
 document.getElementById("shift-cancel-btn").addEventListener("click", closeShiftModal);
 
 function openShiftModal(mode) {
-  const modal = document.getElementById("shift-modal");
   const form = document.getElementById("shift-form");
   form.reset();
   document.getElementById("shift-analyst").value = "";
 
   document.getElementById("shift-modal-title").textContent = "Novo Turno";
-  modal.hidden = false;
+  stOpenModal("shift-modal", "shift-analyst");
 }
 
 function closeShiftModal() {
-  document.getElementById("shift-modal").hidden = true;
+  stCloseModal("shift-modal");
 }
 
 // ====== Escalation Rules ======
@@ -342,16 +340,15 @@ document.getElementById("escalation-form").addEventListener("submit", async (e) 
 document.getElementById("escalation-cancel-btn").addEventListener("click", closeEscalationModal);
 
 function openEscalationModal(mode) {
-  const modal = document.getElementById("escalation-modal");
   const form = document.getElementById("escalation-form");
   form.reset();
 
   document.getElementById("escalation-modal-title").textContent = "Nova Regra de Escalamento";
-  modal.hidden = false;
+  stOpenModal("escalation-modal", "escalation-from-tier");
 }
 
 function closeEscalationModal() {
-  document.getElementById("escalation-modal").hidden = true;
+  stCloseModal("escalation-modal");
 }
 
 // ====== On-Call / Primary ======
@@ -457,9 +454,38 @@ function renderTierSummary(byTier) {
   }).join("");
 }
 
+// ====== Modais ======
+
+const ST_MODAL_IDS = ["analyst-modal", "shift-modal", "escalation-modal"];
+let stModalOpener = null;
+
+function stOpenModal(modalId, focusId) {
+  stModalOpener = document.activeElement;
+  document.getElementById(modalId).hidden = false;
+  const target = document.getElementById(focusId);
+  if (target) target.focus();
+}
+
+function stCloseModal(modalId) {
+  document.getElementById(modalId).hidden = true;
+  if (stModalOpener && typeof stModalOpener.focus === "function" && document.contains(stModalOpener)) {
+    stModalOpener.focus();
+  }
+  stModalOpener = null;
+}
+
 // ====== Main ======
 
 function stInit() {
+  ST_MODAL_IDS.forEach(id => {
+    const modal = document.getElementById(id);
+    modal.addEventListener("click", ev => { if (ev.target === modal) stCloseModal(id); });
+  });
+  document.addEventListener("keydown", ev => {
+    if (ev.key !== "Escape") return;
+    const open = ST_MODAL_IDS.find(id => !document.getElementById(id).hidden);
+    if (open) stCloseModal(open);
+  });
   document.getElementById("analysts-body").addEventListener("click", stOnAnalystsClick);
   loadAnalysts();
   loadShifts();

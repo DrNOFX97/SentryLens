@@ -71,11 +71,27 @@ def section_no_inline_handlers() -> None:
     check("botões da tabela de analistas por data-action", 'data-action="deactivate"' in soc)
 
 
+def section_modals() -> None:
+    css = read("style.css")
+    check(".modal[hidden] esconde", re.search(r"\.modal\[hidden\]\s*\{[^}]*display:\s*none", css) is not None)
+    check("regra morta .modal.hidden removida", ".modal.hidden" not in css)
+    html = read("index.html")
+    check("3 modais com role=dialog", html.count('role="dialog"') == 3 and html.count('aria-modal="true"') == 3)
+    for name in ("analyst", "shift", "escalation"):
+        check(f"modal {name} com aria-labelledby", html.count(f'aria-labelledby="{name}-modal-title"') == 1)
+    check("inputs ocultos órfãos removidos", "shift-modal-id" not in html and "escalation-modal-id" not in html)
+    soc = read("soc_team.js")
+    check("Escape fecha modal", "Escape" in soc)
+    check("stOpenModal/stCloseModal definidos", "function stOpenModal(" in soc and "function stCloseModal(" in soc)
+    check("sem modal.hidden = direto", re.search(r"modal\.hidden\s*=|-modal\"\)\.hidden\s*=", soc) is None)
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
     section_system()
     section_no_inline_handlers()
+    section_modals()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

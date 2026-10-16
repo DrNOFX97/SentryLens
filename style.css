@@ -896,7 +896,7 @@ tr.rb-stale td { font-style: italic; }
 
 /* ===== Modal (genérico) ===== */
 .modal { position: fixed; inset: 0; background: rgba(10,22,34,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal.hidden { display: none; }
+.modal[hidden] { display: none; }
 .modal-content { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 480px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto; }
 .modal-content h3 { margin: 0 0 16px; font-size: 18px; color: var(--ink-900); }
 .form-row { margin-bottom: 12px; }
