@@ -37,6 +37,7 @@ vm.runInContext(`const API_BASE="http://x:1"; const API_KEY="k";
 const periodSelect={value:"7",addEventListener(){}};
 function escapeHtml(s){return String(s)}; function severityBadge(s){return s};
 function formatTimestamp(s){return s};
+function rtRegisterTab(){return {id:"incidents",refresh(){}}}; // router.js (W3.2) não é carregado aqui
 var __pe=[]; function renderPanelError(sel,msg){__pe.push(String(msg))};`, ctx);
 for (const f of process.argv.slice(2)) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
 

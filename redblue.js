@@ -6,6 +6,9 @@
 const RB_REFRESH_MS = 30000;
 const RB_METRICS_HOURS = 168; // máximo aceite por /api/redblue/metrics
 const RB_MAX_PACKET_ROWS = 200;
+const RB_TAB_ID = "redblue"; // o mesmo data-tab do nav em index.html / app.js
+const RB_MAX_PACKETS_MEM = RB_MAX_PACKET_ROWS * 10; // teto em memória (W3.3)
+const RB_MAX_DETECTIONS_MEM = 1000;
 const RB_NETWORK_WS_URL = `${API_BASE.replace(/^http/, "ws")}/ws/network?api_key=${encodeURIComponent(API_KEY)}`;
 
 let rbMetrics = null;
@@ -411,6 +414,36 @@ async function loadNetworkPanel() {
   }
 }
 
+function rbTrim(arr, max) {
+  if (arr.length > max) arr.splice(0, arr.length - max);
+}
+
+// A aba só desenha quando é a ativa e o separador está visível; fora disso o
+// socket continua a acumular (com teto) mas não renderiza.
+function rbNetworkVisible() {
+  const docVisible = typeof document === "undefined" || document.visibilityState === "visible";
+  return docVisible && typeof rtRouter !== "undefined" && rtRouter.getActiveId() === RB_TAB_ID;
+}
+
+let rbRenderScheduled = false;
+let rbRenderDirty = false;
+
+// Várias mensagens no mesmo frame -> um só render (requestAnimationFrame).
+function rbScheduleNetworkRender() {
+  if (rbRenderScheduled) return;
+  rbRenderScheduled = true;
+  const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+  raf(() => {
+    rbRenderScheduled = false;
+    if (!rbNetworkVisible()) {
+      rbRenderDirty = true;
+      return;
+    }
+    rbRenderDirty = false;
+    renderNetworkPanel();
+  });
+}
+
 function connectNetworkSocket() {
   rbNetworkWs = new WebSocket(RB_NETWORK_WS_URL);
   rbNetworkWs.onopen = () => {
@@ -426,14 +459,16 @@ function connectNetworkSocket() {
     }
     if (msg && msg.type === "packet" && msg.packet) {
       rbNetwork.packets.push(msg.packet);
-      if (rbNetwork.packets.length > RB_MAX_PACKET_ROWS * 10) rbNetwork.packets.shift();
+      rbTrim(rbNetwork.packets, RB_MAX_PACKETS_MEM);
     } else if (msg && msg.type === "network_detection" && msg.detection) {
       rbNetwork.detections.push(msg.detection);
       rbNetwork.history.push(msg.detection);
+      rbTrim(rbNetwork.detections, RB_MAX_DETECTIONS_MEM);
+      rbTrim(rbNetwork.history, RB_MAX_DETECTIONS_MEM);
     } else {
       return;
     }
-    renderNetworkPanel();
+    rbScheduleNetworkRender();
   };
   rbNetworkWs.onerror = () => rbNetworkWs.close();
   rbNetworkWs.onclose = () => {
@@ -450,5 +485,11 @@ function connectNetworkSocket() {
   };
 }
 
-refreshRedBlueTab();
-setInterval(refreshRedBlueTab, RB_REFRESH_MS);
+// W3.2: o router só chama refreshRedBlueTab com a aba ativa e o separador visível.
+function rbOnHide() {
+  rbRenderDirty = true; // o próximo load/mensagem redesenha
+}
+
+if (typeof rtRegisterTab === "function") {
+  rtRegisterTab({ id: RB_TAB_ID, load: refreshRedBlueTab, refreshMs: RB_REFRESH_MS, onHide: rbOnHide });
+}

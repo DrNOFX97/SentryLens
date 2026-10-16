@@ -6,6 +6,7 @@
 // e do Wazuh).
 
 const INC_REFRESH_MS = 30000;
+const INC_ALERT_THROTTLE_MS = 5000; // W3.4: no máximo 1 refresh por alerta-rajada
 const INC_STATUS_LABELS = {
   NEW: "Novo", INVESTIGATING: "Em investigação", CONTAINED: "Contido", RESOLVED: "Resolvido", CLOSED: "Fechado",
 };
@@ -17,6 +18,9 @@ const INC_EVENT_LABELS = {
 
 let incSelectedId = null;
 let incRefreshing = false;
+let incLastRefreshAt = 0;
+let incAlertTimer = null;
+let incAnalystsLoaded = false;
 
 function incCell(value) {
   if (value === null || value === undefined || value === "") return "—";
@@ -227,6 +231,7 @@ async function incLoadAnalystFilter() {
 async function refreshIncidentsTab() {
   if (incRefreshing) return;
   incRefreshing = true;
+  incLastRefreshAt = Date.now();
   try {
     const params = new URLSearchParams({ hours: String(incWindowHours()) });
     const status = document.getElementById("inc-status-filter").value;
@@ -307,10 +312,36 @@ document.getElementById("inc-status-filter").addEventListener("change", refreshI
 document.getElementById("inc-severity-filter").addEventListener("change", refreshIncidentsTab);
 document.getElementById("inc-assigned-filter").addEventListener("change", refreshIncidentsTab);
 periodSelect.addEventListener("change", refreshIncidentsTab);
-document.addEventListener("sentrylens:new-alert", refreshIncidentsTab);
 
-incLoadAnalystFilter().then(refreshIncidentsTab);
-setInterval(refreshIncidentsTab, INC_REFRESH_MS);
+// W3.2: ciclo de vida pelo router (só carrega com a aba ativa e visível).
+// O id é o data-tab do nav ("incidents").
+const incTab = rtRegisterTab({
+  id: "incidents",
+  refreshMs: INC_REFRESH_MS,
+  load: async () => {
+    if (!incAnalystsLoaded) {
+      incAnalystsLoaded = true;
+      await incLoadAnalystFilter();
+    }
+    await refreshIncidentsTab();
+  },
+  onHide: () => {
+    if (incAlertTimer !== null) { clearTimeout(incAlertTimer); incAlertTimer = null; }
+  },
+});
+
+// W3.4: um alerta novo não dispara um pedido cada. No máximo 1 refresh por
+// INC_ALERT_THROTTLE_MS (leading se já passou o intervalo, senão trailing).
+// incTab.refresh() é no-op se a aba não estiver ativa e visível.
+function incOnNewAlert() {
+  if (incAlertTimer !== null) return;
+  const wait = Math.max(0, incLastRefreshAt + INC_ALERT_THROTTLE_MS - Date.now());
+  incAlertTimer = setTimeout(() => {
+    incAlertTimer = null;
+    incTab.refresh();
+  }, wait);
+}
+document.addEventListener("sentrylens:new-alert", incOnNewAlert);
 
 // --- JEV Triagem ---
 let incTriageCache = new Map();
