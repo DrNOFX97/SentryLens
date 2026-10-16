@@ -13,8 +13,8 @@ lógica de classificação de Event IDs:
 - **Fase 2** *(o essencial deste repo)* — `scripts/` tem o backend FastAPI
   (`main.py` + módulos de domínio) que liga às APIs do Wazuh (Manager API
   porta 55000, Indexer API porta 9200) e expõe dados prontos para o
-  dashboard. `index.html`/`app.js`/`redblue.js`/`style.css` (raiz) são o frontend estático
-  que consome esse backend. Desde a sessão de 2026-09-13/14 o backend também
+  dashboard. `index.html`/`style.css`/`app.js`/`ui_helpers.js` e um `*.js` por aba
+  (raiz) são o frontend estático que consome esse backend (ver "Frontend (raiz)"). Desde a sessão de 2026-09-13/14 o backend também
   tem autenticação por API key, push em tempo real via WebSocket,
   persistência de histórico própria, exportação de relatório HTML e uma
   camada de conformidade regulatória (RGPD/NIS2/AI Act) — ver secções
@@ -80,7 +80,7 @@ mas isso deixou de funcionar depois do CORS ficar restrito a `localhost`/`127.0.
 
 ## Testes do backend
 
-45 ficheiros standalone (`run_all_tests.py` corre-os todos), todos sem precisar do laboratório Wazuh ligado (tudo mockado).
+48 ficheiros standalone (`run_all_tests.py` corre-os todos), todos sem precisar do laboratório Wazuh ligado (tudo mockado).
 Correm todos a partir de `scripts/`:
 
 ```bash
@@ -97,6 +97,9 @@ Lista completa de testes e o que cobre cada um: `README.md` (secção Testes).
 - Todos usam `TestClient(main.app)` + `main.app.router.on_startup.clear()` (não dispara loops de background)
 - Definem `SENTRYLENS_API_KEY` em `os.environ` **antes** de `import main` (autenticação é lida a nível de módulo)
 - Mockam `WazuhIndexerClient` e `WazuhManagerClient` com `AsyncMock`
+- Os testes do frontend não abrem browser: `test_frontend_static.py` lê os ficheiros servidos (contratos de texto: sem handlers inline, `.modal[hidden]`, CSS, `.gitignore`) e `test_ui_helpers.py` corre `test_ui_helpers.cjs` em `node:vm` sobre `ui_helpers.js` (mesmo padrão de `test_ml_models_ui.py`). Sem `node` no PATH falham de propósito.
+- **Em worktrees** `test_export_raw_events.py` e `test_ml_training.py` falham sempre: precisam de `scripts/models/` e `scripts/snapshots/`, que estão no `.gitignore` e só existem no checkout principal. `test_attack_log_ids.py` e `test_attack_targets.py` falham às vezes em paralelo e passam isolados (flake conhecido, ver `docs/ROADMAP_STATUS.md`).
+- Se um teste rebenta na consola do Windows por um emoji no label (cp1252), corre com `PYTHONIOENCODING=utf-8`.
 
 **Ambiente:**
 - Correr num `.venv` já criado em `scripts/.venv`
@@ -265,6 +268,19 @@ busca alertas crus → módulo de domínio puro transforma-os em relatório → 
 de rede vira `HTTPException(502)`. As funções `build_*_report()` são puras
 (recebem a lista de alertas já obtida), o que é o que torna possível testá-las
 com mocks sem o laboratório ligado.
+
+## Frontend (raiz)
+
+Sem build step: scripts clássicos carregados por `index.html`, servidos por `scripts/serve_frontend.py` (whitelist fixa — **um ficheiro novo tem de entrar em `ALLOWED_FILES`** e em `test_serve_frontend.py`).
+
+- **Escopo global partilhado.** Todos os `*.js` partilham um só escopo; um identificador repetido rebenta o script inteiro. Cada ficheiro usa o seu prefixo (`ovw`, `rb`, `inc`, `st`, `ls`, `atk`, `alib`, `det`, `ns`, `met`, `mlm`, `mle`, `vac` e `sl` para `ui_helpers.js`). `app.js` define os globais que os outros reutilizam (`escapeHtml`, `fetchJSON`, `renderPanelError`, `formatTimestamp`, `API_BASE`, `API_KEY`).
+- **`ui_helpers.js`** (carregado antes de `app.js`): só funções puras `sl*`, sem DOM no topo, é o que se consegue testar em `node:vm`. Lógica nova com decisões (formatar, escolher estado, filtrar) vai para aqui, não para `app.js`.
+- **Nenhum handler inline** (`onclick=` etc.), nunca: `escapeHtml` não protege dentro de um atributo `on*`, porque o browser decodifica `&#39;` antes de correr o JS (XSS confirmada na Equipa SOC com um nome de analista). Usar `data-action`/`data-id` e um listener delegado que vai buscar o objeto à cache pelo id.
+- **Sem dados é `—` ou `Sem dados`**, nunca `0`, `0%` nem uma barra cheia. `.progress-fill` começa vazio e só ganha cor com `level-*`.
+- **O cabeçalho lê `/api/siem/health`** (`slHeaderStatus`), não infere nada de outros pedidos: os loaders apanham os seus erros e um `Promise.all` que não falha não prova que o Wazuh está ligado.
+- `.modal { display:flex }` anula o atributo `hidden`; por isso existe `.modal[hidden] { display:none }`. Qualquer elemento novo com `hidden` e `display` próprio precisa da mesma regra.
+- **A chave da API** vem de `/config.js` (gerado por `serve_frontend.py` a partir de `scripts/.env`, só same-origin). O WebSocket manda-a em `?api_key=` e o uvicorn grava-a **em claro** no access log (`scripts/backend.log.err`) até a Onda 5 tirar a chave do URL. Os logs não vão para o git, mas existem em disco e no OneDrive. Rodar a chave: editar `SENTRYLENS_API_KEY` em `scripts/.env` e reiniciar o backend (`.\scripts\start-backend.ps1 -SkipVMs` — sem `-SkipVMs` arranca também as 3 VMs); o frontend lê-a a cada pedido e não reinicia.
+- **Plano de melhorias do frontend:** `docs/AUDITORIA_FRONTEND.md` (relatório, não versionado) e `docs/superpowers/plans/2026-10-16-frontend-ondas-0-1-honestidade.md` (Ondas 0 e 1, feitas no PR #3). Ondas 2 a 8 por fazer: cliente HTTP único e componente de estado, polling só com a aba visível, tema escuro e rampa de severidade, menu de 38 entradas para ≤ 22, ticket de WebSocket + CSP, gráficos, refatorar `app.js`.
 
 ## Coisas não óbvias a partir do código
 
