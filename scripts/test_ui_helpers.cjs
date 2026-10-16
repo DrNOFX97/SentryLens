@@ -80,4 +80,16 @@ const miss = ctx.slComplianceVerdict(undefined);
 check("sem veredito -> Indeterminado com motivo", miss.label === "❔ Indeterminado" && miss.title === "Sem veredito do motor de conformidade");
 check("veredito null -> Indeterminado", ctx.slComplianceVerdict(null).label === "❔ Indeterminado");
 
+const af = (v) => JSON.stringify(ctx.slAnalystActiveFilter(v));
+check("Ativos", af("1") === '{"activeOnly":true,"onlyInactive":false}');
+check("Inativos", af("0") === '{"activeOnly":false,"onlyInactive":true}');
+check("Todos", af("") === '{"activeOnly":false,"onlyInactive":false}');
+check("filtro desconhecido -> Todos", af("x") === '{"activeOnly":false,"onlyInactive":false}');
+check("7 dias -> 168 h", ctx.slTierWindowHours(7) === 168);
+check("30 dias -> 720 h", ctx.slTierWindowHours(30) === 720);
+check("90 dias -> 720 h (le=720)", ctx.slTierWindowHours(90) === 720);
+check("inválido -> 168 h", ctx.slTierWindowHours("abc") === 168);
+check("zero/negativo -> 168 h", ctx.slTierWindowHours(0) === 168 && ctx.slTierWindowHours(-3) === 168);
+check("Infinity -> 168 h", ctx.slTierWindowHours(Infinity) === 168);
+
 finish();

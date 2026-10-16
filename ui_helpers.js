@@ -83,3 +83,19 @@ function slComplianceVerdict(v) {
   else if (typeof v.justificacao === "string") title = v.justificacao;
   return { label, title };
 }
+
+// Filtro "Estado" dos analistas. O backend só conhece active_only; "Inativos"
+// pede todos (activeOnly=false) e filtra no cliente (onlyInactive=true).
+function slAnalystActiveFilter(value) {
+  if (value === "1") return { activeOnly: true, onlyInactive: false };
+  if (value === "0") return { activeOnly: false, onlyInactive: true };
+  return { activeOnly: false, onlyInactive: false };
+}
+
+// Janela (horas) do resumo por tier: dias x 24, limitada a 720 (le=720 no backend).
+// Dias não numéricos, infinitos ou <= 0 usam a janela por omissão de 168 h.
+function slTierWindowHours(days) {
+  const d = Number(days);
+  if (!Number.isFinite(d) || d <= 0) return 168;
+  return Math.min(d * 24, 720);
+}

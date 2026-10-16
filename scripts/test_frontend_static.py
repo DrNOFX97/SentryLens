@@ -91,6 +91,16 @@ def section_ml_anomalies() -> None:
     check("ml_score não usa toFixed direto", "r.ml_score.toFixed" not in read("app.js"))
 
 
+def section_soc_filters() -> None:
+    soc = read("soc_team.js")
+    check("nome bloqueado ao editar analista", re.search(r'analyst-name"\)\.disabled\s*=\s*true', soc) is not None)
+    check("nome desbloqueado ao abrir", re.search(r'analyst-name"\)\.disabled\s*=\s*false', soc) is not None)
+    check("filtro de estado usa slAnalystActiveFilter", "slAnalystActiveFilter(" in soc)
+    check("resumo por tier usa slTierWindowHours", "slTierWindowHours(" in soc)
+    check("sem active_only forçado a true para Todos", 'active === "" ? "true"' not in soc)
+    check("badges escapam o fallback", "escapeHtml(String(labels[tier] || tier))" in soc and "escapeHtml(String(labels[role] || role))" in soc)
+
+
 if __name__ == "__main__":
     section_gitignore()
     section_header()
@@ -98,6 +108,7 @@ if __name__ == "__main__":
     section_no_inline_handlers()
     section_modals()
     section_ml_anomalies()
+    section_soc_filters()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

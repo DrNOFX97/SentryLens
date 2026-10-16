@@ -17,13 +17,13 @@ function tierBadge(tier) {
   if (!tier) return '<span class="inc-status inc-status-NEW">—</span>';
   const labels = { 1: "Tier 1", 2: "Tier 2", 3: "Tier 3" };
   const cls = { 1: "inc-status-NEW", 2: "inc-status-INVESTIGATING", 3: "inc-status-CONTAINED" };
-  return `<span class="inc-status ${cls[tier]}">${labels[tier] || tier}</span>`;
+  return `<span class="inc-status ${cls[tier]}">${escapeHtml(String(labels[tier] || tier))}</span>`;
 }
 
 function roleBadge(role) {
   const labels = { primary: "Principal", secondary: "Secundário", on_call: "De prevenção" };
   const cls = { primary: "inc-status-CONTAINED", secondary: "inc-status-INVESTIGATING", on_call: "inc-status-NEW" };
-  return `<span class="inc-status ${cls[role]}">${labels[role] || role}</span>`;
+  return `<span class="inc-status ${cls[role]}">${escapeHtml(String(labels[role] || role))}</span>`;
 }
 
 function formatDateTimeLocal(ts) {
@@ -67,12 +67,13 @@ async function loadAnalysts() {
   stText("analyst-notice", "A carregar analistas...");
   try {
     const tier = document.getElementById("analyst-tier-filter").value;
-    const active = document.getElementById("analyst-active-filter").value;
+    const filter = slAnalystActiveFilter(document.getElementById("analyst-active-filter").value);
     const params = new URLSearchParams();
     if (tier) params.set("tier", tier);
-    params.set("active_only", active === "" ? "true" : active);
+    params.set("active_only", filter.activeOnly ? "true" : "false");
     const data = await stRequest("GET", `/api/soc/analysts?${params}`);
     stAnalystsCache = data.analysts || [];
+    if (filter.onlyInactive) stAnalystsCache = stAnalystsCache.filter(a => !a.active);
     renderAnalystsTable(stAnalystsCache);
     updateShiftAnalystSelect(stAnalystsCache);
     stText("analyst-notice", `${stAnalystsCache.length} analista(s)`);
@@ -166,6 +167,7 @@ function openAnalystModal(mode, analystId = null) {
   document.getElementById("analyst-modal-id").value = "";
   document.getElementById("analyst-active-row").hidden = true;
   document.getElementById("analyst-id").disabled = false;
+  document.getElementById("analyst-name").disabled = false;
 
   if (mode === "edit" && analystId) {
     const analyst = stAnalystsCache.find(a => a.id === analystId);
@@ -175,6 +177,8 @@ function openAnalystModal(mode, analystId = null) {
     document.getElementById("analyst-id").value = analyst.id;
     document.getElementById("analyst-id").disabled = true;
     document.getElementById("analyst-name").value = analyst.name;
+    // O PATCH (AnalystUpdate) não aceita nome: bloquear evita uma alteração perdida em silêncio.
+    document.getElementById("analyst-name").disabled = true;
     document.getElementById("analyst-tier").value = analyst.tier;
     document.getElementById("analyst-email").value = analyst.email || "";
     document.getElementById("analyst-active").value = analyst.active ? "1" : "0";
@@ -423,10 +427,12 @@ function renderSLABreaches(breaches) {
 async function loadTierSummary() {
   stText("tier-summary-notice", "A carregar...");
   try {
-    const hours = parseInt(periodSelect.value, 10) * 24;
+    const days = parseInt(periodSelect.value, 10);
+    const hours = slTierWindowHours(days);
+    const clamped = Number.isFinite(days) && days > 0 && days * 24 > hours;
     const data = await stRequest("GET", `/api/soc/summary-by-tier?hours=${hours}`);
     renderTierSummary(data.by_tier || {});
-    stText("tier-summary-notice", `Janela de ${hours}h`);
+    stText("tier-summary-notice", clamped ? `Janela de ${hours} h (máximo desta fonte)` : `Janela de ${hours} h`);
   } catch (err) {
     stText("tier-summary-notice", `⚠️ ${err.message}`);
   }
