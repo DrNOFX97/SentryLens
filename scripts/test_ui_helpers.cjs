@@ -48,4 +48,15 @@ check("slFormatTimestamp inválido -> travessão", ctx.slFormatTimestamp("xyz") 
 check("slFormatTimestamp válido não é Invalid Date",
   !/Invalid/.test(ctx.slFormatTimestamp("2026-10-16T10:00:00.000+0000")) && ctx.slFormatTimestamp("2026-10-16T10:00:00.000+0000") !== "—");
 
+const hs = (h, f) => JSON.stringify(ctx.slHeaderStatus(h, f));
+const hsEq = (h, f, text, cls) => hs(h, f) === JSON.stringify({ text, cls });
+check("slHeaderStatus(null, true) -> sem ligação", hsEq(null, true, "● sem ligação ao backend", "status-error"));
+check("slHeaderStatus(null, false) -> a verificar", hsEq(null, false, "● a verificar", "status-unknown"));
+check("slHeaderStatus ok", hsEq({ status: "ok" }, false, "● Wazuh operacional", "status-ok"));
+check("slHeaderStatus degraded", hsEq({ status: "degraded" }, false, "● Wazuh degradado", "status-warn"));
+check("slHeaderStatus down", hsEq({ status: "down" }, false, "● Wazuh em baixo", "status-error"));
+check("slHeaderStatus outro estado -> desconhecido", hsEq({ status: "xpto" }, false, "● estado do Wazuh desconhecido", "status-unknown"));
+check("slHeaderStatus({}, false).cls é status-unknown", ctx.slHeaderStatus({}, false).cls === "status-unknown");
+check("slHeaderStatus com resposta ignora failed", ctx.slHeaderStatus({ status: "ok" }, true).text === "● Wazuh operacional");
+
 finish();

@@ -24,3 +24,20 @@ function slFormatTimestamp(ts) {
   const data = slParseDate(ts);
   return data ? data.toLocaleString("pt-PT") : "—";
 }
+
+// Texto e classe CSS do indicador do cabeçalho, a partir de /api/siem/health.
+// `health` é a resposta (ou null); `failed` indica que o pedido falhou.
+// Com resposta, `failed` é ignorado.
+function slHeaderStatus(health, failed) {
+  if (health === null || health === undefined) {
+    return failed
+      ? { text: "● sem ligação ao backend", cls: "status-error" }
+      : { text: "● a verificar", cls: "status-unknown" };
+  }
+  switch (health.status) {
+    case "ok": return { text: "● Wazuh operacional", cls: "status-ok" };
+    case "degraded": return { text: "● Wazuh degradado", cls: "status-warn" };
+    case "down": return { text: "● Wazuh em baixo", cls: "status-error" };
+    default: return { text: "● estado do Wazuh desconhecido", cls: "status-unknown" };
+  }
+}

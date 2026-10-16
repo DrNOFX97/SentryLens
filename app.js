@@ -47,9 +47,17 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function setStatus(ok) {
-  statusIndicator.textContent = ok ? "● ligado ao Wazuh" : "● sem ligação";
-  statusIndicator.className = "status-indicator " + (ok ? "status-ok" : "status-error");
+// Estado real do SIEM (/api/siem/health); só "sem ligação" se o próprio backend falhar.
+async function refreshHeaderStatus() {
+  let estado;
+  try {
+    estado = slHeaderStatus(await fetchJSON("/api/siem/health"), false);
+  } catch (err) {
+    console.error(err);
+    estado = slHeaderStatus(null, true);
+  }
+  statusIndicator.textContent = estado.text;
+  statusIndicator.className = "status-indicator " + estado.cls;
 }
 
 // Aviso fixo no topo do dashboard quando o WebSocket de tempo real falha
@@ -1288,11 +1296,10 @@ async function refreshDashboard() {
       loadBruteForce(hours),
       loadSystemPanel(),
     ]);
-    setStatus(true);
   } catch (err) {
     console.error(err);
-    setStatus(false);
   }
+  await refreshHeaderStatus();
 }
 
 refreshBtn.addEventListener("click", refreshDashboard);
@@ -1381,6 +1388,9 @@ applyHash();
 // WebSocket falhar definitivamente (ver connectWebSocket()).
 refreshDashboard();
 connectWebSocket();
+setInterval(() => {
+  if (document.visibilityState === "visible") refreshHeaderStatus();
+}, 30000);
 
 // Painéis novos (ciclo de vida, privilégios, contas admin) — independentes
 // dos painéis Wazuh acima, correm no seu próprio ciclo de 30s.

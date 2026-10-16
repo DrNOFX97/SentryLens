@@ -42,8 +42,17 @@ def section_gitignore() -> None:
         check(f"{name} ignorado pelo git", r.returncode == 0)
 
 
+def section_header() -> None:
+    app = read("app.js")
+    check("setStatus removido", "function setStatus" not in app)
+    check("cabeçalho lê /api/siem/health", 'refreshHeaderStatus' in app and '/api/siem/health' in app)
+    check("subtítulo não afirma ligação", "ligado ao Wazuh em tempo real" not in read("index.html"))
+    check("estilo status-warn existe", ".status-warn" in read("style.css"))
+
+
 if __name__ == "__main__":
     section_gitignore()
+    section_header()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)
