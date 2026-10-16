@@ -40,6 +40,8 @@ ALLOWED_FILES = {
     "/": "index.html",
     "/index.html": "index.html",
     "/ui_helpers.js": "ui_helpers.js",
+    "/api.js": "api.js",
+    "/state.js": "state.js",
     "/app.js": "app.js",
     "/redblue.js": "redblue.js",
     "/incidents.js": "incidents.js",
