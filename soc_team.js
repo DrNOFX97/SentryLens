@@ -438,7 +438,7 @@ function renderSLABreaches(breaches) {
         <td>${stCell(b.asset)}</td>
         <td>${tierBadge(b.assigned_team_tier)}</td>
         <td>${stCell(b.assigned_to)}</td>
-        <td>${formatDateTimeLocal(b.sla_deadline)} ${overdue ? '<span style="color:#e74c3c">⚠️ ULTRAPASSADO</span>' : ""}</td>
+        <td>${formatDateTimeLocal(b.sla_deadline)} ${overdue ? '<span class="sla-overdue">⚠️ ULTRAPASSADO</span>' : ""}</td>
         <td>${b.status}</td>
       </tr>
     `;

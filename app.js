@@ -71,8 +71,7 @@ function showRealtimeFallbackWarning() {
   realtimeFallbackBannerEl = document.createElement("div");
   realtimeFallbackBannerEl.textContent =
     "⚠️ Ligação em tempo real indisponível — a atualizar a cada 30s.";
-  realtimeFallbackBannerEl.style.cssText =
-    "background:#7a5200;color:#fff;text-align:center;padding:8px;font-size:14px;position:sticky;top:0;z-index:1000;";
+  realtimeFallbackBannerEl.className = "realtime-fallback-banner";
   document.body.insertBefore(realtimeFallbackBannerEl, document.body.firstChild);
 }
 
@@ -252,13 +251,9 @@ function renderDetections(containerId, detections) {
 // Mostra (ou, com message vazio/null, esconde) um banner de erro dentro do
 // painel indicado por panelSelector (ex: "#lifecycle-panel").
 //
-// Decisão de paleta: reutilizamos a paleta CLARA já usada em
-// .card.critical/.alert-row.critical (fundo #fdf1f0, texto #c0392b), e não
-// a paleta escura de .status-error (#5c1e1e/#ff8080). Motivo: .status-error
-// foi pensada para o indicador de estado sobre o fundo navy do header; os
-// painéis novos são .panel com fundo branco/claro, tal como todos os
-// outros painéis da app, por isso a paleta clara é a que já convive bem
-// com esse fundo (é a mesma usada em #brute-force-panel/.alert-row.critical).
+// Decisão de paleta: o estilo vem de .panel-error-banner (tokens --sev-critical-*
+// do style.css, que mudam com o tema), e não da paleta de .status-error, pensada
+// para o indicador de estado sobre o fundo do header.
 function renderPanelError(panelSelector, message) {
   const panel = document.querySelector(panelSelector);
   if (!panel) return;
@@ -785,7 +780,25 @@ document.getElementById("export-report-btn")?.addEventListener("click", exportRe
 // --- Gráficos (Chart.js) ---
 
 Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
-Chart.defaults.color = "#666";
+
+// Cores de gráficos vêm dos tokens CSS, lidos em runtime (tema claro/escuro).
+function cssToken(name) { return slCssToken(getComputedStyle(document.documentElement), name); }
+function tokenColor(name, alpha) { return alpha === undefined ? cssToken(name) : slColorAlpha(cssToken(name), alpha); }
+// Scriptable: o Chart.js volta a chamar em cada desenho, por isso o tema novo aplica-se num update().
+const chartColor = (name, alpha) => () => tokenColor(name, alpha);
+function applyChartTheme() {
+  Chart.defaults.color = cssToken("--text-secondary");
+  Chart.defaults.borderColor = cssToken("--border");
+}
+applyChartTheme();
+function refreshChartsTheme() {
+  applyChartTheme();
+  Object.values(charts).forEach((c) => {
+    c.update("none");
+  });
+}
+window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", refreshChartsTheme);
+new MutationObserver(refreshChartsTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 const charts = {};
 
@@ -822,8 +835,8 @@ function renderAlertsTimelineChart(alerts, hours) {
       datasets: [{
         label: "Alertas",
         data: [...buckets.values()],
-        borderColor: "#0b7d92",
-        backgroundColor: "rgba(11,125,146,0.12)",
+        borderColor: chartColor("--accent"),
+        backgroundColor: chartColor("--accent", 0.12),
         fill: true,
         tension: 0.25,
       }],
@@ -839,7 +852,6 @@ function renderAlertsTimelineChart(alerts, hours) {
 
 function renderSeverityDonutChart(bySeverity) {
   const order = ["critical", "high", "medium", "low", "info"];
-  const colorMap = { critical: "#e74c3c", high: "#f39c12", medium: "#d4ac0d", low: "#27ae60", info: "#3498db" };
   const labelMap = { critical: "Crítico", high: "Alto", medium: "Médio", low: "Baixo", info: "Info" };
 
   const labels = [];
@@ -850,13 +862,13 @@ function renderSeverityDonutChart(bySeverity) {
     if (count > 0) {
       labels.push(labelMap[sev]);
       values.push(count);
-      colors.push(colorMap[sev]);
+      colors.push(chartColor(slSeverityToken(sev)));
     }
   });
 
   renderChart("chart-severity-donut", {
     type: "doughnut",
-    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
+    data: { labels, datasets: [{ data: values, backgroundColor: (c) => colors[c.dataIndex](), borderWidth: 0 }] },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -872,7 +884,7 @@ function renderTopEventsChart(topEvents) {
     type: "bar",
     data: {
       labels: sorted.map((e) => `#${e.event_id}`),
-      datasets: [{ label: "Ocorrências", data: sorted.map((e) => e.count), backgroundColor: "#0b7d92" }],
+      datasets: [{ label: "Ocorrências", data: sorted.map((e) => e.count), backgroundColor: chartColor("--accent") }],
     },
     options: {
       responsive: true,
@@ -900,9 +912,9 @@ function renderSystemUsageChart(history) {
     data: {
       labels: history.map((s) => new Date(s.timestamp).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })),
       datasets: [
-        { label: "CPU %", data: history.map((s) => s.cpu_percent), borderColor: "#0b7d92", backgroundColor: "rgba(11,125,146,0.08)", fill: true, tension: 0.3 },
-        { label: "RAM %", data: history.map((s) => s.ram_percent), borderColor: "#8e44ad", backgroundColor: "rgba(142,68,173,0.08)", fill: true, tension: 0.3 },
-        { label: diskLabel, data: history.map((s) => s.disk_percent), borderColor: "#16a085", backgroundColor: "rgba(22,160,133,0.08)", fill: true, tension: 0.3 },
+        { label: "CPU %", data: history.map((s) => s.cpu_percent), borderColor: chartColor("--cat-1"), backgroundColor: chartColor("--cat-1", 0.08), fill: true, tension: 0.3 },
+        { label: "RAM %", data: history.map((s) => s.ram_percent), borderColor: chartColor("--cat-7"), backgroundColor: chartColor("--cat-7", 0.08), fill: true, tension: 0.3 },
+        { label: diskLabel, data: history.map((s) => s.disk_percent), borderColor: chartColor("--cat-3"), backgroundColor: chartColor("--cat-3", 0.08), fill: true, tension: 0.3 },
       ],
     },
     options: {
@@ -976,11 +988,11 @@ function renderLifecycleTimelineChart(timeline) {
     data: {
       labels: data.map((t) => t.date),
       datasets: [
-        { label: "Criadas", data: data.map((t) => t.created), borderColor: "#0b7d92", backgroundColor: "rgba(11,125,146,0.08)", fill: false, tension: 0.25 },
-        { label: "Ativadas", data: data.map((t) => t.activated), borderColor: "#16a085", backgroundColor: "rgba(22,160,133,0.08)", fill: false, tension: 0.25 },
-        { label: "Desativadas", data: data.map((t) => t.disabled), borderColor: "#f39c12", backgroundColor: "rgba(243,156,18,0.08)", fill: false, tension: 0.25 },
-        { label: "Eliminadas", data: data.map((t) => t.deleted), borderColor: "#e74c3c", backgroundColor: "rgba(231,76,60,0.08)", fill: false, tension: 0.25 },
-        { label: "Bloqueadas", data: data.map((t) => t.locked), borderColor: "#8e44ad", backgroundColor: "rgba(142,68,173,0.08)", fill: false, tension: 0.25 },
+        { label: "Criadas", data: data.map((t) => t.created), borderColor: chartColor("--cat-1"), backgroundColor: chartColor("--cat-1", 0.08), fill: false, tension: 0.25 },
+        { label: "Ativadas", data: data.map((t) => t.activated), borderColor: chartColor("--cat-3"), backgroundColor: chartColor("--cat-3", 0.08), fill: false, tension: 0.25 },
+        { label: "Desativadas", data: data.map((t) => t.disabled), borderColor: chartColor("--cat-4"), backgroundColor: chartColor("--cat-4", 0.08), fill: false, tension: 0.25 },
+        { label: "Eliminadas", data: data.map((t) => t.deleted), borderColor: chartColor("--cat-8"), backgroundColor: chartColor("--cat-8", 0.08), fill: false, tension: 0.25 },
+        { label: "Bloqueadas", data: data.map((t) => t.locked), borderColor: chartColor("--cat-7"), backgroundColor: chartColor("--cat-7", 0.08), fill: false, tension: 0.25 },
       ],
     },
     options: {
@@ -1074,7 +1086,7 @@ function renderPrivilegesGroupsChart(groupRanking) {
     type: "bar",
     data: {
       labels: sorted.map((g) => g.group),
-      datasets: [{ label: "Movimentações", data: sorted.map((g) => g.count), backgroundColor: "#0b7d92" }],
+      datasets: [{ label: "Movimentações", data: sorted.map((g) => g.count), backgroundColor: chartColor("--accent") }],
     },
     options: {
       responsive: true,
@@ -1113,7 +1125,7 @@ function renderAdminEventComparisonChart(eventCounts) {
     type: "doughnut",
     data: {
       labels: ["Administrativos", "Normais"],
-      datasets: [{ data: [admin, normal], backgroundColor: ["#8e44ad", "#0b7d92"], borderWidth: 0 }],
+      datasets: [{ data: [admin, normal], backgroundColor: [chartColor("--cat-7"), chartColor("--cat-1")], borderWidth: 0 }],
     },
     options: {
       responsive: true,

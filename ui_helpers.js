@@ -106,3 +106,63 @@ function slTierWindowHours(days) {
   if (!Number.isFinite(d) || d <= 0) return 168;
   return Math.min(d * 24, 720);
 }
+
+// Valor de um token CSS (custom property). `style` é um CSSStyleDeclaration
+// (getComputedStyle(document.documentElement)) ou qualquer objeto com
+// getPropertyValue; devolve "" se o token não existir. Puro: o DOM fica com o chamador.
+function slCssToken(style, name) {
+  if (!style || typeof style.getPropertyValue !== "function") return "";
+  const v = style.getPropertyValue(name);
+  return typeof v === "string" ? v.trim() : "";
+}
+
+// Aplica transparência a uma cor de token (#rgb ou #rrggbb) -> color(srgb r g b / a),
+// que o canvas aceita. Qualquer outro formato (ou alpha inválido) devolve-se como veio.
+function slColorAlpha(color, alpha) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(typeof color === "string" ? color.trim() : "");
+  const a = Number(alpha);
+  if (!m || !Number.isFinite(a) || a < 0 || a > 1) return color;
+  let h = m[1];
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const ch = [0, 2, 4].map((i) => +(parseInt(h.slice(i, i + 2), 16) / 255).toFixed(4));
+  return `color(srgb ${ch[0]} ${ch[1]} ${ch[2]} / ${a})`;
+}
+
+// Severidade -> token CSS (--sev-*). Desconhecida cai em --sev-info.
+function slSeverityToken(sev) {
+  const ok = ["critical", "high", "medium", "low", "info"];
+  return "--sev-" + (ok.includes(sev) ? sev : "info");
+}
+
+// Série categórica (índice 0-based) -> token --cat-1..--cat-8, com volta ao início.
+function slCategoryToken(index) {
+  const i = Number.isInteger(index) && index >= 0 ? index : 0;
+  return "--cat-" + ((i % 8) + 1);
+}
+
+// Foco preso dentro de um modal aberto (WCAG 2.4.3). Pura: recebe os elementos focáveis
+// e o ativo; devolve o elemento que deve receber o foco, ou null para deixar o Tab seguir.
+function slModalTabTarget(focusables, active, shiftKey) {
+  if (!Array.isArray(focusables) || focusables.length === 0) return null;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  const idx = focusables.indexOf(active);
+  if (idx === -1) return shiftKey ? last : first;
+  if (shiftKey && active === first) return last;
+  if (!shiftKey && active === last) return first;
+  return null;
+}
+
+// Liga o Tab preso a qualquer .modal visível. Só corre no browser (guarda por typeof document).
+function slInstallModalFocusTrap() {
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Tab") return;
+    const modal = document.querySelector(".modal:not([hidden])");
+    if (!modal) return;
+    const sel = "a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+    const focusables = Array.from(modal.querySelectorAll(sel)).filter((el) => !el.hidden && el.offsetParent !== null);
+    const target = slModalTabTarget(focusables, document.activeElement, ev.shiftKey);
+    if (target) { ev.preventDefault(); target.focus(); }
+  });
+}
+if (typeof document !== "undefined") slInstallModalFocusTrap();
