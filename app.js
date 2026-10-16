@@ -1386,7 +1386,7 @@ function showTab(contentId, activeItem) {
 }
 
 function activateTab(tabName) {
-  const item = document.querySelector(`.nav-item[data-tab="${tabName}"]`);
+  const item = document.querySelector(`.nav-item[data-tab="${CSS.escape(tabName)}"]`);
   if (!item) return;
   showTab(`tab-${tabName}`, item);
   history.replaceState(null, "", `#${tabName}`);

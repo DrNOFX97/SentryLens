@@ -97,6 +97,7 @@ function renderAttackLibraryDetail(entry) {
 }
 
 function alibShowDetailError(message) {
+  if (message) document.getElementById("attack-library-detail-panel").hidden = false;
   renderPanelError("#attack-library-detail-panel", message);
 }
 

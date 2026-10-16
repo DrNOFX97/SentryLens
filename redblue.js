@@ -245,8 +245,8 @@ function renderBluePanel(metrics) {
   const techBody = document.getElementById("redblue-technique-body");
   const note = document.getElementById("redblue-blue-note");
   note.textContent =
-    "Ações de resposta: a aplicação não regista ações de resposta (nem manuais), por isso não há nada para mostrar aqui. " +
-    "Este painel mostra apenas o que foi detetado, por que método e ao fim de quanto tempo.";
+    "Este painel mostra o que foi detetado, por que método e ao fim de quanto tempo. " +
+    "O seguimento (estados, notas, atribuição) está na aba Incidentes.";
 
   if (!metrics) {
     body.innerHTML = '<tr><td colspan="9" class="empty-state">Correlação indisponível</td></tr>';

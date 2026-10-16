@@ -113,8 +113,23 @@ def section_ml_models() -> None:
     check("parágrafo do treino aparece uma vez", html.count("O botão treina a partir do próprio dashboard") == 1)
     check("origem por omissão não é 'real'", '<option value="real" selected>' not in html)
     check("origem por omissão é 'unknown'", '<option value="unknown" selected>' in html)
-    check("sem escape duplo no resultado do treino", "mlmRenderTrainResult(\"erro\", escapeHtml(" not in read("ml_models.js"))
+    check("sem escape duplo no resultado do treino",
+          re.search(r"mlmRenderTrainResult\([^;]*escapeHtml\(", read("ml_models.js"), re.S) is None)
     check("sem escapeHtml no resultado do treino", "escapeHtml(resultado.texto)" not in read("ml_models.js"))
+
+
+def section_cleanups() -> None:
+    ev = read("ml_evaluation.js")
+    check("mleRenderEvaluation declarada uma vez", ev.count("function mleRenderEvaluation(") == 1)
+    check("comparação vazia com colspan 8", 'colspan="7"' not in ev)
+    check("activateTab escapa o hash", "CSS.escape(tabName)" in read("app.js"))
+    check("nota Red vs Blue atualizada", "não regista ações de resposta" not in read("redblue.js"))
+    check("Live SOC distingue 401", "API key inválida" in read("live_soc.js"))
+    css = read("style.css")
+    for dead in ["row-gap", "mle-verdict", "tier-badge-inline", "role-badge-inline", ".status-badge"]:
+        check(f"CSS morto removido: {dead}", dead not in css)
+    check("detalhe da Attack Library mostra o painel no erro",
+          re.search(r"function alibShowDetailError[\s\S]{0,300}hidden\s*=\s*false", read("attack_library.js")) is not None)
 
 
 if __name__ == "__main__":
@@ -127,6 +142,7 @@ if __name__ == "__main__":
     section_soc_filters()
     section_incidents_filter()
     section_ml_models()
+    section_cleanups()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)
