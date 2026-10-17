@@ -268,6 +268,13 @@ def section_charts_w6() -> None:
         check(f"{rel}: sem curvas inventadas (tension > 0)", re.search(r"tension:\s*0\.[1-9]", txt) is None)
         check(f"{rel}: sem donut", 'type: "doughnut"' not in txt)
     check("sem canvas do donut de admin", "chart-admin-event-comparison" not in read("index.html"))
+    index = read("index.html")
+    check("matriz de cobertura com tabela, legenda e caption", 'id="met-matrix"' in index and "matrix-legend" in index and "<caption" in index)
+    check("faixa ataque→deteção com aria-label e tabela «Ver dados»", 'id="atk-strip"' in index and 'id="atk-strip-data"' in index)
+    check("matriz usa /api/attacks e os helpers", "slCoverageMatrix(" in read("metrics.js") and "/api/attacks?" in read("metrics.js"))
+    check("faixa usa slAttackStrip", "slAttackStrip(" in read("attack_registry.js"))
+    css = read("style.css")
+    check("matriz: miss tem contorno além da cor", re.search(r"\.matrix-miss\s*\{[^}]*outline", css) is not None)
 
 
 if __name__ == "__main__":

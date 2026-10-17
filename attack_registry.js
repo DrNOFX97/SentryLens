@@ -125,7 +125,49 @@ function renderAttacksTable(attacks) {
   })}`);
 }
 
+// Faixa ataque -> deteção (W6.5), SVG à mão: uma linha por ataque, losango no lançamento,
+// um ponto por sensor à distância do MTTD. Sem deteção: só o losango e «não detetado».
+const ATK_STRIP = { labelW: 190, plotW: 520, rowH: 28, top: 26, right: 24 };
+
+function renderAttackStrip(attacks) {
+  const box = document.getElementById("atk-strip");
+  const details = document.getElementById("atk-strip-details");
+  const { rows, maxSeconds } = slAttackStrip(attacks);
+  if (!rows.length) {
+    box.textContent = "Sem dados — nenhum ataque lançado nesta janela.";
+    box.setAttribute("aria-label", "Faixa ataque → deteção: sem dados nesta janela");
+    details.hidden = true;
+    return;
+  }
+  const { labelW, plotW, rowH, top, right } = ATK_STRIP;
+  const width = labelW + plotW + right;
+  const height = top + rows.length * rowH + 8;
+  const x = (sec) => labelW + (sec / maxSeconds) * plotW;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * maxSeconds);
+  const cy = (i) => top + i * rowH + rowH / 2;
+  const dy = { rule: -4, ml: 4, network: 0 };
+  const svg = htmlT`<svg class="atk-strip-svg" viewBox="0 0 ${width} ${height}" width="${width}" aria-hidden="true" focusable="false">
+    ${ticks.map((t) => htmlT`<line class="atk-strip-grid" x1="${x(t)}" x2="${x(t)}" y1="${top - 6}" y2="${height - 8}"/><text class="atk-strip-tick" x="${x(t)}" y="${top - 12}" text-anchor="middle">${fmtDuration(t)}</text>`)}
+    ${rows.map((r, i) => htmlT`<g>
+      <text class="atk-strip-label" x="${labelW - 10}" y="${cy(i) + 4}" text-anchor="end">${slTruncate(r.label, 26)}<title>${r.label}</title></text>
+      ${r.points.length ? htmlT`<line class="atk-strip-link" x1="${x(0)}" x2="${x(Math.max(...r.points.map((p) => p.seconds)))}" y1="${cy(i)}" y2="${cy(i)}"/>` : ""}
+      <polygon class="atk-strip-launch" points="${x(0)},${cy(i) - 6} ${x(0) + 6},${cy(i)} ${x(0)},${cy(i) + 6} ${x(0) - 6},${cy(i)}"><title>Lançamento</title></polygon>
+      ${r.points.map((p) => htmlT`<circle class="atk-strip-dot atk-strip-${p.sensor}" cx="${x(p.seconds)}" cy="${cy(i) + dy[p.sensor]}" r="5"><title>${SL_SENSOR_LABELS[p.sensor]}: ${fmtDuration(p.seconds)}</title></circle>`)}
+      ${r.detected ? "" : htmlT`<text class="atk-strip-miss" x="${x(0) + 14}" y="${cy(i) + 4}">${r.verdict === "unknown" ? "sem correlação" : "não detetado"}</text>`}
+    </g>`)}
+  </svg>`;
+  const legend = htmlT`<p class="atk-strip-legend"><span class="atk-key atk-strip-rule"></span> Regra <span class="atk-key atk-strip-ml"></span> ML <span class="atk-key atk-strip-network"></span> Rede <span class="atk-key-diamond"></span> Lançamento · a distância ao losango é o MTTD (regra e ML partilham o mesmo valor)</p>`;
+  htmRender(box, htmlT`${svg}${legend}`);
+  const detected = rows.filter((r) => r.detected).length;
+  box.setAttribute("aria-label", `Faixa ataque → deteção: ${rows.length} ataques, ${detected} detetados, ${rows.length - detected} sem deteção`);
+  details.hidden = false;
+  const cell = (r, s) => fmtDuration((r.points.find((p) => p.sensor === s) || {}).seconds);
+  chartFillTable(document.getElementById("atk-strip-data"), ["Ataque", "Veredito", "Regra", "ML", "Rede"],
+    rows.map((r) => [r.label, r.verdict, cell(r, "rule"), cell(r, "ml"), cell(r, "network")]));
+}
+
 function renderAttackTimeline(attacks) {
+  renderAttackStrip(attacks);
   const list = document.getElementById("atk-timeline");
   if (!attacks.length) {
     htmRender(list, htmlT`<li class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</li>`);

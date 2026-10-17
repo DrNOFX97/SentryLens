@@ -1527,6 +1527,11 @@
           Linha temporal dos ataques lançados (mais antigo primeiro), com o veredito esperado vs real.
           Usa os filtros do Registo de ataques e a janela do cabeçalho.
         </p>
+        <div class="atk-strip" id="atk-strip" role="img" aria-label="Faixa ataque → deteção: a carregar">A carregar...</div>
+        <details class="chart-data" id="atk-strip-details" hidden>
+          <summary>Ver dados</summary>
+          <div class="chart-data-body" id="atk-strip-data"></div>
+        </details>
         <ol class="atk-timeline" id="atk-timeline">
           <li class="empty-state">A carregar...</li>
         </ol>
@@ -1704,6 +1709,16 @@
           <div class="card"><h3>Cenários cobertos</h3><div class="value" id="met-cov-scenarios">—</div></div>
           <div class="card"><h3>Técnicas MITRE cobertas</h3><div class="value" id="met-cov-techniques">—</div></div>
         </section>
+        <h3>Matriz cenário × sensor</h3>
+        <p class="panel-note" id="met-matrix-note">A carregar...</p>
+        <div class="table-scroll">
+          <table id="met-matrix" class="matrix-table" hidden>
+            <caption class="visually-hidden">Cobertura por cenário e sensor: esperado e alcançado</caption>
+            <thead><tr><th scope="col">Cenário</th><th scope="col">Tentativas</th><th scope="col">Regra</th><th scope="col">ML</th><th scope="col">Rede</th></tr></thead>
+            <tbody id="met-matrix-body"></tbody>
+          </table>
+        </div>
+        <p class="panel-note matrix-legend">✔ esperado e alcançado · ◐ alcançado em parte · ✘ esperado e falhado · ＋ alcançado sem ser esperado · — não esperado</p>
         <h3>Lacunas — cenários sem deteção</h3>
         <ul id="met-gaps-scenarios"><li class="empty-state">A carregar...</li></ul>
         <h3>Lacunas — técnicas sem deteção</h3>

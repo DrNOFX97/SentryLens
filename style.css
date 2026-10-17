@@ -893,6 +893,36 @@ table th {
   font-variant-numeric: tabular-nums;
 }
 
+/* Matriz de cobertura (W6.4): o texto da célula é sempre escrito, a cor só reforça */
+.matrix-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.matrix-table th, .matrix-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+.matrix-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.matrix-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.matrix-hit { background: var(--sev-low-bg); color: var(--sev-low-fg); }
+.matrix-partial { background: var(--sev-medium-bg); color: var(--sev-medium-fg); }
+.matrix-miss { background: var(--sev-critical-bg); color: var(--sev-critical-fg); outline: 1px dashed var(--sev-critical-fg); outline-offset: -3px; }
+.matrix-extra { background: var(--accent-soft); color: var(--accent-soft-fg); }
+.matrix-none { color: var(--text-muted); }
+.matrix-legend { margin-top: 6px; }
+.matrix-table[hidden] { display: none; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Faixa ataque -> deteção (W6.5) */
+.atk-strip { margin: 12px 0; overflow-x: auto; }
+.atk-strip-svg { max-width: 100%; height: auto; }
+.atk-strip-grid { stroke: var(--border); stroke-width: 1; }
+.atk-strip-tick, .atk-strip-label { fill: var(--text-secondary); font-size: var(--fs-xs); }
+.atk-strip-link { stroke: var(--border-strong); stroke-width: 2; }
+.atk-strip-launch { fill: var(--text); }
+.atk-strip-miss { fill: var(--sev-critical-fg); font-size: var(--fs-xs); font-weight: 600; }
+.atk-strip-dot { stroke: var(--surface); stroke-width: 1.5; }
+circle.atk-strip-rule, span.atk-strip-rule { fill: var(--cat-1); background: var(--cat-1); }
+circle.atk-strip-ml, span.atk-strip-ml { fill: var(--cat-7); background: var(--cat-7); }
+circle.atk-strip-network, span.atk-strip-network { fill: var(--cat-3); background: var(--cat-3); }
+.atk-strip-legend { font-size: var(--fs-xs); color: var(--text-secondary); }
+.atk-key { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 10px; }
+.atk-key-diamond { display: inline-block; width: 8px; height: 8px; background: var(--text); transform: rotate(45deg); margin: 0 6px 0 10px; }
+
 .admin-share {
   margin: 0 0 4px;
   font-size: var(--fs-2xl);

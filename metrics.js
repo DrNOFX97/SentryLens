@@ -91,6 +91,34 @@ function metRenderCoverage(data) {
   metGapList("met-gaps-techniques", cov.gaps && cov.gaps.techniques, cov.available);
 }
 
+// Matriz cenário x sensor (W6.4): vem de /api/attacks (esperado vs alcançado por tentativa).
+function metRenderMatrix(attacks) {
+  const { rows, unknown } = slCoverageMatrix(attacks);
+  const table = document.getElementById("met-matrix");
+  table.hidden = rows.length === 0;
+  metText("met-matrix-note", rows.length
+    ? `Janela de ${SL_MTTD_WINDOW_HOURS} h.${unknown ? ` ${unknown} tentativa(s) sem correlação disponível ficaram de fora.` : ""}`
+    : "Sem dados: nenhuma tentativa com correlação disponível na janela.");
+  htmRender(document.getElementById("met-matrix-body"), htmlT`${rows.map((r) => htmlT`<tr>
+    <th scope="row">${r.scenario}</th>
+    <td class="num">${r.attempts}</td>
+    ${SL_SENSORS.map((s) => {
+      const c = slMatrixCellText(r.cells[s]);
+      return htmlT`<td class="matrix-cell matrix-${r.cells[s].state}" title="${SL_SENSOR_LABELS[s]}: ${c.label}">${c.text}</td>`;
+    })}
+  </tr>`)}`);
+}
+
+async function metLoadMatrix() {
+  try {
+    const data = await apiRequest(`/api/attacks?hours=${SL_MTTD_WINDOW_HOURS}&limit=500`);
+    metRenderMatrix(data.attacks || []);
+  } catch (err) {
+    document.getElementById("met-matrix").hidden = true;
+    metText("met-matrix-note", `Não foi possível carregar a matriz: ${apiErrorMessage(err)}`);
+  }
+}
+
 function metRenderRate(data) {
   const rate = data.rate || {};
   const fp = rate.false_positives || {};
@@ -123,6 +151,7 @@ async function refreshMetrics() {
     metRenderMttd(data);
     metRenderCoverage(data);
     metRenderRate(data);
+    metLoadMatrix();
     if (data.alerts_truncated) {
       // O Indexer devolveu o teto de alertas: ataques antigos podem ficar sem os
       // seus alertas e parecer não detetados — os valores são limites inferiores.

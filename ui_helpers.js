@@ -234,6 +234,78 @@ function slChartAriaLabel(title, rows) {
   return `${title}: ${lista}${pts.length > 6 ? ` e mais ${pts.length - 6}` : ""}`;
 }
 
+// --- Matriz de cobertura e faixa ataque -> deteção (W6.4, W6.5) ---
+// Dados: itens de GET /api/attacks (expected.detection, actual.achieved, mttd_*).
+
+const SL_SENSORS = ["rule", "ml", "network"];
+const SL_SENSOR_LABELS = { rule: "Regra", ml: "ML", network: "Rede" };
+
+// Matriz cenário x sensor. Por célula: n = tentativas que ESPERAVAM o sensor, k = as que o
+// alcançaram. Veredito "unknown" (correlação indisponível) não conta: não é falha nem sucesso.
+// state: hit (k=n) | partial | miss (k=0) | extra (não esperado mas alcançado) | none.
+function slCoverageMatrix(attacks) {
+  const byScenario = new Map();
+  let unknown = 0;
+  (Array.isArray(attacks) ? attacks : []).forEach((a) => {
+    if (!a || !a.actual || a.actual.verdict === "unknown") { unknown += 1; return; }
+    let row = byScenario.get(a.scenario);
+    if (!row) {
+      row = { scenario: a.scenario, attempts: 0, cells: {} };
+      SL_SENSORS.forEach((s) => { row.cells[s] = { n: 0, k: 0, extra: 0, state: "none" }; });
+      byScenario.set(a.scenario, row);
+    }
+    row.attempts += 1;
+    const expected = (a.expected && a.expected.detection) || [];
+    const achieved = a.actual.achieved || [];
+    SL_SENSORS.forEach((s) => {
+      const c = row.cells[s];
+      if (expected.includes(s)) { c.n += 1; if (achieved.includes(s)) c.k += 1; }
+      else if (achieved.includes(s)) c.extra += 1;
+    });
+  });
+  const rows = [...byScenario.values()].sort((x, y) => String(x.scenario).localeCompare(String(y.scenario)));
+  rows.forEach((r) => SL_SENSORS.forEach((s) => {
+    const c = r.cells[s];
+    if (c.n > 0) c.state = c.k === c.n ? "hit" : c.k === 0 ? "miss" : "partial";
+    else c.state = c.extra > 0 ? "extra" : "none";
+  }));
+  return { rows, unknown };
+}
+
+// Texto da célula (nunca só cor) e descrição longa para leitores de ecrã.
+function slMatrixCellText(cell) {
+  if (cell.state === "hit") return { text: `✔ ${cell.k}/${cell.n}`, label: `esperado e alcançado em ${cell.k} de ${cell.n}` };
+  if (cell.state === "partial") return { text: `◐ ${cell.k}/${cell.n}`, label: `esperado, alcançado em ${cell.k} de ${cell.n}` };
+  if (cell.state === "miss") return { text: `✘ 0/${cell.n}`, label: `esperado e não alcançado em ${cell.n}` };
+  if (cell.state === "extra") return { text: "＋ extra", label: "não esperado, mas alcançado" };
+  return { text: "—", label: "não esperado" };
+}
+
+// Faixa: uma linha por ataque (mais antigo primeiro), eixo comum em segundos desde o lançamento.
+// Regra e ML partilham mttd_seconds (o backend só calcula um); a rede tem o seu.
+function slAttackStrip(attacks) {
+  const list = (Array.isArray(attacks) ? attacks : []).filter((a) => a && a.actual)
+    .sort((x, y) => (slParseDate(x.timestamp) || 0) - (slParseDate(y.timestamp) || 0));
+  let max = 0;
+  const rows = list.map((a, i) => {
+    const achieved = a.actual.achieved || [];
+    const points = [];
+    achieved.forEach((s) => {
+      const sec = s === "network" ? a.actual.mttd_network_seconds : a.actual.mttd_seconds;
+      if (Number.isFinite(sec) && sec >= 0) { points.push({ sensor: s, seconds: sec }); if (sec > max) max = sec; }
+    });
+    return {
+      key: a.id === null || a.id === undefined ? `i${i}` : String(a.id),
+      label: `${a.id === null || a.id === undefined ? "" : "#" + a.id + " "}${a.scenario}`,
+      verdict: a.actual.verdict,
+      detected: achieved.length > 0,
+      points,
+    };
+  });
+  const step = max <= 60 ? 20 : max <= 600 ? 120 : 1200; // eixo divisível por 4 (ticks redondos)
+  return { rows, maxSeconds: Math.max(step, Math.ceil(max / step) * step) };
+}
+
 // Valor de um token CSS (custom property). `style` é um CSSStyleDeclaration
 // (getComputedStyle(document.documentElement)) ou qualquer objeto com
 // getPropertyValue; devolve "" se o token não existir. Puro: o DOM fica com o chamador.
