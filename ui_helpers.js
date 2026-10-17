@@ -99,12 +99,39 @@ function slAnalystActiveFilter(value) {
   return { activeOnly: false, onlyInactive: false };
 }
 
-// Janela (horas) do resumo por tier: dias x 24, limitada a 720 (le=720 no backend).
-// Dias não numéricos, infinitos ou <= 0 usam a janela por omissão de 168 h.
-function slTierWindowHours(days) {
-  const d = Number(days);
-  if (!Number.isFinite(d) || d <= 0) return 168;
-  return Math.min(d * 24, 720);
+// Janela global (W5.3): um só seletor, em horas. Cada fonte tem o seu teto
+// (alertas 168 h, incidentes e ataques 720 h, contas 90 dias); a janela efetiva
+// é o mínimo dos dois e a aba diz qual foi, nunca recorta em silêncio.
+// Valor não numérico, infinito ou <= 0 usa a janela por omissão de 168 h.
+function slWindowHours(selected) {
+  const h = Number(selected);
+  return Number.isFinite(h) && h > 0 ? h : 168;
+}
+
+// { hours, clamped } para uma fonte com teto `maxHours`.
+function slEffectiveWindow(selected, maxHours) {
+  const want = slWindowHours(selected);
+  return { hours: Math.min(want, maxHours), clamped: want > maxHours };
+}
+
+// Dias inteiros (>= 1) para as rotas que pedem `days` (ciclo de vida, backfill).
+function slWindowDays(hours) {
+  return Math.max(1, Math.ceil(hours / 24));
+}
+
+// "últimos 7 dias", "última hora"... para a nota «A mostrar».
+function slWindowLabel(hours) {
+  if (hours === 1) return "última hora";
+  if (hours < 24) return `últimas ${hours} horas`;
+  if (hours % 24 !== 0) return `últimas ${hours} horas`;
+  const d = hours / 24;
+  return d === 1 ? "últimas 24 horas" : `últimos ${d} dias`;
+}
+
+// Texto da nota de janela de uma aba: «A mostrar: últimos 7 dias (máximo desta fonte)».
+function slWindowNote(selected, maxHours) {
+  const w = slEffectiveWindow(selected, maxHours);
+  return `A mostrar: ${slWindowLabel(w.hours)}${w.clamped ? " (máximo desta fonte)" : ""}`;
 }
 
 // Valor de um token CSS (custom property). `style` é um CSSStyleDeclaration

@@ -52,12 +52,13 @@ const ctx = vm.createContext({
 });
 try {
   vm.runInContext(`const API_BASE = "http://x:1"; const API_KEY = "k";
-    const periodSelect = { value: "7" };
+    const windowSelect = { value: "168" };
     function escapeHtml(s) { return String(s); }
     function severityBadge(s) { return String(s); }
     function renderPanelError(sel, msg) { __errs.push([sel, msg]); }
     function slAnalystActiveFilter() { return { activeOnly: true, onlyInactive: false }; }
-    function slTierWindowHours(d) { return d * 24; }`, Object.assign(ctx, { __errs: panelErrors }));
+    function slEffectiveWindow(s, m) { return { hours: Math.min(Number(s), m), clamped: false }; }
+    function slWindowNote() { return "A mostrar: nota"; }`, Object.assign(ctx, { __errs: panelErrors }));
   for (const f of process.argv.slice(2)) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
   check("api.js, state.js e soc_team.js carregam", true);
 } catch (e) {

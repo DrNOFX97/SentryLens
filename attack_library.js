@@ -125,7 +125,7 @@ async function refreshAttackLibrary() {
       alibEntries.length ? `${data.total} cenário(s) no catálogo.` : "";
     alibApplyFilters();
   } catch (err) {
-    const message = `Não foi possível carregar a Attack Library: ${apiErrorMessage(err)}`;
+    const message = `Não foi possível carregar a Biblioteca de ataques: ${apiErrorMessage(err)}`;
     renderPanelError("#attack-library-panel", message);
     htmRender(document.getElementById("alib-body"),
       htmlT`<tr><td colspan="8" class="empty-state">Sem dados — ${apiErrorMessage(err)}.</td></tr>`);

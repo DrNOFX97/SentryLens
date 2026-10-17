@@ -1,6 +1,6 @@
 // Abas "Attack Registry" e "Attack Timeline" (Roadmap v2, R4). Carregado depois
 // de app.js: reutiliza os seus globais (API_BASE, API_KEY,
-// severityBadge, formatTimestamp, renderPanelError, periodSelect) — não
+// severityBadge, formatTimestamp, renderPanelError, windowSelect) — não
 // redeclarar nenhum aqui. As duas abas partilham o mesmo pedido a
 // GET /api/attacks; só mostram dados reais, sem dados -> estado vazio. Só
 // trabalha com uma das abas ativa e o separador visível (sem refresh em
@@ -61,8 +61,8 @@ function atkRequest(path) {
 }
 
 function atkQuery() {
-  // period-select está em dias; o endpoint aceita no máximo 720 h (30 dias).
-  const params = new URLSearchParams({ hours: String(Math.min(Number(periodSelect.value) * 24, 720)), limit: "500" });
+  // O endpoint aceita no máximo 720 h (30 dias); a nota da aba diz o recorte.
+  const params = new URLSearchParams({ hours: String(slEffectiveWindow(windowSelect.value, 720).hours), limit: "500" });
   const status = document.getElementById("atk-status-filter").value;
   const technique = document.getElementById("atk-technique-filter").value.trim().toUpperCase();
   if (status) params.set("status", status);
@@ -247,7 +247,7 @@ document.getElementById("atk-technique-filter").addEventListener("input", () => 
   clearTimeout(atkTechniqueTimer);
   atkTechniqueTimer = setTimeout(() => { if (atkIsActive()) refreshAttacks(); }, 250);
 });
-periodSelect.addEventListener("change", () => { if (atkIsActive()) refreshAttacks(); });
+windowSelect.addEventListener("change", () => { if (atkIsActive()) refreshAttacks(); });
 
 // Ciclo de vida: só pede dados com uma das abas ativa e o separador visível.
 let atkLoadedOnce = false;

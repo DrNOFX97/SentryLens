@@ -55,7 +55,7 @@ const sandbox = {
   setInterval() {}, setTimeout() {}, clearTimeout() {},
   WebSocket: { OPEN: 1 },
   API_BASE: "http://127.0.0.1:8001", API_KEY: "k",
-  periodSelect: { value: "7", addEventListener() {} },
+  windowSelect: { value: "168", addEventListener() {} },
   apiRequest: async (p) => {
     requested.push(p);
     const key = Object.keys(fixtures).find((k) => p.startsWith(k));

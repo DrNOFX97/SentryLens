@@ -34,11 +34,12 @@ const ctx = vm.createContext({
   fetch: () => Promise.reject(new TypeError("Failed to fetch")),
 });
 vm.runInContext(`const API_BASE="http://x:1"; const API_KEY="k";
-const periodSelect={value:"7",addEventListener(){}};
+const windowSelect={value:"168",addEventListener(){}};
 function escapeHtml(s){return String(s)}; function severityBadge(s){return s};
 function formatTimestamp(s){return s};
 function rtRegisterTab(){return {id:"incidents",refresh(){}}}; // router.js (W3.2) não é carregado aqui
 var __pe=[]; function renderPanelError(sel,msg){__pe.push(String(msg))};`, ctx);
+vm.runInContext(fs.readFileSync(require("node:path").join(__dirname, "..", "ui_helpers.js"), "utf8"), ctx, { filename: "ui_helpers.js" });
 for (const f of process.argv.slice(2)) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
 
 (async () => {

@@ -30,7 +30,7 @@ function makeEnv(visibility) {
     Date: { now: () => t },
     setInterval: (fn, ms) => { const id = nextId++; timers.set(id, { fn, ms, next: t + ms }); return id; },
     clearInterval: (id) => { timers.delete(id); },
-    periodSelect: { value: "7" }, windowSelect: { value: "24" }, severityFilter: { value: "" },
+    windowSelect: { value: "24" }, severityFilter: { value: "" },
     refreshHeaderStatus: rec("header"),
     loadAlerts: rec("alerts"), loadAgents: rec("agents"), loadSystemPanel: rec("system"),
     loadLifecyclePanel: rec("lifecycle"), loadPrivilegesPanel: rec("privileges"),
@@ -38,6 +38,7 @@ function makeEnv(visibility) {
     loadCompliancePanel: rec("compliance"),
   };
   vm.createContext(ctx);
+  vm.runInContext(read("ui_helpers.js"), ctx);
   vm.runInContext(read("router.js") + "\nthis.rtRouter=rtRouter;this.rtActivate=rtActivate;this.rtDeactivate=rtDeactivate;this.rtRegisterTab=rtRegisterTab;", ctx);
   vm.runInContext(m[0] + "\nthis.appCurrentTabId=appCurrentTabId;", ctx);
   return {

@@ -47,7 +47,7 @@ function makeEnv() {
     querySelectorAll() { return []; },
     getElementById(id) { return (els[id] = els[id] || makeEl()); },
   };
-  els["period-select"] = Object.assign(makeEl(), { value: "7" });
+  els["window-select"] = Object.assign(makeEl(), { value: "168" });
 
   function add(fn, ms, repeat) {
     const id = nextId++;
@@ -73,7 +73,7 @@ function makeEnv() {
     formatTimestamp: (s) => String(s),
     renderPanelError() {},
     sttShowLoading() {}, sttShowError() {}, sttShowEmpty() {},
-    periodSelect: els["period-select"],
+    windowSelect: els["window-select"],
   };
   return {
     sandbox, doc, requests,

@@ -6,7 +6,6 @@ const windowSelect = document.getElementById("window-select");
 const severityFilter = document.getElementById("severity-filter");
 const refreshBtn = document.getElementById("refresh-btn");
 const statusIndicator = document.getElementById("status-indicator");
-const periodSelect = document.getElementById("period-select");
 // Estado real do SIEM (/api/siem/health); só "sem ligação" se o próprio backend falhar.
 async function refreshHeaderStatus() {
   let estado;
@@ -22,7 +21,7 @@ async function refreshHeaderStatus() {
 
 async function exportReport() {
   const btn = document.getElementById("export-report-btn");
-  const hours = windowSelect.value;
+  const hours = appPeriodHours();
   if (btn) {
     btn.disabled = true;
     btn.textContent = "⏳ A gerar...";
@@ -66,31 +65,35 @@ async function exportReport() {
 
 document.getElementById("export-report-btn")?.addEventListener("click", exportReport);
 
-// Ponto de entrada dos painéis novos (ciclo de vida, privilégios, contas
-// admin, ML anomalias, conformidade) — independente de refreshDashboard()
-// (painéis Wazuh antigos) e do window-select (horas); usa sempre
-// period-select (dias) no momento da chamada, nunca reatribui esse .value.
+// Janela global (W5.3): o único seletor do cabeçalho está em horas e cada fonte
+// tem o seu teto. As abas dizem a janela efetiva com `<p class="window-note"
+// data-window-max="<horas>">`, preenchido aqui.
+
+function appRenderWindowNotes() {
+  document.querySelectorAll("[data-window-max]").forEach((el) => {
+    el.textContent = slWindowNote(windowSelect.value, Number(el.dataset.windowMax));
+  });
+}
+
+// Ponto de entrada dos painéis que não passam pelo refreshDashboard() (ciclo de
+// vida, privilégios, contas admin, ML anomalias, conformidade).
 async function refreshNewPanels() {
-  const days = periodSelect.value;
   await Promise.allSettled([
-    loadLifecyclePanel(days),
-    loadPrivilegesPanel(days),
-    loadAdminActivityPanel(days),
-    // /api/ml-anomalies usa "hours" (Query(24, ge=1, le=168)), não "dias" como
-    // os outros 3 painéis — convertemos e limitamos ao máximo aceite pelo
-    // endpoint (168h = 7 dias), para "30 dias"/"90 dias" mostrarem sempre os
-    // últimos 7 dias em vez de serem lidos como 30/90 HORAS.
-    loadMlAnomaliesPanel(Math.min(Number(days) * 24, 168)),
-    // /api/compliance tem a mesma assinatura de /api/ml-anomalies
-    // (Query(24, ge=1, le=168)) — mesma conversão dias->horas.
-    loadCompliancePanel(Math.min(Number(days) * 24, 168)),
+    loadLifecyclePanel(appPeriodDays()),
+    loadPrivilegesPanel(appPeriodDays()),
+    loadAdminActivityPanel(appPeriodDays()),
+    loadMlAnomaliesPanel(appPeriodHours()),
+    loadCompliancePanel(appPeriodHours()),
   ]);
 }
 
-periodSelect.addEventListener("change", refreshNewPanels);
+windowSelect.addEventListener("change", () => {
+  appRenderWindowNotes();
+  refreshNewPanels();
+});
 
 async function refreshDashboard() {
-  const hours = windowSelect.value;
+  const hours = appPeriodHours();
   const severity = severityFilter.value;
 
   try {
@@ -182,16 +185,21 @@ document.getElementById("system-summary-card").addEventListener("click", () => a
 // as suas abas, um id repetido rebenta o registo.
 let appCurrentTabId = "overview"; // Overview vem ativa no HTML
 
+const APP_LIFECYCLE_MAX_HOURS = 90 * 24; // /api/lifecycle|privileges|admin-activity: days le=90
+const APP_ALERTS_MAX_HOURS = 168; // /api/alerts, /api/ml-anomalies, /api/compliance: hours le=168
+
+// Dias para as rotas de contas (le=90) e horas para alertas/ML/conformidade (le=168),
+// sempre derivados da janela global.
 function appPeriodDays() {
-  return periodSelect.value;
+  return slWindowDays(slEffectiveWindow(windowSelect.value, APP_LIFECYCLE_MAX_HOURS).hours);
 }
 function appPeriodHours() {
-  return Math.min(Number(appPeriodDays()) * 24, 168);
+  return slEffectiveWindow(windowSelect.value, APP_ALERTS_MAX_HOURS).hours;
 }
 
 function appRegisterTabs() {
   const refreshMs = 30000;
-  rtRegisterTab({ id: "alerts", refreshMs, load: () => loadAlerts(windowSelect.value, severityFilter.value) });
+  rtRegisterTab({ id: "alerts", refreshMs, load: () => loadAlerts(appPeriodHours(), severityFilter.value) });
   rtRegisterTab({ id: "agents", refreshMs, load: () => loadAgents() });
   rtRegisterTab({ id: "system", refreshMs, load: () => loadSystemPanel() });
   rtRegisterTab({ id: "lifecycle", refreshMs, load: () => loadLifecyclePanel(appPeriodDays()) });
@@ -252,6 +260,7 @@ applyHash();
 // Carrega ao abrir e liga o WebSocket de tempo real (/ws/alerts); o polling
 // fixo de 30s só volta a existir via startPollFallback() se a ligação
 // WebSocket falhar definitivamente (ver connectWebSocket()).
+appRenderWindowNotes();
 refreshDashboard();
 connectWebSocket();
 

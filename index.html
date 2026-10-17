@@ -65,18 +65,14 @@
       </div>
     </div>
     <div class="controls">
-      <label for="window-select">Janela temporal:</label>
+      <label for="window-select">Janela:</label>
       <select id="window-select">
         <option value="1">Última hora</option>
         <option value="6">Últimas 6 horas</option>
-        <option value="24" selected>Últimas 24 horas</option>
-        <option value="168">Última semana</option>
-      </select>
-      <label for="period-select">Período (novos painéis):</label>
-      <select id="period-select">
-        <option value="7">7 dias</option>
-        <option value="30" selected>30 dias</option>
-        <option value="90">90 dias</option>
+        <option value="24">Últimas 24 horas</option>
+        <option value="168" selected>Últimos 7 dias</option>
+        <option value="720">Últimos 30 dias</option>
+        <option value="2160">Últimos 90 dias</option>
       </select>
       <button id="refresh-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Atualizar</button>
       <button id="export-report-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-file"/></svg> Exportar relatório</button>
@@ -96,21 +92,21 @@
       <button class="nav-item" data-tab="live-soc" data-tabs="live-soc agents"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Live SOC</button>
       <button class="nav-item" data-tab="alerts"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-siren"/></svg> Alertas</button>
       <button class="nav-item" data-tab="incidents"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-puzzle"/></svg> Incidentes</button>
-      <button class="nav-item" data-tab="detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Detections</button>
+      <button class="nav-item" data-tab="detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Deteções</button>
       <button class="nav-item" data-tab="soc-team"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-users"/></svg> Equipa SOC</button>
     </details>
     <details class="nav-group" open>
       <summary>Validação</summary>
       <button class="nav-item" data-tab="redblue"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-swords"/></svg> Red vs Blue</button>
       <button class="nav-item" data-tab="attack-registry" data-tabs="attack-registry attack-timeline"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Ataques</button>
-      <button class="nav-item" data-tab="attack-library"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Attack Library</button>
+      <button class="nav-item" data-tab="attack-library"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Biblioteca</button>
       <button class="nav-item" data-tab="vaccines"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-syringe"/></svg> Vaccines</button>
     </details>
     <details class="nav-group" open>
       <summary>Rede</summary>
-      <button class="nav-item" data-tab="live-traffic"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Live Traffic</button>
-      <button class="nav-item" data-tab="network-detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-traffic"/></svg> Network Detections</button>
-      <button class="nav-item" data-tab="pcap-evidence"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-flask"/></svg> PCAP / Evidence</button>
+      <button class="nav-item" data-tab="live-traffic"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Tráfego</button>
+      <button class="nav-item" data-tab="network-detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-traffic"/></svg> Deteções de rede</button>
+      <button class="nav-item" data-tab="pcap-evidence"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-flask"/></svg> Evidência</button>
     </details>
     <details class="nav-group" open>
       <summary>Identidade</summary>
@@ -261,6 +257,7 @@
 
       <section class="panel" id="alerts-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-siren"/></svg> Alertas Recentes</h2>
+        <p class="panel-note window-note" data-window-max="168"></p>
         <div class="filter-row">
           <select id="severity-filter">
             <option value="">Todas as severidades</option>
@@ -393,6 +390,7 @@
     <div class="tab-content" id="tab-lifecycle">
       <section class="panel" id="lifecycle-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clipboard"/></svg> Ciclo de Vida de Contas</h2>
+        <p class="panel-note window-note" data-window-max="2160"></p>
 
         <section class="kpi-grid" id="lifecycle-kpi-grid">
           <div class="card">
@@ -462,6 +460,7 @@
     <div class="tab-content" id="tab-privileges">
       <section class="panel" id="privileges-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-key"/></svg> Privilégios</h2>
+        <p class="panel-note window-note" data-window-max="2160"></p>
 
         <section class="kpi-grid" id="privileges-kpi-grid">
           <div class="card">
@@ -513,6 +512,7 @@
     <div class="tab-content" id="tab-admin-activity">
       <section class="panel" id="admin-activity-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-user"/></svg> Contas Admin</h2>
+        <p class="panel-note window-note" data-window-max="2160"></p>
 
         <div class="chart-card">
           <h3>Eventos administrativos vs. normais</h3>
@@ -561,12 +561,11 @@
     <!-- ===== ML Anomalias ===== -->
     <div class="tab-content" id="tab-ml-anomalies">
       <section class="panel" id="ml-anomalies-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-brain"/></svg> ML Anomalias</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-brain"/></svg> Anomalias de ML</h2>
+        <p class="panel-note window-note" data-window-max="168"></p>
         <p class="panel-note">
           Deteção por Isolation Forest, a correr em paralelo com a classificação por regras
-          (event_catalog.py) — nunca a substitui. A versão do modelo e a origem dos dados de treino estão na aba Models.
-          Janela de análise limitada aos últimos 7 dias, independentemente do período
-          selecionado acima.
+          (event_catalog.py) — nunca a substitui. A versão do modelo e a origem dos dados de treino estão na aba Modelos.
         </p>
 
         <section class="kpi-grid" id="ml-anomalies-kpi-grid">
@@ -621,7 +620,7 @@
         <button type="button" class="subnav-item" data-tab="ml-evaluation">Avaliação</button>
       </div>
       <section class="panel" id="ml-models-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-box"/></svg> Models</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-box"/></svg> Modelos</h2>
         <p class="panel-note">
           Versões do modelo de ML registadas em <code>scripts/models/vN/</code> (metadados em
           <code>metadata.json</code>); a versão ativa é a indicada por <code>scripts/models/ACTIVE</code>.
@@ -707,7 +706,7 @@
         <button type="button" class="subnav-item" data-tab="ml-evaluation">Avaliação</button>
       </div>
       <section class="panel" id="ml-evaluation-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-ruler"/></svg> Evaluation</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-ruler"/></svg> Avaliação</h2>
         <p class="panel-note">
           Duas metades, com origens diferentes. Em cima, a avaliação de cada versão do modelo (ML
           contra regras) lida do <code>metadata.json</code> da <strong>própria</strong> versão —
@@ -828,6 +827,7 @@
     <div class="tab-content" id="tab-compliance">
       <section class="panel" id="compliance-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg> Conformidade Regulatória</h2>
+        <p class="panel-note window-note" data-window-max="168"></p>
         <p class="panel-note" id="compliance-org-note">
           A carregar perfil da organização...
         </p>
@@ -881,7 +881,7 @@
           (regras e ML) e a captura de rede detetaram. Todos os dados vêm dos
           endpoints reais do backend. As tentativas vêm de todo o log de
           ataques, mas os alertas do Wazuh só são pesquisados nos últimos
-          7 dias (independentemente do período escolhido acima); tentativas
+          7 dias (janela fixa, independente do seletor do cabeçalho); tentativas
           mais antigas não podem ter correspondência.
         </p>
         <section class="kpi-grid" id="redblue-kpi-grid">
@@ -943,7 +943,7 @@
         <p class="panel-note">Este painel é a vista de correlação (pacotes do buffer + deteções recomputadas,
           a mesma fonte usada por <code>/api/redblue/metrics</code>). Para resumos dedicados e para o histórico
           persistido de deteções (sobrevive a um restart do backend), ver as abas
-          <strong>Network → Live Traffic / Network Detections / PCAP Evidence</strong> na sidebar.</p>
+          <strong>Rede → Tráfego / Deteções de rede / Evidência</strong> na sidebar.</p>
         <section class="kpi-grid">
           <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="kpi-rb-packets">—</div></div>
           <div class="card"><h3>Deteções Atuais</h3><div class="value" id="kpi-rb-detections">—</div></div>
@@ -992,6 +992,7 @@
     <div class="tab-content" id="tab-incidents">
       <section class="panel" id="incidents-panel">
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-puzzle"/></svg> Incidentes</h2>
+        <p class="panel-note window-note" data-window-max="720"></p>
         <p class="panel-note">
           Agrupamento automático de deteções (alertas Wazuh e rede) por ativo, com estado e timeline.
           Só dados reais: ataques sem nenhuma deteção não geram incidente (ver Red vs Blue).
@@ -1351,7 +1352,7 @@
     <!-- ===== Attack Library (Roadmap v2, R5) ===== -->
     <div class="tab-content" id="tab-attack-library">
       <section class="panel" id="attack-library-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Attack Library</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Biblioteca de ataques</h2>
         <p class="panel-note">
           Catálogo de referência dos cenários de ataque do laboratório (técnica/ferramenta/Event IDs,
           risco, pré-requisitos, sensores esperados e passos de limpeza). Só leitura — não lança nada;
@@ -1456,7 +1457,8 @@
         <button type="button" class="subnav-item" data-tab="attack-timeline">Linha temporal</button>
       </div>
       <section class="panel" id="attack-registry-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Attack Registry</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Registo de ataques</h2>
+        <p class="panel-note window-note" data-window-max="720"></p>
         <p class="panel-note">
           Ataques lançados (log da Kali), o que se esperava detetar e o que foi realmente detetado
           (regra, ML, rede), com os incidentes ligados. Só dados reais; sem correlação disponível
@@ -1518,10 +1520,11 @@
         <button type="button" class="subnav-item" data-tab="attack-timeline">Linha temporal</button>
       </div>
       <section class="panel" id="attack-timeline-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg> Attack Timeline</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg> Linha temporal de ataques</h2>
+        <p class="panel-note window-note" data-window-max="720"></p>
         <p class="panel-note">
           Linha temporal dos ataques lançados (mais antigo primeiro), com o veredito esperado vs real.
-          Usa os filtros do Attack Registry e a janela do seletor de período.
+          Usa os filtros do Registo de ataques e a janela do cabeçalho.
         </p>
         <ol class="atk-timeline" id="atk-timeline">
           <li class="empty-state">A carregar...</li>
@@ -1567,7 +1570,7 @@
     <!-- ===== Network SOC: Live Traffic / Network Detections / PCAP Evidence (Roadmap v2, R6) ===== -->
     <div class="tab-content" id="tab-live-traffic">
       <section class="panel" id="live-traffic-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Live Traffic</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Tráfego em direto</h2>
         <p class="panel-note" id="nst-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="nst-total">—</div></div>
@@ -1600,7 +1603,7 @@
 
     <div class="tab-content" id="tab-network-detections">
       <section class="panel" id="network-detections-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-traffic"/></svg> Network Detections</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-traffic"/></svg> Deteções de rede</h2>
         <p class="panel-note" id="nsd-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Deteções Agora</h3><div class="value" id="nsd-live-count">—</div></div>
@@ -1626,7 +1629,7 @@
     <!-- ===== Detections: vista unificada regra/ML/rede (Roadmap v2, R7) ===== -->
     <div class="tab-content" id="tab-detections">
       <section class="panel" id="detections-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Detections</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Deteções</h2>
         <p class="panel-note" id="det-note">A carregar...</p>
         <div class="filter-row">
           <label for="det-hours-filter">Janela:</label>
@@ -1694,7 +1697,7 @@
         <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
       </div>
       <section class="panel" id="detection-coverage-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trend"/></svg> Detection Coverage</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trend"/></svg> Cobertura de deteção</h2>
         <p class="panel-note" id="met-cov-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Cenários cobertos</h3><div class="value" id="met-cov-scenarios">—</div></div>
@@ -1715,7 +1718,7 @@
         <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
       </div>
       <section class="panel" id="detection-rate-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Detection Rate</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Taxa de deteção</h2>
         <p class="panel-note" id="met-rate-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Ataques lançados</h3><div class="value" id="met-rate-launched">—</div></div>
@@ -1737,7 +1740,7 @@
 
     <div class="tab-content" id="tab-pcap-evidence">
       <section class="panel" id="pcap-evidence-panel">
-        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-flask"/></svg> PCAP / Evidence</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-flask"/></svg> Evidência de rede</h2>
         <p class="panel-note" id="nse-disclaimer">A carregar...</p>
         <div class="filter-row">
           <label for="nse-date-filter">Dia (AAAA-MM-DD):</label>

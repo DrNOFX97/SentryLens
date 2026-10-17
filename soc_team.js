@@ -1,6 +1,6 @@
 // Aba "Equipa SOC" (Tier 1/2/3). Carregado depois de app.js, api.js e state.js (apiRequest, apiErrorMessage, stt*):
 // reutiliza os seus globais (API_BASE, API_KEY, escapeHtml, severityBadge,
-// formatTimestamp, renderPanelError, periodSelect) — não redeclarar nenhum aqui.
+// formatTimestamp, renderPanelError, windowSelect) — não redeclarar nenhum aqui.
 // Só mostra dados reais de /api/soc/*; sem dados, estado vazio.
 
 function stText(id, text) {
@@ -452,12 +452,10 @@ async function loadTierSummary() {
   stText("tier-summary-notice", "A carregar...");
   stShowState(document.getElementById("tier-summary-body"), "loading", "A carregar…", 5);
   try {
-    const days = parseInt(periodSelect.value, 10);
-    const hours = slTierWindowHours(days);
-    const clamped = Number.isFinite(days) && days > 0 && days * 24 > hours;
+    const { hours } = slEffectiveWindow(windowSelect.value, 720); // le=720 no backend
     const data = await apiRequest(`/api/soc/summary-by-tier?hours=${hours}`);
     renderTierSummary(data.by_tier || {});
-    stText("tier-summary-notice", clamped ? `Janela de ${hours} h (máximo desta fonte)` : `Janela de ${hours} h`);
+    stText("tier-summary-notice", slWindowNote(windowSelect.value, 720));
   } catch (err) {
     stLoadFailed(err, "tier-summary-notice", null, "", document.getElementById("tier-summary-body"), 5);
   }

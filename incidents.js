@@ -1,6 +1,6 @@
 // Aba "Incidentes" (Roadmap v2, R3). Carregado depois de app.js e redblue.js:
 // reutiliza os seus globais (API_BASE, API_KEY, escapeHtml, severityBadge,
-// formatTimestamp, renderPanelError, periodSelect) — não redeclarar nenhum
+// formatTimestamp, renderPanelError, windowSelect) — não redeclarar nenhum
 // aqui. Só mostra dados reais de /api/incidents/*; sem dados, estado vazio.
 // Todo o texto dinâmico é escapado pelo htmlT (notas e payloads vêm do analista
 // e do Wazuh).
@@ -64,8 +64,8 @@ function incTableState(kind, text, err) {
 }
 
 function incWindowHours() {
-  // period-select está em dias; o endpoint aceita no máximo 720 h (30 dias).
-  return Math.min(Number(periodSelect.value) * 24, 720);
+  // O endpoint aceita no máximo 720 h (30 dias); a nota da aba diz o recorte.
+  return slEffectiveWindow(windowSelect.value, 720).hours;
 }
 
 function renderIncidentsKpis(summary) {
@@ -288,7 +288,7 @@ async function backfillIncidents() {
   btn.disabled = true;
   incSetText("inc-notice", "A importar alertas do Wazuh…");
   try {
-    const r = await incRequest("POST", "/api/incidents/backfill", { days: Number(periodSelect.value) });
+    const r = await incRequest("POST", "/api/incidents/backfill", { days: slWindowDays(slWindowHours(windowSelect.value)) });
     incSetText("inc-notice",
       `Importados ${r.fetched} alertas: ${r.opened} incidentes abertos, ${r.attached} anexados, ${r.duplicate} já conhecidos, ${r.ignored} abaixo do limiar, ${r.invalid} inválidos.` +
       (r.truncated ? " ⚠️ Atingido o teto de alertas por importação — alguns ficaram de fora." : "") +
@@ -341,7 +341,7 @@ document.getElementById("inc-backfill-btn").addEventListener("click", backfillIn
 document.getElementById("inc-status-filter").addEventListener("change", refreshIncidentsTab);
 document.getElementById("inc-severity-filter").addEventListener("change", refreshIncidentsTab);
 document.getElementById("inc-assigned-filter").addEventListener("change", refreshIncidentsTab);
-periodSelect.addEventListener("change", refreshIncidentsTab);
+windowSelect.addEventListener("change", refreshIncidentsTab);
 
 // W3.2: ciclo de vida pelo router (só carrega com a aba ativa e visível).
 // O id é o data-tab do nav ("incidents").

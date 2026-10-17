@@ -109,7 +109,7 @@ def section_soc_filters() -> None:
     check("nome bloqueado ao editar analista", re.search(r'analyst-name"\)\.disabled\s*=\s*true', soc) is not None)
     check("nome desbloqueado ao abrir", re.search(r'analyst-name"\)\.disabled\s*=\s*false', soc) is not None)
     check("filtro de estado usa slAnalystActiveFilter", "slAnalystActiveFilter(" in soc)
-    check("resumo por tier usa slTierWindowHours", "slTierWindowHours(" in soc)
+    check("resumo por tier usa a janela global (slEffectiveWindow)", "slEffectiveWindow(windowSelect.value, 720)" in soc)
     check("sem active_only forçado a true para Todos", 'active === "" ? "true"' not in soc)
     body = re.search(r"async function loadAnalysts\(\)\s*\{(.*?)\n\}", soc, re.S).group(1)
     check("select de turnos recebe a lista sem filtro Inativos",
@@ -224,6 +224,23 @@ def section_ws_ticket_csp() -> None:
     check("index.html sem javascript: URLs", "javascript:" not in index)
 
 
+def section_language_and_window_w52_w53() -> None:
+    """W5.2: menu e títulos em português. W5.3: um só seletor de janela."""
+    index = read("index.html")
+    nav = index[index.index('<nav class="sidebar"'):index.index("</nav>")]
+    labels = [re.sub(r"<[^>]+>", "", m).strip() for m in re.findall(r'<button class="nav-item[^>]*>(.*?)</button>', nav, re.S)]
+    ingles = {"Detections", "Attack Library", "Live Traffic", "Network Detections", "PCAP / Evidence", "Models", "Evaluation", "Candidates"}
+    check("menu sem rótulos em inglês fora da lista de termos da indústria", not (ingles & set(labels)))
+    titulos = [re.sub(r"<[^>]+>", "", m).strip() for m in re.findall(r"<h2[^>]*>(.*?)</h2>", index, re.S)]
+    check("títulos de painel sem os nomes ingleses antigos", not (ingles | {"Attack Registry", "Attack Timeline", "Detection Coverage", "Detection Rate", "ML Anomalias"}) & set(titulos))
+    check("sem seletor de período separado", "period-select" not in index and "novos painéis" not in index)
+    check("um só seletor de janela, até 90 dias", index.count('<select id="window-select">') == 1 and 'value="2160"' in index)
+    notas = re.findall(r'data-window-max="(\d+)"', index)
+    check("abas dependentes da janela têm nota «A mostrar»", len(notas) >= 9 and set(notas) <= {"168", "720", "2160"})
+    for rel in ("shell.js", "incidents.js", "attack_registry.js", "soc_team.js"):
+        check(f"{rel} não usa periodSelect", "periodSelect" not in read(rel))
+
+
 if __name__ == "__main__":
     section_ws_ticket_csp()
     section_gitignore()
@@ -239,6 +256,7 @@ if __name__ == "__main__":
     section_cleanups()
     section_offline()
     section_nav_w51()
+    section_language_and_window_w52_w53()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

@@ -34,7 +34,7 @@ const ctx = vm.createContext({
   console, setTimeout, clearTimeout, setInterval: () => 0, AbortController, JSON, Promise, URLSearchParams, Date, Math, Number, String, Array, Object,
   document, MutationObserver: class { observe() {} },
   fetch: () => Promise.reject(new TypeError("Failed to fetch")),
-  activateTab() {}, periodSelect: (() => { const e = makeEl(); e.value = "7"; return e; })(),
+  activateTab() {}, windowSelect: (() => { const e = makeEl(); e.value = "168"; return e; })(),
 });
 vm.runInContext(`const API_BASE = "http://x:1"; const API_KEY = "k";
 function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>"&#"+c.charCodeAt(0)+";");}
