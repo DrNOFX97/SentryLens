@@ -840,6 +840,66 @@ table th {
   height: 200px;
 }
 
+.chart-canvas-wrap.chart-tall {
+  height: 300px;
+}
+
+/* Gráfico sem dados: mensagem em vez de um retângulo em branco (D7) */
+.chart-empty {
+  margin: 0;
+  padding: 48px 12px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* Tabela alternativa («Ver dados») sob cada gráfico */
+.chart-data {
+  margin-top: 8px;
+  font-size: var(--fs-xs);
+}
+
+.chart-data summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.chart-data-body {
+  max-height: 220px;
+  overflow: auto;
+  margin-top: 6px;
+}
+
+.chart-data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.chart-data-table th,
+.chart-data-table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: 400;
+}
+
+.chart-data-table thead th {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.chart-data-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-share {
+  margin: 0 0 4px;
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  color: var(--text);
+}
+
 footer {
   text-align: center;
   padding: 20px;

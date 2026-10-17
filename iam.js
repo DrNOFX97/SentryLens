@@ -55,26 +55,37 @@ function applyLifecycleFilters() {
   renderLifecycleEventsTable(filtered);
 }
 
+// Cinco categorias numa paleta categórica (azul, verde-água, rosa, violeta, laranja): as
+// cores de estado (vermelho/amarelo/verde) ficam reservadas para severidade e saúde.
+const IAM_LIFECYCLE_SERIES = [
+  { key: "created", label: "Criadas", token: "--cat-1" },
+  { key: "activated", label: "Ativadas", token: "--cat-3" },
+  { key: "disabled", label: "Desativadas", token: "--cat-5" },
+  { key: "deleted", label: "Eliminadas", token: "--cat-7" },
+  { key: "locked", label: "Bloqueadas", token: "--cat-2" },
+];
+
 function renderLifecycleTimelineChart(timeline) {
   const data = timeline || [];
+  const empty = !slHasAnyValue(IAM_LIFECYCLE_SERIES.map((s) => data.map((t) => t[s.key])));
+  const totals = IAM_LIFECYCLE_SERIES.map((s) => ({ label: s.label, value: fmtNumber(data.reduce((acc, t) => acc + (Number(t[s.key]) || 0), 0)) }));
   renderChart("chart-lifecycle-timeline", {
-    type: "line",
+    type: "bar",
     data: {
       labels: data.map((t) => t.date),
-      datasets: [
-        { label: "Criadas", data: data.map((t) => t.created), borderColor: chartColor("--cat-1"), backgroundColor: chartColor("--cat-1", 0.08), fill: false, tension: 0.25 },
-        { label: "Ativadas", data: data.map((t) => t.activated), borderColor: chartColor("--cat-3"), backgroundColor: chartColor("--cat-3", 0.08), fill: false, tension: 0.25 },
-        { label: "Desativadas", data: data.map((t) => t.disabled), borderColor: chartColor("--cat-4"), backgroundColor: chartColor("--cat-4", 0.08), fill: false, tension: 0.25 },
-        { label: "Eliminadas", data: data.map((t) => t.deleted), borderColor: chartColor("--cat-8"), backgroundColor: chartColor("--cat-8", 0.08), fill: false, tension: 0.25 },
-        { label: "Bloqueadas", data: data.map((t) => t.locked), borderColor: chartColor("--cat-7"), backgroundColor: chartColor("--cat-7", 0.08), fill: false, tension: 0.25 },
-      ],
+      datasets: IAM_LIFECYCLE_SERIES.map((s) => ({ label: s.label, data: data.map((t) => t[s.key]), backgroundColor: chartColor(s.token), maxBarThickness: 28 })),
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+      scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
     },
+  }, {
+    title: empty ? "Ciclo de vida de contas: sem dados nesta janela" : slChartAriaLabel("Ciclo de vida de contas, totais da janela", totals),
+    empty,
+    columns: ["Dia", ...IAM_LIFECYCLE_SERIES.map((s) => s.label)],
+    rows: data.map((t) => [t.date, ...IAM_LIFECYCLE_SERIES.map((s) => fmtNumber(t[s.key]))]),
   });
 }
 
@@ -150,20 +161,25 @@ function renderCriticalAdditionsBlock(additions) {
 }
 
 function renderPrivilegesGroupsChart(groupRanking) {
-  const sorted = [...(groupRanking || [])].sort((a, b) => b.count - a.count).slice(0, 10);
+  const rows = [...(groupRanking || [])]
+    .filter((g) => Number(g.count) > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+    .map((g) => ({ label: g.group, value: Number(g.count) }));
 
   renderChart("chart-privileges-groups", {
     type: "bar",
     data: {
-      labels: sorted.map((g) => g.group),
-      datasets: [{ label: "Movimentações", data: sorted.map((g) => g.count), backgroundColor: chartColor("--accent") }],
+      labels: rows.map((r) => r.label),
+      datasets: [{ label: "Movimentações", data: rows.map((r) => r.value), backgroundColor: chartColor("--accent"), maxBarThickness: 18 }],
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
-    },
+    options: chartHBarOptions(rows.map((r) => r.label)),
+    plugins: [chartValueLabels],
+  }, {
+    title: rows.length ? slChartAriaLabel("Grupos mais movimentados", rows.map((r) => ({ label: r.label, value: fmtNumber(r.value) }))) : "Grupos mais movimentados: sem dados nesta janela",
+    empty: rows.length === 0,
+    columns: ["Grupo", "Movimentações"],
+    rows: rows.map((r) => [r.label, fmtNumber(r.value)]),
   });
 }
 
@@ -187,22 +203,20 @@ async function loadPrivilegesPanel(days) {
 
 // --- Painel: Contas Privilegiadas (tab-admin-activity) ---
 
-function renderAdminEventComparisonChart(eventCounts) {
-  const admin = eventCounts?.admin ?? 0;
-  const normal = eventCounts?.normal ?? 0;
-
-  renderChart("chart-admin-event-comparison", {
-    type: "doughnut",
-    data: {
-      labels: ["Administrativos", "Normais"],
-      datasets: [{ data: [admin, normal], backgroundColor: [chartColor("--cat-7"), chartColor("--cat-1")], borderWidth: 0 }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
-    },
-  });
+// Dois números não pedem um gráfico: um KPI com a parte e o total.
+function renderAdminShare(eventCounts) {
+  const admin = Number(eventCounts?.admin);
+  const normal = Number(eventCounts?.normal);
+  const valueEl = document.getElementById("admin-share-value");
+  const detailEl = document.getElementById("admin-share-detail");
+  const total = (Number.isFinite(admin) ? admin : 0) + (Number.isFinite(normal) ? normal : 0);
+  if (!Number.isFinite(admin) || !Number.isFinite(normal) || total === 0) {
+    valueEl.textContent = FMT_EMPTY;
+    detailEl.textContent = "Sem dados nesta janela";
+    return;
+  }
+  valueEl.textContent = fmtPct((admin / total) * 100, { decimals: 0 });
+  detailEl.textContent = `${fmtNumber(admin)} de ${fmtNumber(total)} eventos são de contas administrativas`;
 }
 
 // Procura o timestamp mais recente entre scheduled_tasks/processes cujo user
@@ -263,7 +277,7 @@ async function loadAdminActivityPanel(days) {
     const data = await fetchJSON(`/api/admin-activity?days=${days}`);
     renderPanelError("#admin-activity-panel", null);
 
-    renderAdminEventComparisonChart(data.event_counts || {});
+    renderAdminShare(data.event_counts || {});
     renderAdminAccountsTable(
       data.admin_accounts || [],
       data.special_privileges_by_user || {},

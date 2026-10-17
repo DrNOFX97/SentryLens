@@ -241,6 +241,35 @@ def section_language_and_window_w52_w53() -> None:
         check(f"{rel} não usa periodSelect", "periodSelect" not in read(rel))
 
 
+def section_charts_w6() -> None:
+    """W6.3 (D7): todo gráfico passa por renderChart com estado vazio, aria-label e tabela alternativa."""
+    base = read("overview-alerts.js")
+    check("renderChart escreve aria-label e role=img", 'setAttribute("aria-label"' in base and 'setAttribute("role", "img")' in base)
+    check("renderChart tem a mensagem de estado vazio", 'CHART_EMPTY_TEXT = "Sem dados nesta janela"' in base)
+    check("renderChart cria a tabela «Ver dados»", "Ver dados" in base and "chart-data-table" in base)
+    check("Chart.js em pt-PT", 'Chart.defaults.locale = "pt-PT"' in base)
+    canvases = re.findall(r'<canvas id="([^"]+)"', read("index.html"))
+    chamadas: dict[str, str] = {}
+    for rel in ("overview-alerts.js", "iam.js", "system.js"):
+        txt = read(rel)
+        for cid in canvases:
+            m = re.search(r'renderChart\("' + re.escape(cid) + r'"(.*?)(?=\n(?:async )?function |\nconst |\Z)', txt, re.S)
+            if m:
+                chamadas[cid] = m.group(0)
+    for cid in canvases:
+        if cid not in chamadas:
+            check(f"canvas {cid} é desenhado por renderChart", False)
+            continue
+        corpo = chamadas[cid]
+        check(f"{cid}: meta com title, empty, columns e rows",
+              all(k in corpo for k in ("title", "empty", "columns:", "rows:")))
+    for rel in ("overview-alerts.js", "iam.js", "system.js"):
+        txt = read(rel)
+        check(f"{rel}: sem curvas inventadas (tension > 0)", re.search(r"tension:\s*0\.[1-9]", txt) is None)
+        check(f"{rel}: sem donut", 'type: "doughnut"' not in txt)
+    check("sem canvas do donut de admin", "chart-admin-event-comparison" not in read("index.html"))
+
+
 if __name__ == "__main__":
     section_ws_ticket_csp()
     section_gitignore()
@@ -257,6 +286,7 @@ if __name__ == "__main__":
     section_offline()
     section_nav_w51()
     section_language_and_window_w52_w53()
+    section_charts_w6()
     if failures:
         print(f"\n{len(failures)} falha(s).")
         sys.exit(1)

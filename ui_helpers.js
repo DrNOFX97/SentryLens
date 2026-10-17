@@ -134,6 +134,106 @@ function slWindowNote(selected, maxHours) {
   return `A mostrar: ${slWindowLabel(w.hours)}${w.clamped ? " (máximo desta fonte)" : ""}`;
 }
 
+// --- Dados dos gráficos (W6) ---
+// Tudo puro: o desenho (Chart.js, DOM) fica em overview-alerts.js (renderChart).
+
+// Granularidade dos baldes de um gráfico de alertas ao longo do tempo.
+function slBucketGranularity(hours) {
+  const h = slWindowHours(hours);
+  if (h <= 1) return "5min";
+  if (h <= 6) return "30min";
+  if (h <= 48) return "hour";
+  return "day";
+}
+
+function slBucketFloor(date, gran) {
+  const d = new Date(date.getTime());
+  if (gran === "day") d.setHours(0, 0, 0, 0);
+  else if (gran === "hour") d.setMinutes(0, 0, 0);
+  else {
+    const step = gran === "5min" ? 5 : 30;
+    d.setMinutes(Math.floor(d.getMinutes() / step) * step, 0, 0);
+  }
+  return d;
+}
+
+function slBucketNext(date, gran) {
+  const d = new Date(date.getTime());
+  if (gran === "day") d.setDate(d.getDate() + 1);
+  else d.setTime(d.getTime() + (gran === "hour" ? 3600000 : gran === "5min" ? 300000 : 1800000));
+  return d;
+}
+
+function slPad2(n) {
+  return n < 10 ? "0" + n : String(n);
+}
+
+function slBucketLabel(date, gran, hours) {
+  const dia = `${slPad2(date.getDate())}/${slPad2(date.getMonth() + 1)}`;
+  if (gran === "day") return dia;
+  const hora = slPad2(date.getHours());
+  if (gran === "hour") return hours <= 24 ? `${hora} h` : `${dia} ${hora} h`;
+  return `${hora}:${slPad2(date.getMinutes())}`;
+}
+
+// Baldes CONTÍNUOS da janela [agora - horas, agora]: uma hora (ou dia) sem
+// alertas vale 0 em vez de desaparecer, para o ritmo não ficar deformado.
+// Devolve [{ startMs, label, count }]; timestamps inválidos ou fora da janela são ignorados.
+function slBucketSeries(timestamps, hours, nowMs) {
+  const h = slWindowHours(hours);
+  const gran = slBucketGranularity(h);
+  const buckets = [];
+  const index = new Map();
+  for (let d = slBucketFloor(new Date(nowMs - h * 3600000), gran); d.getTime() <= nowMs; d = slBucketNext(d, gran)) {
+    index.set(d.getTime(), buckets.length);
+    buckets.push({ startMs: d.getTime(), label: slBucketLabel(d, gran, h), count: 0 });
+  }
+  (Array.isArray(timestamps) ? timestamps : []).forEach((ts) => {
+    const d = slParseDate(ts);
+    if (!d) return;
+    const i = index.get(slBucketFloor(d, gran).getTime());
+    if (i !== undefined) buckets[i].count += 1;
+  });
+  return buckets;
+}
+
+// Severidades na ordem fixa Crítico -> Info, com zeros (uma barra vazia é uma contagem real).
+function slSeverityBars(bySeverity) {
+  const order = [["critical", "Crítico"], ["high", "Alto"], ["medium", "Médio"], ["low", "Baixo"], ["info", "Info"]];
+  const rows = order.map(([key, label]) => ({ key, label, value: Number(bySeverity && bySeverity[key]) || 0 }));
+  return { rows, total: rows.reduce((acc, r) => acc + r.value, 0) };
+}
+
+// «4625 · Logon falhado», ordenado por contagem e limitado a `limit` (10 por omissão).
+function slEventBars(topEvents, limit) {
+  const max = Number.isInteger(limit) && limit > 0 ? limit : 10;
+  return (Array.isArray(topEvents) ? topEvents : [])
+    .filter((e) => e && Number(e.count) > 0)
+    .map((e) => ({ label: e.name ? `${e.event_id} · ${e.name}` : String(e.event_id), value: Number(e.count) }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, max);
+}
+
+// Texto longo cortado com reticências (rótulos de eixo); o tooltip mostra o completo.
+function slTruncate(text, max) {
+  const t = String(text === null || text === undefined ? "" : text);
+  return t.length <= max ? t : t.slice(0, Math.max(1, max - 1)) + "…";
+}
+
+// true se alguma série tem algum valor numérico > 0 (para o estado vazio).
+function slHasAnyValue(seriesList) {
+  return (Array.isArray(seriesList) ? seriesList : []).some((serie) =>
+    (Array.isArray(serie) ? serie : []).some((v) => Number(v) > 0));
+}
+
+// aria-label de um gráfico: título + os primeiros pontos, nunca a imagem sozinha.
+function slChartAriaLabel(title, rows) {
+  const pts = Array.isArray(rows) ? rows : [];
+  if (pts.length === 0) return `${title}: sem dados nesta janela`;
+  const lista = pts.slice(0, 6).map((r) => `${r.label} ${r.value}`).join(", ");
+  return `${title}: ${lista}${pts.length > 6 ? ` e mais ${pts.length - 6}` : ""}`;
+}
+
 // Valor de um token CSS (custom property). `style` é um CSSStyleDeclaration
 // (getComputedStyle(document.documentElement)) ou qualquer objeto com
 // getPropertyValue; devolve "" se o token não existir. Puro: o DOM fica com o chamador.

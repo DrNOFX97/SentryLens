@@ -209,11 +209,11 @@
           </div>
           <div class="chart-card">
             <h3>Distribuição por severidade</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-severity-donut"></canvas></div>
+            <div class="chart-canvas-wrap"><canvas id="chart-severity-bars"></canvas></div>
           </div>
           <div class="chart-card">
-            <h3>Top Event IDs</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-top-events"></canvas></div>
+            <h3>Eventos mais frequentes</h3>
+            <div class="chart-canvas-wrap chart-tall"><canvas id="chart-top-events"></canvas></div>
           </div>
         </div>
       </section>
@@ -479,7 +479,7 @@
 
         <div class="chart-card">
           <h3>Grupos mais movimentados</h3>
-          <div class="chart-canvas-wrap"><canvas id="chart-privileges-groups"></canvas></div>
+          <div class="chart-canvas-wrap chart-tall"><canvas id="chart-privileges-groups"></canvas></div>
         </div>
 
         <h3 class="system-alerts-title" style="margin-top: 25px;">Desvios ao Baseline</h3>
@@ -514,9 +514,10 @@
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-user"/></svg> Contas Admin</h2>
         <p class="panel-note window-note" data-window-max="2160"></p>
 
-        <div class="chart-card">
-          <h3>Eventos administrativos vs. normais</h3>
-          <div class="chart-canvas-wrap"><canvas id="chart-admin-event-comparison"></canvas></div>
+        <div class="chart-card" id="admin-share-card">
+          <h3>Peso das contas administrativas nos eventos</h3>
+          <p class="admin-share" id="admin-share-value">—</p>
+          <p class="panel-note" id="admin-share-detail">Sem dados nesta janela</p>
         </div>
 
         <h3 class="system-alerts-title" style="margin-top: 25px;">Contas Administrativas</h3>

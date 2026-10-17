@@ -275,7 +275,7 @@ async function loadSystemPanel() {
     }
 
     renderViolationsHistory(historyData.history || []);
-    renderSystemUsageChart(usageHistoryData.history || []);
+    renderSystemUsageChart(usageHistoryData.history || [], await sysLoadThresholds());
     renderSystemSummaryCard({
       cpuPct,
       cpuLvl,
@@ -320,27 +320,107 @@ document.getElementById("speedtest-btn").addEventListener("click", forceSpeedtes
 // buffer em memória no backend (~1h a 30s/amostra) alimentado pelo loop de
 // background — persiste entre recargas da página e é partilhado por
 // qualquer separador que abra o dashboard.
-function renderSystemUsageChart(history) {
-  const diskLabel = history.length && history[history.length - 1].disk_mountpoint
-    ? `Disco ${history[history.length - 1].disk_mountpoint} %`
-    : "Disco %";
+// Limiares de aviso/crítico: fonte única no backend (/api/system/thresholds).
+// Em caso de erro devolve {} e tenta de novo no próximo refresh; o gráfico fica sem linhas de referência.
+let sysThresholdsCache = null;
+async function sysLoadThresholds() {
+  if (sysThresholdsCache) return sysThresholdsCache;
+  try {
+    sysThresholdsCache = await apiRequest("/api/system/thresholds");
+    return sysThresholdsCache;
+  } catch (err) {
+    console.error(err);
+    return {};
+  }
+}
+
+// Linhas tracejadas nos limiares de cada série e o nome da série escrito no fim da linha.
+const sysUsagePlugin = {
+  id: "sysUsagePlugin",
+  afterDatasetsDraw(chart, args, opts) {
+    const ctx = chart.ctx;
+    const area = chart.chartArea;
+    const y = chart.scales.y;
+    ctx.save();
+    ctx.font = `600 11px ${Chart.defaults.font.family}`;
+    ctx.textBaseline = "middle";
+    chart.data.datasets.forEach((ds, i) => {
+      const th = (opts.thresholds || {})[ds.metric];
+      if (th) {
+        [["warning", 0.4], ["critical", 0.85]].forEach(([level, alpha]) => {
+          if (!Number.isFinite(th[level])) return;
+          const py = y.getPixelForValue(th[level]);
+          ctx.setLineDash([4, 4]);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = tokenColor(ds.token, alpha);
+          ctx.beginPath();
+          ctx.moveTo(area.left, py);
+          ctx.lineTo(area.right, py);
+          ctx.stroke();
+        });
+        ctx.setLineDash([]);
+      }
+      const pts = chart.getDatasetMeta(i).data;
+      const last = pts[pts.length - 1];
+      if (last) {
+        ctx.fillStyle = tokenColor(ds.token);
+        ctx.fillText(ds.label, area.right + 6, last.y);
+      }
+    });
+    ctx.restore();
+  },
+};
+
+const SYS_USAGE_SERIES = [
+  { metric: "cpu", token: "--cat-1", field: "cpu_percent", label: "CPU" },
+  { metric: "ram", token: "--cat-7", field: "ram_percent", label: "RAM" },
+  { metric: "disk", token: "--cat-3", field: "disk_percent", label: "Disco" },
+];
+
+function renderSystemUsageChart(history, thresholds) {
+  const diskMount = history.length && history[history.length - 1].disk_mountpoint ? history[history.length - 1].disk_mountpoint : "";
+  const times = history.map((s) => new Date(s.timestamp).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }));
+  const series = SYS_USAGE_SERIES.map((d) => ({ ...d, label: d.metric === "disk" && diskMount ? `Disco ${diskMount}` : d.label }));
+  const last = history[history.length - 1] || {};
 
   renderChart("chart-system-usage", {
     type: "line",
     data: {
-      labels: history.map((s) => new Date(s.timestamp).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })),
-      datasets: [
-        { label: "CPU %", data: history.map((s) => s.cpu_percent), borderColor: chartColor("--cat-1"), backgroundColor: chartColor("--cat-1", 0.08), fill: true, tension: 0.3 },
-        { label: "RAM %", data: history.map((s) => s.ram_percent), borderColor: chartColor("--cat-7"), backgroundColor: chartColor("--cat-7", 0.08), fill: true, tension: 0.3 },
-        { label: diskLabel, data: history.map((s) => s.disk_percent), borderColor: chartColor("--cat-3"), backgroundColor: chartColor("--cat-3", 0.08), fill: true, tension: 0.3 },
-      ],
+      labels: times,
+      datasets: series.map((d) => ({
+        label: d.label,
+        metric: d.metric,
+        token: d.token,
+        data: history.map((s) => s[d.field]),
+        borderColor: chartColor(d.token),
+        backgroundColor: chartColor(d.token),
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        tension: 0,
+        fill: false,
+      })),
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
-      scales: { y: { beginAtZero: true, max: 100 } },
+      layout: { padding: { right: 78 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { mode: "index", intersect: false, callbacks: { label: (item) => `${item.dataset.label}: ${fmtPct(item.raw, { decimals: 0 })}` } },
+        sysUsagePlugin: { thresholds: thresholds || {} },
+      },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true, max: 100, ticks: { callback: (v) => `${v}%` } } },
+      interaction: { mode: "index", intersect: false },
     },
+    plugins: [sysUsagePlugin],
+  }, {
+    title: history.length
+      ? slChartAriaLabel("Uso do sistema, última amostra", series.map((d) => ({ label: d.label, value: fmtPct(last[d.field], { decimals: 0 }) })))
+      : "Uso do sistema: sem dados nesta janela",
+    empty: history.length === 0,
+    columns: ["Hora", ...series.map((d) => d.label)],
+    rows: history.map((s, i) => [times[i], ...series.map((d) => fmtPct(s[d.field], { decimals: 0 }))]),
   });
 }
 
