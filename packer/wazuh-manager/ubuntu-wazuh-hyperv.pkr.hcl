@@ -59,6 +59,14 @@ variable "ssh_password" {
   # (ver packer/.env.example), nunca uma password fixa no repositório.
 }
 
+variable "lab_network_cidr" {
+  type    = string
+  default = ""
+  # CIDR da rede do laboratório (ex.: a sub-rede do host na bridge) a partir
+  # da qual as APIs do Manager (55000) e do Indexer (9200) ficam acessíveis.
+  # Vazio = portas fechadas (fail-closed); ver 03-configure-network.sh.
+}
+
 variable "switch_name" {
   type    = string
   default = "Lab-Wazuh"
@@ -148,6 +156,7 @@ build {
     env_vars = [
       "SSH_USERNAME=${var.ssh_username}",
       "SSH_PASSWORD=${var.ssh_password}",
+      "LAB_NETWORK_CIDR=${var.lab_network_cidr}",
     ]
   }
 

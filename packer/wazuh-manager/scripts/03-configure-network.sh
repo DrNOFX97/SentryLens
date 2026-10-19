@@ -67,12 +67,27 @@ ufw default allow outgoing
 # Allow SSH
 ufw allow 22/tcp comment 'SSH'
 
-# Allow Wazuh ports
+# Allow Wazuh ports: a porta de registo/logs de agentes (1514/1515) fica
+# aberta a toda a rede, porque recebe agentes Windows por IP variável. As
+# duas APIs administrativas (55000 Manager, 9200 Indexer: leitura de todos
+# os alertas e logs) ficam restritas a LAB_NETWORK_CIDR quando definida —
+# falham fail-closed (nem abrem) se não estiver, em vez de ficarem
+# acessíveis a toda a rede bridged por omissão.
 ufw allow 1514/tcp comment 'Wazuh Agent Logs'
 ufw allow 1515/tcp comment 'Wazuh Agent Registration'
-ufw allow 55000/tcp comment 'Wazuh Manager API'
-ufw allow 9200/tcp comment 'Wazuh Indexer API'
 ufw allow 443/tcp comment 'Wazuh Dashboard'
+
+if [ -n "${LAB_NETWORK_CIDR:-}" ]; then
+    ufw allow from "${LAB_NETWORK_CIDR}" to any port 55000 proto tcp comment 'Wazuh Manager API (lab only)'
+    ufw allow from "${LAB_NETWORK_CIDR}" to any port 9200 proto tcp comment 'Wazuh Indexer API (lab only)'
+    ok "Manager/Indexer API restritas a ${LAB_NETWORK_CIDR}"
+else
+    warn "LAB_NETWORK_CIDR não definida: portas 55000/9200 ficam FECHADAS (fail-closed)."
+    warn "Define LAB_NETWORK_CIDR (ex.: a sub-rede do host) e corre"
+    warn "  ufw allow from <cidr> to any port 55000 proto tcp"
+    warn "  ufw allow from <cidr> to any port 9200 proto tcp"
+    warn "manualmente para o backend (scripts/main.py) conseguir chegar-lhes."
+fi
 
 # Allow tshark/tcpdump for network monitoring
 # (no specific ports needed - raw socket capture)

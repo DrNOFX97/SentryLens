@@ -135,7 +135,8 @@ if (-not $OnlyKali -and -not $SkipVirtualBox) {
     Write-Step "Building Wazuh Manager (VirtualBox)..."
     try {
         $wazuhPassword = Get-RequiredEnv "SENTRYLENS_WAZUH_SSH_PASSWORD"
-        $result = packer build @packerArgs @("-var", "ssh_password=$wazuhPassword") @("-only=wazuh-manager-virtualbox", "$wazuhDir\ubuntu-wazuh-virtualbox.pkr.hcl")
+        $labCidr = [System.Environment]::GetEnvironmentVariable("SENTRYLENS_LAB_NETWORK_CIDR", "Process")
+        $result = packer build @packerArgs @("-var", "ssh_password=$wazuhPassword", "-var", "lab_network_cidr=$labCidr") @("-only=wazuh-manager-virtualbox", "$wazuhDir\ubuntu-wazuh-virtualbox.pkr.hcl")
         $results["wazuh-virtualbox"] = "SUCCESS"
         Write-Ok "Wazuh Manager VirtualBox build completed"
     } catch {
@@ -149,7 +150,8 @@ if (-not $OnlyKali -and -not $SkipHyperV) {
     Write-Step "Building Wazuh Manager (Hyper-V)..."
     try {
         $wazuhPassword = Get-RequiredEnv "SENTRYLENS_WAZUH_SSH_PASSWORD"
-        $result = packer build @packerArgs @("-var", "ssh_password=$wazuhPassword") @("-only=wazuh-manager-hyperv", "$wazuhDir\ubuntu-wazuh-hyperv.pkr.hcl")
+        $labCidr = [System.Environment]::GetEnvironmentVariable("SENTRYLENS_LAB_NETWORK_CIDR", "Process")
+        $result = packer build @packerArgs @("-var", "ssh_password=$wazuhPassword", "-var", "lab_network_cidr=$labCidr") @("-only=wazuh-manager-hyperv", "$wazuhDir\ubuntu-wazuh-hyperv.pkr.hcl")
         $results["wazuh-hyperv"] = "SUCCESS"
         Write-Ok "Wazuh Manager Hyper-V build completed"
     } catch {
