@@ -150,16 +150,28 @@ function applyChartTheme() {
   Chart.defaults.borderColor = cssToken("--border");
 }
 applyChartTheme();
+// O Chart.js grava as cores resolvidas (grelha, rótulos) no `config.options` que recebe, e um
+// update() não as volta a ler dos defaults. Por isso cada gráfico nasce de um clone e o
+// original fica intacto em chartConfigs: ao mudar de tema recria-se a partir dele.
+// Clona objetos e arrays simples; funções (callbacks) e valores simples ficam por referência.
+function chartClone(v) {
+  if (Array.isArray(v)) return v.map(chartClone);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, chartClone(x)]));
+  return v;
+}
 function refreshChartsTheme() {
   applyChartTheme();
-  Object.values(charts).forEach((c) => {
-    c.update("none");
+  Object.keys(charts).forEach((canvasId) => {
+    const canvas = charts[canvasId].canvas;
+    charts[canvasId].destroy();
+    charts[canvasId] = new Chart(canvas.getContext("2d"), chartClone(chartConfigs[canvasId]));
   });
 }
 window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", refreshChartsTheme);
 new MutationObserver(refreshChartsTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 const charts = {};
+const chartConfigs = {};
 const CHART_EMPTY_TEXT = "Sem dados nesta janela";
 
 Chart.defaults.locale = "pt-PT";
@@ -211,16 +223,19 @@ function renderChart(canvasId, config, meta) {
     if (charts[canvasId]) {
       charts[canvasId].destroy();
       delete charts[canvasId];
+      delete chartConfigs[canvasId];
     }
     return;
   }
+  chartConfigs[canvasId] = config;
   if (charts[canvasId]) {
-    charts[canvasId].data = config.data;
-    charts[canvasId].options = config.options;
+    const live = chartClone(config);
+    charts[canvasId].data = live.data;
+    charts[canvasId].options = live.options;
     charts[canvasId].update("none"); // sem animação: um refresh não deve "piscar" os gráficos
     return;
   }
-  charts[canvasId] = new Chart(canvas.getContext("2d"), config);
+  charts[canvasId] = new Chart(canvas.getContext("2d"), chartClone(config));
 }
 
 // Valor escrito no fim de cada barra horizontal (rótulo direto, sem biblioteca extra).

@@ -609,6 +609,8 @@ table th {
   font-weight: 600;
 }
 
+li.empty-state { list-style: none; }
+
 .empty-state {
   color: var(--text-muted);
   text-align: center;
@@ -818,7 +820,7 @@ table th {
 
 .charts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
   gap: 12px;
 }
 
