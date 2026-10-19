@@ -53,8 +53,10 @@ variable "ssh_username" {
 }
 
 variable "ssh_password" {
-  type    = string
-  default = "sentrylens"
+  type      = string
+  sensitive = true
+  # Sem default de propósito: tem de vir de -var ou de PKR_VAR_ssh_password
+  # (ver packer/.env.example), nunca uma password fixa no repositório.
 }
 
 variable "switch_name" {
@@ -78,9 +80,15 @@ source "hyperv-iso" "wazuh_manager" {
   switch_name           = var.switch_name
   iso_urls              = ["https://releases.ubuntu.com/jammy/ubuntu-${var.ubuntu_version}-live-server-amd64.iso"]
   iso_checksum          = "sha256:ae5a8e5c5ae0c7b5f5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c"
-  http_directory        = "http"
-  http_port_min         = 8080
-  http_port_max         = 8100
+  http_content = {
+    "/user-data" = templatefile("${path.root}/http/user-data.pkrtpl.hcl", {
+      ssh_username = var.ssh_username
+      ssh_password = var.ssh_password
+    })
+    "/meta-data" = ""
+  }
+  http_port_min = 8080
+  http_port_max = 8100
   boot_wait             = "10s"
   boot_command          = [
     "<enter><wait>",

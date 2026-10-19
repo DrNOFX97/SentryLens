@@ -14,14 +14,22 @@ autoinstall:
   apt:
     geoip: true
     preserve_sources_list: false
+    primary:
+      - arches: [amd64]
+        uri: http://archive.ubuntu.com/ubuntu
+    security:
+      - arches: [amd64]
+        uri: http://security.ubuntu.com/ubuntu
   storage:
     layout:
       name: lvm
   identity:
-    hostname: sentrylens-kali
-    username: kali
-    password: "$6$rounds=4096$kali$W8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8"
-    realname: "Kali User"
+    hostname: sentrylens-wazuh
+    username: ${ssh_username}
+    # Conta bloqueada (sem password válida) até ao late-command abaixo a definir
+    # a partir de SENTRYLENS_WAZUH_SSH_PASSWORD (packer/.env, nunca commitada).
+    password: "*"
+    realname: "SentryLens User"
   ssh:
     allow-pw: true
     install-server: true
@@ -35,35 +43,12 @@ autoinstall:
     - ca-certificates
     - python3
     - python3-pip
-    - python3-venv
     - virtualbox-guest-utils
     - virtualbox-guest-dkms
-    - linux-headers-$(uname -r)
-    - nmap
-    - hydra
-    - john
-    - hashcat
-    - sqlmap
-    - metasploit-framework
-    - crackmapexec
-    - impacket-scripts
-    - bloodhound
-    - neo4j
-    - gobuster
-    - dirb
-    - nikto
-    - wpscan
-    - enum4linux
-    - smbclient
-    - rpcclient
-    - ldap-utils
-    - kerberos-user
-    - proxychains4
-    - torsocks
-    - sshpass
   late-commands:
-    - echo 'kali ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/kali
-    - chmod 440 /target/etc/sudoers.d/kali
+    - curtin in-target --target=/target -- bash -c "echo '${ssh_username}:${ssh_password}' | chpasswd"
+    - echo '${ssh_username} ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/${ssh_username}
+    - chmod 440 /target/etc/sudoers.d/${ssh_username}
     - curtin in-target --target=/target -- systemctl enable ssh
     - curtin in-target --target=/target -- systemctl enable vboxadd-service
     - curtin in-target --target=/target -- systemctl enable vboxadd

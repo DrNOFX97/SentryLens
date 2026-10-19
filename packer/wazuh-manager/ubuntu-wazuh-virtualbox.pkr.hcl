@@ -53,8 +53,10 @@ variable "ssh_username" {
 }
 
 variable "ssh_password" {
-  type    = string
-  default = "sentrylens"
+  type      = string
+  sensitive = true
+  # Sem default de propósito: tem de vir de -var ou de PKR_VAR_ssh_password
+  # (ver packer/.env.example), nunca uma password fixa no repositório.
 }
 
 variable "vboxmanage_path" {
@@ -95,9 +97,15 @@ source "virtualbox-iso" "wazuh_manager" {
   ]
   iso_checksum = "sha256:ae5a8e5c5ae0c7b5f5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c"
 
-  http_directory = "http"
-  http_port_min  = 8080
-  http_port_max  = 8100
+  http_content = {
+    "/user-data" = templatefile("${path.root}/http/user-data.pkrtpl.hcl", {
+      ssh_username = var.ssh_username
+      ssh_password = var.ssh_password
+    })
+    "/meta-data" = ""
+  }
+  http_port_min = 8080
+  http_port_max = 8100
 
   ssh_username     = var.ssh_username
   ssh_password     = var.ssh_password

@@ -142,6 +142,9 @@ To attack real targets, use `--allow-any-target` or configure `/opt/sentrylens/c
 - **VirtualBox** 7.0+ (for VirtualBox builds)
 - **Hyper-V** on Windows 10/11 Pro/Enterprise (for Hyper-V builds)
 - Hardware virtualization enabled in BIOS/UEFI
+- `packer/.env` com as passwords das contas das VMs — copiar de `.env.example`
+  (gitignored; `build-all.ps1` lê-lo e passa cada password ao packer por
+  `-var`, nunca um default fixo no `.pkr.hcl`)
 
 ### Build Commands
 

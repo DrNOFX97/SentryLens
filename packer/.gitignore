@@ -17,3 +17,6 @@ packer_cache/
 
 # Vagrant
 .vagrant/
+
+# Passwords das VMs (ver .env.example)
+.env

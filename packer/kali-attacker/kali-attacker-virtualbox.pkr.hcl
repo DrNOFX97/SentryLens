@@ -48,8 +48,10 @@ variable "ssh_username" {
 }
 
 variable "ssh_password" {
-  type    = string
-  default = "kali"
+  type      = string
+  sensitive = true
+  # Sem default de propósito: tem de vir de -var ou de PKR_VAR_ssh_password
+  # (ver packer/.env.example), nunca uma password fixa no repositório.
 }
 
 locals {
@@ -85,9 +87,15 @@ source "virtualbox-iso" "kali_attacker" {
   ]
   iso_checksum = "sha256:TODO_UPDATE_WITH_ACTUAL_CHECKSUM"
 
-  http_directory = "http"
-  http_port_min  = 8080
-  http_port_max  = 8100
+  http_content = {
+    "/user-data" = templatefile("${path.root}/http/user-data.pkrtpl.hcl", {
+      ssh_username = var.ssh_username
+      ssh_password = var.ssh_password
+    })
+    "/meta-data" = ""
+  }
+  http_port_min = 8080
+  http_port_max = 8100
 
   ssh_username     = var.ssh_username
   ssh_password     = var.ssh_password

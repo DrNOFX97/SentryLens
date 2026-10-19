@@ -54,6 +54,33 @@ function Write-Ok   { param([string]$Message) Write-Host "OK  $Message" -Foregro
 function Write-Warn { param([string]$Message) Write-Host "!!  $Message" -ForegroundColor Yellow }
 function Write-Err  { param([string]$Message) Write-Host "XX  $Message" -ForegroundColor Red }
 
+# Carrega packer/.env (gitignored) para o ambiente do processo: é dele que
+# vêm as passwords das VMs (SENTRYLENS_WAZUH_SSH_PASSWORD,
+# SENTRYLENS_KALI_SSH_PASSWORD). Nunca há default no .pkr.hcl de propósito;
+# sem .env, o packer falha com "ssh_password is required", não com uma
+# password previsível. Ver packer/.env.example.
+$envFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ".env"
+if (Test-Path $envFile) {
+    Write-Step "A carregar packer/.env..."
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$' -and -not $_.TrimStart().StartsWith('#')) {
+            [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process")
+        }
+    }
+} else {
+    Write-Warn "packer/.env não existe (copia packer/.env.example); as passwords das VMs têm de vir de lá."
+}
+
+function Get-RequiredEnv {
+    param([string]$Name)
+    $value = [System.Environment]::GetEnvironmentVariable($Name, "Process")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        Write-Err "Variável $Name não definida em packer/.env."
+        exit 1
+    }
+    return $value
+}
+
 # Check for Packer
 Write-Step "Checking for Packer..."
 $packerPath = Get-Command packer -ErrorAction SilentlyContinue
@@ -107,7 +134,8 @@ $results = @{}
 if (-not $OnlyKali -and -not $SkipVirtualBox) {
     Write-Step "Building Wazuh Manager (VirtualBox)..."
     try {
-        $result = packer build @packerArgs @("-only=wazuh-manager-virtualbox", "$wazuhDir\ubuntu-wazuh-virtualbox.pkr.hcl")
+        $wazuhPassword = Get-RequiredEnv "SENTRYLENS_WAZUH_SSH_PASSWORD"
+        $result = packer build @packerArgs @("-var", "ssh_password=$wazuhPassword") @("-only=wazuh-manager-virtualbox", "$wazuhDir\ubuntu-wazuh-virtualbox.pkr.hcl")
         $results["wazuh-virtualbox"] = "SUCCESS"
         Write-Ok "Wazuh Manager VirtualBox build completed"
     } catch {
@@ -120,7 +148,8 @@ if (-not $OnlyKali -and -not $SkipVirtualBox) {
 if (-not $OnlyKali -and -not $SkipHyperV) {
     Write-Step "Building Wazuh Manager (Hyper-V)..."
     try {
-        $result = packer build @packerArgs @("-only=wazuh-manager-hyperv", "$wazuhDir\ubuntu-wazuh-hyperv.pkr.hcl")
+        $wazuhPassword = Get-RequiredEnv "SENTRYLENS_WAZUH_SSH_PASSWORD"
+        $result = packer build @packerArgs @("-var", "ssh_password=$wazuhPassword") @("-only=wazuh-manager-hyperv", "$wazuhDir\ubuntu-wazuh-hyperv.pkr.hcl")
         $results["wazuh-hyperv"] = "SUCCESS"
         Write-Ok "Wazuh Manager Hyper-V build completed"
     } catch {
@@ -133,7 +162,8 @@ if (-not $OnlyKali -and -not $SkipHyperV) {
 if (-not $OnlyWazuh -and -not $SkipVirtualBox) {
     Write-Step "Building Kali Attacker (VirtualBox)..."
     try {
-        $result = packer build @packerArgs @("-only=kali-attacker-virtualbox", "$kaliDir\kali-attacker-virtualbox.pkr.hcl")
+        $kaliPassword = Get-RequiredEnv "SENTRYLENS_KALI_SSH_PASSWORD"
+        $result = packer build @packerArgs @("-var", "ssh_password=$kaliPassword") @("-only=kali-attacker-virtualbox", "$kaliDir\kali-attacker-virtualbox.pkr.hcl")
         $results["kali-virtualbox"] = "SUCCESS"
         Write-Ok "Kali Attacker VirtualBox build completed"
     } catch {
