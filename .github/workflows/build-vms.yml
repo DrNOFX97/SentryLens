@@ -1,0 +1,258 @@
+name: Build VM Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., 1.2.0)'
+        required: true
+        type: string
+      build_timestamp:
+        description: 'Build timestamp (YYYYMMDD, defaults to today)'
+        required: false
+        type: string
+      skip_virtualbox:
+        description: 'Skip VirtualBox builds'
+        required: false
+        type: boolean
+        default: false
+      skip_hyperv:
+        description: 'Skip Hyper-V builds'
+        required: false
+        type: boolean
+        default: false
+      only_wazuh:
+        description: 'Only build Wazuh Manager VM'
+        required: false
+        type: boolean
+        default: false
+      only_kali:
+        description: 'Only build Kali Attacker VM'
+        required: false
+        type: boolean
+        default: false
+
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  PACKER_VERSION: "1.10.3"
+
+jobs:
+  build-wazuh-virtualbox:
+    name: Wazuh Manager (VirtualBox)
+    if: ${{ !inputs.skip_virtualbox && !inputs.only_kali }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Install Packer
+        uses: hashicorp/setup-packer@ecc5516821087666a672c0d280a0084ea6d9aafd  # v2
+        with:
+          version: ${{ env.PACKER_VERSION }}
+
+      - name: Install VirtualBox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y virtualbox virtualbox-guest-additions-iso
+          VBoxManage --version
+
+      - name: Set build timestamp
+        id: timestamp
+        run: |
+          if [ -n "${{ inputs.build_timestamp }}" ]; then
+            echo "timestamp=${{ inputs.build_timestamp }}" >> $GITHUB_OUTPUT
+          else
+            echo "timestamp=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Wazuh Manager (VirtualBox)
+        working-directory: ./packer/wazuh-manager
+        run: |
+          packer init .
+          packer build \
+            -var "version=${{ inputs.version }}" \
+            -var "build_timestamp=${{ steps.timestamp.outputs.timestamp }}" \
+            -only=wazuh-manager-virtualbox \
+            ubuntu-wazuh-virtualbox.pkr.hcl
+
+      - name: Upload VirtualBox artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: wazuh-manager-virtualbox-${{ steps.timestamp.outputs.timestamp }}
+          path: packer/wazuh-manager/output-*/
+          retention-days: 30
+
+  build-wazuh-hyperv:
+    name: Wazuh Manager (Hyper-V)
+    if: ${{ !inputs.skip_hyperv && !inputs.only_kali }}
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Install Packer
+        uses: hashicorp/setup-packer@ecc5516821087666a672c0d280a0084ea6d9aafd  # v2
+
+      - name: Enable Hyper-V
+        run: |
+          Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart
+          # Note: Requires reboot, so this only works on self-hosted runners with Hyper-V pre-enabled
+          # For GitHub-hosted runners, Hyper-V is not available
+
+      - name: Set build timestamp
+        id: timestamp
+        run: |
+          if ("${{ inputs.build_timestamp }}" -ne "") {
+            $timestamp = "${{ inputs.build_timestamp }}"
+          } else {
+            $timestamp = Get-Date -Format "yyyyMMdd"
+          }
+          echo "timestamp=$timestamp" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build Wazuh Manager (Hyper-V)
+        if: false  # Disabled - GitHub-hosted runners don't support Hyper-V
+        working-directory: ./packer/wazuh-manager
+        run: |
+          packer init .
+          packer build `
+            -var "version=${{ inputs.version }}" `
+            -var "build_timestamp=${{ steps.timestamp.outputs.timestamp }}" `
+            -only=wazuh-manager-hyperv `
+            ubuntu-wazuh-hyperv.pkr.hcl
+
+      - name: Upload Hyper-V artifact
+        if: false
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: wazuh-manager-hyperv-${{ steps.timestamp.outputs.timestamp }}
+          path: packer/wazuh-manager/output-*/
+          retention-days: 30
+
+  build-kali-virtualbox:
+    name: Kali Attacker (VirtualBox)
+    if: ${{ !inputs.skip_virtualbox && !inputs.only_wazuh }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Install Packer
+        uses: hashicorp/setup-packer@ecc5516821087666a672c0d280a0084ea6d9aafd  # v2
+        with:
+          version: ${{ env.PACKER_VERSION }}
+
+      - name: Install VirtualBox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y virtualbox virtualbox-guest-additions-iso
+          VBoxManage --version
+
+      - name: Set build timestamp
+        id: timestamp
+        run: |
+          if [ -n "${{ inputs.build_timestamp }}" ]; then
+            echo "timestamp=${{ inputs.build_timestamp }}" >> $GITHUB_OUTPUT
+          else
+            echo "timestamp=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Kali Attacker (VirtualBox)
+        working-directory: ./packer/kali-attacker
+        run: |
+          packer init .
+          packer build \
+            -var "version=${{ inputs.version }}" \
+            -var "build_timestamp=${{ steps.timestamp.outputs.timestamp }}" \
+            -only=kali-attacker-virtualbox \
+            kali-attacker-virtualbox.pkr.hcl
+
+      - name: Upload VirtualBox artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: kali-attacker-virtualbox-${{ steps.timestamp.outputs.timestamp }}
+          path: packer/kali-attacker/output-*/
+          retention-days: 30
+
+  package-release:
+    name: Package Release
+    needs: [build-wazuh-virtualbox, build-kali-virtualbox]
+    if: always() && (needs.build-wazuh-virtualbox.result == 'success' || needs.build-kali-virtualbox.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          path: ./artifacts
+          pattern: "*"
+          merge-multiple: true
+
+      - name: Set build timestamp
+        id: timestamp
+        run: |
+          if [ -n "${{ inputs.build_timestamp }}" ]; then
+            echo "timestamp=${{ inputs.build_timestamp }}" >> $GITHUB_OUTPUT
+          else
+            echo "timestamp=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package release
+        working-directory: ./packer
+        run: |
+          pwsh ./package-release.ps1 \
+            -Version "${{ inputs.version }}" \
+            -BuildTimestamp "${{ steps.timestamp.outputs.timestamp }}" \
+            -PackerOutputDir "./artifacts" \
+            -OutputDir "./releases"
+
+      - name: Upload release package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: sentrylens-vm-release-${{ steps.timestamp.outputs.timestamp }}
+          path: packer/releases/
+          retention-days: 90
+
+      - name: Create GitHub Release (on tag)
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844  # v1
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          release_name: ${{ github.event.release.name }}
+          body_path: ./packer/releases/sentrylens-v${{ inputs.version }}-${{ steps.timestamp.outputs.timestamp }}/README.md
+          files: |
+            ./packer/releases/sentrylens-v${{ inputs.version }}-${{ steps.timestamp.outputs.timestamp }}/**/*
+          draft: false
+          prerelease: ${{ github.event.release.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Notify Completion
+    needs: [package-release]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Send notification
+        run: |
+          STATUS="${{ needs.package-release.result }}"
+          VERSION="${{ inputs.version }}"
+          TIMESTAMP="${{ needs.package-release.outputs.timestamp || github.run_id }}"
+          
+          if [ "$STATUS" = "success" ]; then
+            echo "✅ VM build completed successfully for version $VERSION ($TIMESTAMP)"
+          else
+            echo "❌ VM build failed for version $VERSION ($TIMESTAMP)"
+          fi
+          # Add Slack/Discord/email notification here if needed
