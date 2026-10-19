@@ -1,0 +1,2 @@
+# Os ficheiros de vendor/ têm de ficar byte a byte iguais aos originais (o teste confere o sha384)
+vendor/** -text
