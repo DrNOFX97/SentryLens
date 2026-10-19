@@ -37,10 +37,12 @@ INCIDENT = {
 GOOD_BODY = {
     "model": "jev-1.13.0",
     "answers": {
-        "is_compromise": {"type": "noul", "noul": 0.62},
-        "is_brute_force": {"type": "noul", "noul": 0.9},
-        "severity": {"type": "choice", "choice": "medium", "confidence": 0.48,
-                     "probabilities": {"info": 0.07, "low": 0.06, "medium": 0.61, "high": 0.26}},
+        "is_compromise": {"noul": 0.62},
+        "is_brute_force": {"noul": 0.9},
+        "severity": {"choice": "medium", "confidence": 0.48,
+                     "probabilities": {"info": 0.07, "low": 0.06, "medium": 0.61, "high": 0.26, "critical": 0.0}},
+        "attack_type": {"choice": "credential_access", "confidence": 0.82,
+                        "probabilities": {"credential_access": 0.7, "lateral_movement": 0.15, "discovery": 0.1, "benign": 0.05}},
     },
 }
 
@@ -58,7 +60,7 @@ parsed = jev_client.parse_answers(GOOD_BODY)
 check("parse_answers resposta válida", parsed is not None and parsed["answers"]["severity"]["choice"] == "medium"
       and parsed["answers"]["is_compromise"]["probability"] == 0.62)
 check("parse_answers rejeita choice fora do critério",
-      jev_client.parse_answers({"answers": {**GOOD_BODY["answers"], "severity": {"choice": "critical", "probabilities": {}}}}) is None)
+      jev_client.parse_answers({"answers": {**GOOD_BODY["answers"], "severity": {"choice": "invalid_choice", "probabilities": {}}}}) is None)
 check("parse_answers rejeita lixo", all(jev_client.parse_answers(x) is None for x in (None, [], {}, {"answers": []}, {"answers": {}})))
 
 # --- jev_enabled: fail-closed ---

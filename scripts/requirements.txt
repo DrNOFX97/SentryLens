@@ -1,9 +1,9 @@
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-httpx==0.27.2
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+httpx==0.26.0
 python-dotenv==1.0.1
-psutil==6.1.0
-scikit-learn==1.5.2
-joblib==1.4.2
-PyYAML==6.0.3
-asyncssh==2.17.0
+psutil==5.9.8
+scikit-learn==1.3.2
+joblib==1.3.2
+PyYAML==6.0.1
+asyncssh==2.14.2

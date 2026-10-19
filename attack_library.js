@@ -1,10 +1,10 @@
 // Aba "Attack Library" (Roadmap v2, R5). Carregado depois de app.js e
 // attack_registry.js: reutiliza os seus globais (API_BASE, API_KEY,
-// escapeHtml, renderPanelError) — não redeclarar nenhum aqui. Um só pedido
+// renderPanelError) — não redeclarar nenhum aqui. Um só pedido
 // a GET /api/attack-library (catálogo estático, não depende do período
 // selecionado); refiltra em memória quando os filtros mudam. Só mostra
 // dados reais; sem dados -> "Sem dados". Não abre WebSocket, não pede nada
-// com a aba escondida. Todo o texto dinâmico passa por escapeHtml (o YAML é
+// com a aba escondida. Todo o texto dinâmico é escapado pelo htmlT (o YAML é
 // controlado pelo projeto, mas a regra do projeto é sempre escapar).
 
 const ALIB_RISK_LABELS = { low: "Baixo", medium: "Médio", high: "Alto" };
@@ -20,9 +20,10 @@ function alibIsActive() {
   return alibTab.classList.contains("active") && document.visibilityState === "visible";
 }
 
+// Texto simples: o htmlT escapa na interpolação.
 function alibCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function alibSensors(list) {
@@ -31,24 +32,15 @@ function alibSensors(list) {
 
 function alibRiskBadge(risk) {
   const label = ALIB_RISK_LABELS[risk] || risk;
-  return `<span class="alib-risk alib-risk-${escapeHtml(risk)}">${escapeHtml(label)}</span>`;
+  return htmlT`<span class="alib-risk alib-risk-${risk}">${label}</span>`;
 }
 
 function alibReplayableBadge(replayable) {
-  return `<span class="alib-replayable alib-replayable-${replayable ? "yes" : "no"}">${replayable ? "Sim" : "Não"}</span>`;
+  return htmlT`<span class="alib-replayable alib-replayable-${replayable ? "yes" : "no"}">${replayable ? "Sim" : "Não"}</span>`;
 }
 
-async function alibRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
+function alibRequest(path) {
+  return apiRequest(path);
 }
 
 function alibFilteredEntries() {
@@ -61,42 +53,43 @@ function alibFilteredEntries() {
 function renderAttackLibraryTable(entries) {
   const body = document.getElementById("alib-body");
   if (!entries.length) {
-    body.innerHTML = `<tr><td colspan="8" class="empty-state">Sem dados — nenhum cenário corresponde aos filtros.</td></tr>`;
+    htmRender(body, htmlT`<tr><td colspan="8" class="empty-state">Sem dados — nenhum cenário corresponde aos filtros.</td></tr>`);
     return;
   }
-  body.innerHTML = entries.map((e) => `<tr class="atk-row${e.id === alibSelectedId ? " selected" : ""}" data-id="${escapeHtml(e.id)}" tabindex="0">
+  htmRender(body, htmlT`${entries.map((e) => htmlT`<tr class="atk-row${e.id === alibSelectedId ? " selected" : ""}" data-id="${e.id}" tabindex="0">
     <td>${alibCell(e.id)}</td>
     <td>${alibCell(e.name)}</td>
     <td>${alibCell(e.mitre_technique)}</td>
     <td>${alibCell(e.tool)}</td>
     <td>${alibRiskBadge(e.risk)}</td>
-    <td>${escapeHtml(alibSensors(e.expected_sensors))}</td>
+    <td>${alibSensors(e.expected_sensors)}</td>
     <td>${alibReplayableBadge(e.replayable)}</td>
     <td>${alibCell(e.duration_estimate)}</td>
-  </tr>`).join("");
+  </tr>`)}`);
 }
 
 function renderAttackLibraryDetail(entry) {
   const panel = document.getElementById("attack-library-detail-panel");
   panel.hidden = false;
   document.getElementById("alib-detail-title").textContent = entry.name || entry.id;
-  document.getElementById("alib-detail-meta").innerHTML = `
+  htmRender(document.getElementById("alib-detail-meta"), htmlT`
     <span>${alibRiskBadge(entry.risk)}</span>
     <span>Cenário: <strong>${alibCell(entry.id)}</strong></span>
     <span>MITRE: ${alibCell(entry.mitre_technique)} (${alibCell(entry.mitre_tactic)})</span>
     <span>Ferramenta: ${alibCell(entry.tool)}</span>
     <span>Event IDs: ${alibCell((entry.event_ids || []).join(", "))}</span>
-    <span>Duração estimada: ${alibCell(entry.duration_estimate)}</span>`;
+    <span>Duração estimada: ${alibCell(entry.duration_estimate)}</span>`);
   document.getElementById("alib-detail-prereqs").textContent = entry.prerequisites || "—";
   const steps = entry.cleanup_steps || [];
-  document.getElementById("alib-detail-cleanup").innerHTML = steps.length
-    ? steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("")
-    : `<li class="empty-state">Sem passos de limpeza registados.</li>`;
-  document.getElementById("alib-detail-replayable").innerHTML =
-    `${alibReplayableBadge(entry.replayable)} — ${escapeHtml(entry.replayable_reason || "sem motivo registado")}`;
+  htmRender(document.getElementById("alib-detail-cleanup"), steps.length
+    ? htmlT`${steps.map((s) => htmlT`<li>${s}</li>`)}`
+    : htmlT`<li class="empty-state">Sem passos de limpeza registados.</li>`);
+  htmRender(document.getElementById("alib-detail-replayable"),
+    htmlT`${alibReplayableBadge(entry.replayable)} — ${entry.replayable_reason || "sem motivo registado"}`);
 }
 
 function alibShowDetailError(message) {
+  if (message) document.getElementById("attack-library-detail-panel").hidden = false;
   renderPanelError("#attack-library-detail-panel", message);
 }
 
@@ -113,7 +106,7 @@ async function selectAttackLibraryEntry(id) {
     renderAttackLibraryDetail(entry);
   } catch (err) {
     if (seq !== alibSelectSeq) return;
-    alibShowDetailError(`Não foi possível carregar o detalhe: ${err.message}`);
+    alibShowDetailError(`Não foi possível carregar o detalhe: ${apiErrorMessage(err)}`);
   }
 }
 
@@ -132,10 +125,10 @@ async function refreshAttackLibrary() {
       alibEntries.length ? `${data.total} cenário(s) no catálogo.` : "";
     alibApplyFilters();
   } catch (err) {
-    const message = `Não foi possível carregar a Attack Library: ${err.message}`;
+    const message = `Não foi possível carregar a Biblioteca de ataques: ${apiErrorMessage(err)}`;
     renderPanelError("#attack-library-panel", message);
-    document.getElementById("alib-body").innerHTML =
-      `<tr><td colspan="8" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+    htmRender(document.getElementById("alib-body"),
+      htmlT`<tr><td colspan="8" class="empty-state">Sem dados — ${apiErrorMessage(err)}.</td></tr>`);
   } finally {
     alibLoading = false;
   }

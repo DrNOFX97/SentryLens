@@ -17,6 +17,7 @@ Correr:
 
 import http.client
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -110,8 +111,24 @@ def run() -> None:
         check("Host localhost:porta é aceite", status == 200)
 
         # --- whitelist continua intacta ---
-        status, _, _ = get(port, "/index.html")
+        status, headers, _ = get(port, "/index.html")
         check("/index.html continua a ser servido", status == 200)
+        csp = headers.get("content-security-policy", "")
+        directives = {d.strip().split(" ", 1)[0]: d.strip() for d in csp.split(";") if d.strip()}
+        check("/index.html traz Content-Security-Policy", bool(csp))
+        check("CSP: script-src 'self' sem unsafe-inline/unsafe-eval",
+              directives.get("script-src") == "script-src 'self'")
+        check("CSP: object-src none, base-uri none, frame-ancestors none",
+              directives.get("object-src") == "object-src 'none'"
+              and directives.get("base-uri") == "base-uri 'none'"
+              and directives.get("frame-ancestors") == "frame-ancestors 'none'")
+        check("CSP: connect-src permite o backend loopback http e ws",
+              all(x in directives.get("connect-src", "") for x in
+                  ("'self'", "http://127.0.0.1:*", "http://localhost:*", "ws://127.0.0.1:*", "ws://localhost:*")))
+        check("CSP: img-src e font-src locais", "data:" in directives.get("img-src", "")
+              and directives.get("font-src") == "font-src 'self'")
+        status, headers, _ = get(port, "/app.js")
+        check("/app.js (não-HTML) não leva CSP", status == 200 and "content-security-policy" not in headers)
         status, headers, _ = get(port, "/incidents.js")
         check("/incidents.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/live_soc.js")
@@ -120,12 +137,66 @@ def run() -> None:
         check("/attack_registry.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/attack_library.js")
         check("/attack_library.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ui_helpers.js")
+        check("/ui_helpers.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/router.js")
+        check("/router.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/fmt.js")
+        check("/fmt.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/html.js")
+        check("/html.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/table.js")
+        check("/table.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/kpi.js")
+        check("/kpi.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/api.js")
+        check("/api.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/state.js")
+        check("/state.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/overview-alerts.js")
+        check("/overview-alerts.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/system.js")
+        check("/system.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/iam.js")
+        check("/iam.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ml-anomalies.js")
+        check("/ml-anomalies.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/compliance.js")
+        check("/compliance.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/realtime.js")
+        check("/realtime.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/shell.js")
+        check("/shell.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/network_soc.js")
         check("/network_soc.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/detections.js")
         check("/detections.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/metrics.js")
         check("/metrics.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ml_models.js")
+        check("/ml_models.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ml_evaluation.js")
+        check("/ml_evaluation.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/vaccines.js")
+        check("/vaccines.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/soc_team.js")
+        check("/soc_team.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/overview.js")
+        check("/overview.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/vendor/chart.umd.min.js")
+        check("/vendor/chart.umd.min.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        for fonte in ("inter-latin", "jetbrains-mono-latin", "space-grotesk-latin"):
+            status, headers, _ = get(port, f"/vendor/fonts/{fonte}.woff2")
+            check(f"/vendor/fonts/{fonte}.woff2 é servido como font/woff2", status == 200 and headers.get("content-type") == "font/woff2")
+        status, _, _ = get(port, "/vendor/")
+        check("/vendor/ (listagem) dá 404", status == 404)
+        status, _, _ = get(port, "/vendor/fonts/../../scripts/.env")
+        check("travessia a partir de /vendor/ dá 404", status == 404)
         status, _, _ = get(port, "/scripts/.env")
         check("/scripts/.env continua a dar 404", status == 404)
         status, _, _ = get(port, "/.env")
@@ -138,8 +209,126 @@ def run() -> None:
         tmp.cleanup()
 
 
+def check_static_frontend() -> None:
+    """
+    Protege a sidebar e a forma de ml_models.js/ml_evaluation.js contra
+    regressões que o servidor não apanha: se alguém voltar a pôr
+    data-planned="R9" num botão, reintroduzir um nome global colidente, ou
+    tirar um código de erro da tabela PT, a aba fica em branco sem nenhum
+    teste vermelho.
+    """
+    index_html = (serve_frontend.PROJECT_ROOT / "index.html").read_text(encoding="utf-8")
+    ml_models_js = (serve_frontend.PROJECT_ROOT / "ml_models.js").read_text(encoding="utf-8")
+    ml_evaluation_js = (serve_frontend.PROJECT_ROOT / "ml_evaluation.js").read_text(encoding="utf-8")
+
+    for marker in ('data-tab="ml-models"', 'data-tab="ml-evaluation"',
+                   'id="tab-ml-models"', 'id="tab-ml-evaluation"',
+                   '<script src="ml_models.js"></script>',
+                   '<script src="ml_evaluation.js"></script>'):
+        check(f"index.html contém {marker}", marker in index_html)
+
+    # D-09: a Evaluation só funciona se ml_evaluation.js carregar DEPOIS de
+    # ml_models.js — é lá que estão mlmErrorText e mlmCodeFromResponse.
+    check("index.html carrega ml_evaluation.js depois de ml_models.js",
+          index_html.index('<script src="ml_evaluation.js"></script>')
+          > index_html.index('<script src="ml_models.js"></script>'))
+
+    # A tabela de Evaluation tem de ter as SEIS colunas que o helper desenha
+    # (colspan="6" nas linhas de estado vazio, de aviso e de "Sem avaliação").
+    thead = re.search(r'<table id="mlm-eval-table">.*?</thead>', index_html, re.S)
+    check("a tabela de Evaluation tem seis <th>",
+          bool(thead) and len(re.findall(r"<th>", thead.group(0))) == 6)
+    check('o corpo da tabela de Evaluation usa colspan="6"',
+          '<td colspan="6" class="empty-state">A carregar...</td>' in index_html)
+    check('o cabeçalho da tabela de Evaluation declara as seis colunas',
+          bool(thead) and all(coluna in thead.group(0) for coluna in (
+              ">Versão<", ">Ativa<", ">Dataset<", ">Origem<", ">ML (", ">Regras (")))
+
+    # O bloco de concordância ao vivo (D-10): select de janela, aviso e corpo.
+    for marker in ('id="mle-live-block"', 'id="mle-live-hours"',
+                   'id="mle-live-notice"', 'id="mle-live-body"',
+                   'for="mle-live-hours"'):
+        check(f"index.html contém {marker}", marker in index_html)
+    check("o select da janela só oferece janelas dentro do ge=1/le=168 da rota",
+          all(f'value="{h}"' in index_html for h in (1, 24, 72, 168)))
+    check("o botão de recarregar da Evaluation continua a ser mlm-eval-reload",
+          'id="mlm-eval-reload"' in index_html)
+    # O bloco ao vivo fica DENTRO do mesmo section da tabela: um section novo
+    # duplicaria o banner do renderPanelError por cima do bloco.
+    painel = re.search(r'<section class="panel" id="ml-evaluation-panel">(.*?)</section>',
+                       index_html, re.S)
+    check("o bloco ao vivo está dentro do mesmo painel da tabela",
+          bool(painel) and 'id="mle-live-body"' in painel.group(1)
+          and 'id="mlm-eval-table"' in painel.group(1))
+
+    check("index.html já não tem nenhum marcador de planeado R9", 'data-planned="R9"' not in index_html)
+
+    for tab in ("ml-models", "ml-evaluation"):
+        linhas = [l for l in index_html.splitlines() if f'data-tab="{tab}"' in l]
+        check(f"o botão {tab} deixou de ser planeado",
+              bool(linhas) and not any("is-planned" in l for l in linhas))
+
+    linhas_training = [l for l in index_html.splitlines() if 'data-label="Training"' in l]
+    check("o botão Training foi removido do sidebar (treino está em 📦 Models, D-07)",
+          not linhas_training)
+
+    declaracoes = re.findall(
+        r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)",
+        ml_models_js, re.M)
+    colisoes = [n for n in declaracoes if not n.startswith(("mlm", "MLM_"))]
+    check("todos os identificadores de topo de ml_models.js têm prefixo mlm/MLM_", not colisoes)
+    if colisoes:
+        print(f"       nomes sem prefixo: {colisoes}")
+
+    # D-09: os dois ficheiros partilham um só escopo global no browser, por
+    # isso nenhum identificador de topo de ml_evaluation.js pode repetir um de
+    # ml_models.js (ou de app.js) — a colisão partiria o browser inteiro.
+    declaracoes_mle = re.findall(
+        r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)",
+        ml_evaluation_js, re.M)
+    sem_prefixo = [n for n in declaracoes_mle if not n.startswith(("mle", "MLE_"))]
+    check("todos os identificadores de topo de ml_evaluation.js têm prefixo mle/MLE_",
+          not sem_prefixo)
+    if sem_prefixo:
+        print(f"       nomes sem prefixo: {sem_prefixo}")
+
+    reutilizados = {"MLM_ERROR_TEXT", "MLM_GENERIC_ERROR", "mlmErrorText",
+                    "mlmCodeFromResponse", "mlmCell", "mlmRefresh", "mlmInit",
+                    "mlmRequest", "mlmIsShown", "escapeHtml", "API_BASE",
+                    "API_KEY", "renderPanelError"}
+    # Intersecção com TUDO o que ml_models.js declara de topo (não só a lista
+    # de globais conhecidos): um nome mlm*/MLM_* novo que aparecesse nos dois
+    # ficheiros partiria o browser inteiro na mesma (Pitfall 9).
+    declaracoes_mlm = set(re.findall(
+        r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)",
+        ml_models_js, re.M))
+    repetidos = sorted(reutilizados.intersection(declaracoes_mle))
+    colisao_mlm = sorted(declaracoes_mlm.intersection(declaracoes_mle))
+    check("ml_evaluation.js não redeclara nada de ml_models.js ou app.js",
+          not repetidos)
+    if repetidos:
+        print(f"       nomes redeclarados: {repetidos}")
+    check("ml_evaluation.js não repete nenhum identificador de topo de ml_models.js",
+          not colisao_mlm)
+    if colisao_mlm:
+        print(f"       colisoes com ml_models.js: {colisao_mlm}")
+    check("ml_evaluation.js não volta a ter mlmBuildEvalRows/mlmRenderEvaluation/mlmEvalTab",
+          not any(x in ml_evaluation_js for x in ("mlmBuildEvalRows", "mlmRenderEvaluation", "mlmEvalTab")))
+    check("ml_models.js deixou de ter a Evaluation (D-09)",
+          not any(x in ml_models_js for x in ("mlmBuildEvalRows", "mlmRenderEvaluation", "mlmEvalTab")))
+
+    codigos = ("invalid_version_id", "active_not_found", "metadata_missing", "metadata_invalid",
+               "artifact_missing", "hash_mismatch", "already_adopted", "no_legacy_model",
+               "registry_unavailable")
+    em_falta = [c for c in codigos if c not in ml_models_js]
+    check("ml_models.js traduz os 9 códigos de erro de D-06", not em_falta)
+    if em_falta:
+        print(f"       códigos em falta: {em_falta}")
+
+
 if __name__ == "__main__":
     run()
+    check_static_frontend()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:

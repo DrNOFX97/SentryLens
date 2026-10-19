@@ -1,19 +1,23 @@
 // Aba "Red vs Blue" (Fase 11, Onda 3). Carregado depois de app.js e
-// reutiliza os seus globais (fetchJSON, escapeHtml, formatTimestamp,
+// reutiliza os seus globais (apiRequest/apiErrorMessage de api.js, escapeHtml, formatTimestamp,
 // renderPanelError, API_BASE, API_KEY) — não redeclarar nenhum deles aqui.
 // Só mostra dados reais dos endpoints do backend; sem dados, estado vazio.
 
 const RB_REFRESH_MS = 30000;
 const RB_METRICS_HOURS = 168; // máximo aceite por /api/redblue/metrics
 const RB_MAX_PACKET_ROWS = 200;
-const RB_NETWORK_WS_URL = `${API_BASE.replace(/^http/, "ws")}/ws/network?api_key=${encodeURIComponent(API_KEY)}`;
+const RB_TAB_ID = "redblue"; // o mesmo data-tab do nav em index.html / app.js
+const RB_MAX_PACKETS_MEM = RB_MAX_PACKET_ROWS * 10; // teto em memória (W3.3)
+const RB_MAX_DETECTIONS_MEM = 1000;
+// A chave da API não vai no URL: pede-se um ticket de uso único (S2) a cada ligação.
+const RB_NETWORK_WS_BASE = `${API_BASE.replace(/^http/, "ws")}/ws/network`;
 
 let rbMetrics = null;
 let rbAttackLog = null;
 
 function rbCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function rbFormatSeconds(seconds) {
@@ -66,6 +70,28 @@ function rbSummarize(fresh) {
   };
 }
 
+// MTTD = fonte única (slMttdView sobre GET /api/metrics, mesma janela de 7 dias
+// e mesma fórmula nos 4 painéis), não a média local das tentativas.
+let rbMttdMetrics = null;
+let rbMttdFailed = false;
+
+function rbRenderMttdKpi(metrics, error) {
+  const view = slMttdView(metrics, error);
+  const valueEl = document.getElementById("kpi-rb-mttd");
+  if (!valueEl) return;
+  valueEl.textContent = view.value;
+  const card = valueEl.parentElement;
+  const title = card.querySelector("h3");
+  if (title) title.textContent = view.label;
+  let subEl = card.querySelector(".ovw-kpi-sub");
+  if (!subEl) {
+    subEl = document.createElement("div");
+    subEl.className = "ovw-kpi-sub";
+    card.appendChild(subEl);
+  }
+  subEl.textContent = view.sub;
+}
+
 function renderRedBlueKpis(data) {
   const overall = data.overall || {};
   const attempts = overall.total_attempts || 0;
@@ -74,7 +100,7 @@ function renderRedBlueKpis(data) {
   const none = sum.count === 0;
   rbSetText("kpi-rb-attempts", attempts);
   rbSetText("kpi-rb-coverage", none ? "—" : rbFormatPercent(sum.detected / sum.count, sum.count));
-  rbSetText("kpi-rb-mttd", none ? "—" : rbFormatSeconds(sum.avgMttd));
+  rbRenderMttdKpi(rbMttdMetrics, rbMttdFailed);
   rbSetText("kpi-rb-network-only", data.network_capture_configured && !none ? sum.networkOnly : "—");
   rbSetText("kpi-rb-neither", none ? "—" : sum.neither);
   rbSetText("kpi-rb-alerts-fetched", data.alerts_fetched ?? "—");
@@ -99,14 +125,17 @@ function renderRedBlueKpis(data) {
     const n = (data[key] || []).length;
     if (n > 0) notices.push(`${n} entrada(s) do log ${label} ficaram de fora da correlação.`);
   });
-  document.getElementById("redblue-notices").innerHTML = notices
-    .map((n) => `<div class="rb-notice">⚠️ ${escapeHtml(n)}</div>`)
-    .join("");
+  htmRender(document.getElementById("redblue-notices"),
+    htmlT`${notices.map((n) => htmlT`<div class="rb-notice">⚠️ ${n}</div>`)}`);
 }
 
 async function loadRedBlueMetrics() {
   try {
-    rbMetrics = await fetchJSON(`/api/redblue/metrics?hours=${RB_METRICS_HOURS}`);
+    const mttdReq = apiRequest(`/api/metrics?hours=${SL_MTTD_WINDOW_HOURS}`).then(
+      (m) => { rbMttdMetrics = m; rbMttdFailed = false; },
+      () => { rbMttdMetrics = null; rbMttdFailed = true; });
+    rbMetrics = await apiRequest(`/api/redblue/metrics?hours=${RB_METRICS_HOURS}`);
+    await mttdReq;
     renderPanelError("#redblue-summary-panel", null);
     renderRedBlueKpis(rbMetrics);
   } catch (err) {
@@ -114,43 +143,66 @@ async function loadRedBlueMetrics() {
     rbMetrics = null;
     ["kpi-rb-attempts", "kpi-rb-coverage", "kpi-rb-mttd", "kpi-rb-network-only", "kpi-rb-neither"]
       .forEach((id) => rbSetText(id, "—"));
+    rbRenderMttdKpi(null, true);
     const noticesEl = document.getElementById("redblue-notices");
-    if (noticesEl) noticesEl.innerHTML = "";
+    if (noticesEl) noticesEl.replaceChildren();
     const message = err.status === 503
       ? "Modelo de ML ainda não foi treinado. Corre scripts/train_anomaly_model.py."
-      : (err.message || "Erro ao carregar a correlação Red vs Blue.");
+      : apiErrorMessage(err);
     renderPanelError("#redblue-summary-panel", message);
   }
   if (typeof renderBluePanel === "function") renderBluePanel(rbMetrics);
   if (typeof renderRedPanel === "function") renderRedPanel(rbAttackLog, rbMetrics);
 }
 
+// Estado «A carregar» numa tabela (só na 1.ª carga, para não piscar nos refresh).
+function rbTableLoading(tbodyId, cols) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody || tbody.children.length > 0) return;
+  const td = document.createElement("td");
+  td.colSpan = cols;
+  const tr = document.createElement("tr");
+  tr.appendChild(td);
+  tbody.replaceChildren(tr);
+  sttShowLoading(td);
+}
+
+// Estado de erro numa tabela: mensagem PT fixa (nunca texto de exceção).
+function rbTableError(tbodyId, cols, err) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const td = document.createElement("td");
+  td.colSpan = cols;
+  const tr = document.createElement("tr");
+  tr.appendChild(td);
+  tbody.replaceChildren(tr);
+  sttShowError(td, err);
+}
+
 async function loadManagerPanel() {
   const tbody = document.getElementById("redblue-agents-body");
+  rbTableLoading("redblue-agents-body", 4);
   try {
-    const [health, agents] = await Promise.all([fetchJSON("/api/health"), fetchJSON("/api/agents")]);
+    const [health, agents] = await Promise.all([apiRequest("/api/health"), apiRequest("/api/agents")]);
     renderPanelError("#redblue-manager-panel", null);
     rbSetText("kpi-rb-backend", health.status === "ok" ? "Ativo" : String(health.status));
     const list = agents.agents || [];
     rbSetText("kpi-rb-agents", list.filter((a) => a.status === "active").length);
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Nenhum agente encontrado</td></tr>';
+      htmRender(tbody, htmlT`<tr><td colspan="4" class="empty-state">Nenhum agente encontrado</td></tr>`);
       return;
     }
-    tbody.innerHTML = list
-      .map(
-        (a) => `
+    htmRender(tbody, htmlT`${list.map((a) => htmlT`
       <tr>
         <td>${rbCell(a.name)}</td>
         <td class="mono">${rbCell(a.ip)}</td>
-        <td><span class="agent-status ${escapeHtml(a.status)}">${rbCell(a.status)}</span></td>
-        <td class="mono">${escapeHtml(formatTimestamp(a.last_keep_alive))}</td>
-      </tr>`,
-      )
-      .join("");
+        <td><span class="agent-status ${a.status}">${rbCell(a.status)}</span></td>
+        <td class="mono">${formatTimestamp(a.last_keep_alive)}</td>
+      </tr>`)}`);
   } catch (err) {
     console.error(err);
-    renderPanelError("#redblue-manager-panel", err.message || "Erro ao carregar agentes.");
+    renderPanelError("#redblue-manager-panel", apiErrorMessage(err));
+    rbTableError("redblue-agents-body", 4, err);
   }
 }
 
@@ -164,13 +216,14 @@ async function refreshRedBlueTab() {
 }
 
 async function loadRedPanel() {
+  rbTableLoading("redblue-attack-body", 6);
   try {
-    rbAttackLog = await fetchJSON("/api/redblue/attack-log");
+    rbAttackLog = await apiRequest("/api/redblue/attack-log");
     renderPanelError("#redblue-red-panel", null);
   } catch (err) {
     console.error(err);
     rbAttackLog = null;
-    renderPanelError("#redblue-red-panel", err.message || "Erro ao carregar o log de ataques.");
+    renderPanelError("#redblue-red-panel", apiErrorMessage(err));
   }
   renderRedPanel(rbAttackLog, rbMetrics);
 }
@@ -178,32 +231,30 @@ async function loadRedPanel() {
 function renderRedPanel(attackLog) {
   const tbody = document.getElementById("redblue-attack-body");
   if (!attackLog) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Log de ataques indisponível</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="6" class="empty-state">Log de ataques indisponível</td></tr>`);
     return;
   }
   const entries = attackLog.entries || [];
   if (entries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum ataque registado em attack_log.jsonl</td></tr>';
+    htmRender(tbody, htmlT`<tr><td colspan="6" class="empty-state">Nenhum ataque registado em attack_log.jsonl</td></tr>`);
     return;
   }
   const scenarios = attackLog.scenarios || {};
   const sorted = [...entries].sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
-  tbody.innerHTML = sorted
-    .map((e) => {
+  htmRender(tbody, htmlT`${sorted.map((e) => {
       const s = scenarios[e.scenario];
       const mitre = s ? `${s.mitre_technique} — ${s.mitre_tactic}` : null;
       const status = String(e.status);
-      return `
+      return htmlT`
       <tr>
-        <td class="mono">${escapeHtml(formatTimestamp(e.timestamp))}</td>
+        <td class="mono">${formatTimestamp(e.timestamp)}</td>
         <td>${rbCell(e.scenario)}</td>
         <td class="mono">${rbCell(e.target)}</td>
         <td>${rbCell(e.tool)}</td>
-        <td><span class="rb-badge ${escapeHtml(status)}">${escapeHtml(status)}</span></td>
+        <td><span class="rb-badge ${status}">${status}</span></td>
         <td>${rbCell(mitre)}</td>
       </tr>`;
-    })
-    .join("");
+    })}`);
 }
 
 function rbMttdByTechnique(attempts) {
@@ -245,31 +296,30 @@ function renderBluePanel(metrics) {
   const techBody = document.getElementById("redblue-technique-body");
   const note = document.getElementById("redblue-blue-note");
   note.textContent =
-    "Ações de resposta: a aplicação não regista ações de resposta (nem manuais), por isso não há nada para mostrar aqui. " +
-    "Este painel mostra apenas o que foi detetado, por que método e ao fim de quanto tempo.";
+    "Este painel mostra o que foi detetado, por que método e ao fim de quanto tempo. " +
+    "O seguimento (estados, notas, atribuição) está na aba Incidentes.";
 
   if (!metrics) {
-    body.innerHTML = '<tr><td colspan="9" class="empty-state">Correlação indisponível</td></tr>';
-    techBody.innerHTML = '<tr><td colspan="5" class="empty-state">Correlação indisponível</td></tr>';
+    htmRender(body, htmlT`<tr><td colspan="9" class="empty-state">Correlação indisponível</td></tr>`);
+    htmRender(techBody, htmlT`<tr><td colspan="5" class="empty-state">Correlação indisponível</td></tr>`);
     return;
   }
 
   const names = Object.keys(metrics.by_scenario || {}).sort();
   if (names.length === 0) {
-    body.innerHTML = '<tr><td colspan="9" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>';
+    htmRender(body, htmlT`<tr><td colspan="9" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>`);
   } else {
-    body.innerHTML = names
-      .map((name) => {
+    htmRender(body, htmlT`${names.map((name) => {
         const own = (metrics.attempts || []).filter((a) => a.scenario === name);
         const sum = rbSummarize(rbFreshAttempts(own, RB_METRICS_HOURS));
         const total = own.length || (metrics.by_scenario[name] || {}).attempts || 0;
         const allStale = sum.count === 0;
         const dash = "—";
-        const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
-        return `
+        const rowAttr = allStale ? htmlT` class="rb-stale" title="${RB_STALE_TITLE}"` : "";
+        return htmlT`
         <tr${rowAttr}>
           <td>${rbCell(name)}</td>
-          <td>${escapeHtml(rbAttemptsLabel(total, sum.count))}</td>
+          <td>${rbAttemptsLabel(total, sum.count)}</td>
           <td>${allStale ? dash : rbFormatPercent(sum.detected / sum.count, sum.count)}</td>
           <td>${allStale ? dash : rbFormatSeconds(sum.avgMttd)}</td>
           <td>${allStale ? dash : sum.rule}</td>
@@ -278,28 +328,25 @@ function renderBluePanel(metrics) {
           <td>${allStale || !metrics.network_capture_configured ? dash : sum.networkOnly}</td>
           <td>${allStale ? dash : sum.neither}</td>
         </tr>`;
-      })
-      .join("");
+      })}`);
   }
 
   const techniques = rbMttdByTechnique(metrics.attempts);
   if (techniques.length === 0) {
-    techBody.innerHTML = '<tr><td colspan="5" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>';
+    htmRender(techBody, htmlT`<tr><td colspan="5" class="empty-state">Sem tentativas de ataque na janela de 7 dias</td></tr>`);
   } else {
-    techBody.innerHTML = techniques
-      .map((t) => {
+    htmRender(techBody, htmlT`${techniques.map((t) => {
         const allStale = t.freshAttempts === 0;
-        const rowAttr = allStale ? ` class="rb-stale" title="${escapeHtml(RB_STALE_TITLE)}"` : "";
-        return `
+        const rowAttr = allStale ? htmlT` class="rb-stale" title="${RB_STALE_TITLE}"` : "";
+        return htmlT`
       <tr${rowAttr}>
         <td>${rbCell(t.technique)}</td>
         <td>${rbCell(t.tactic)}</td>
-        <td>${escapeHtml(rbAttemptsLabel(t.attempts, t.freshAttempts))}</td>
+        <td>${rbAttemptsLabel(t.attempts, t.freshAttempts)}</td>
         <td>${allStale ? "—" : t.detected}</td>
         <td>${allStale ? "—" : rbFormatSeconds(t.avgMttd)}</td>
       </tr>`;
-      })
-      .join("");
+      })}`);
   }
 }
 
@@ -323,8 +370,8 @@ function renderNetworkPanel() {
     rbSetText("kpi-rb-packets", "—");
     rbSetText("kpi-rb-detections", "—");
     rbSetText("kpi-rb-history", "—");
-    detBody.innerHTML = '<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>';
-    pktBody.innerHTML = '<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>';
+    htmRender(detBody, htmlT`<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>`);
+    htmRender(pktBody, htmlT`<tr><td colspan="5" class="empty-state">Captura não configurada</td></tr>`);
     return;
   }
 
@@ -334,43 +381,37 @@ function renderNetworkPanel() {
   rbSetText("kpi-rb-history", rbNetwork.history.length);
 
   const dets = [...rbNetwork.history].reverse();
-  detBody.innerHTML = dets.length
-    ? dets
-        .map(
-          (d) => `
+  htmRender(detBody, dets.length
+    ? htmlT`${dets.map((d) => htmlT`
       <tr>
-        <td class="mono">${escapeHtml(formatTimestamp(d.timestamp))}</td>
+        <td class="mono">${formatTimestamp(d.timestamp)}</td>
         <td>${rbCell(d.type)}</td>
         <td class="mono">${rbCell(d.src_ip)}</td>
         <td class="mono">${rbCell(d.dst_ip)}</td>
-        <td>${escapeHtml(rbDetectionDetail(d.detail))}</td>
-      </tr>`,
-        )
-        .join("")
-    : '<tr><td colspan="5" class="empty-state">Nenhuma deteção de rede até agora</td></tr>';
+        <td>${rbDetectionDetail(d.detail)}</td>
+      </tr>`)}`
+    : htmlT`<tr><td colspan="5" class="empty-state">Nenhuma deteção de rede até agora</td></tr>`);
 
   const pkts = rbNetwork.packets.slice(-RB_MAX_PACKET_ROWS).reverse();
-  pktBody.innerHTML = pkts.length
-    ? pkts
-        .map((p) => {
+  htmRender(pktBody, pkts.length
+    ? htmlT`${pkts.map((p) => {
           const src = p.src_port != null ? `${p.src_ip}:${p.src_port}` : p.src_ip;
           const dst = p.dst_port != null ? `${p.dst_ip}:${p.dst_port}` : p.dst_ip;
-          return `
+          return htmlT`
       <tr>
-        <td class="mono">${escapeHtml(formatTimestamp(p.timestamp))}</td>
+        <td class="mono">${formatTimestamp(p.timestamp)}</td>
         <td class="mono">${rbCell(src)}</td>
         <td class="mono">${rbCell(dst)}</td>
         <td>${rbCell(p.protocol)}</td>
         <td>${rbCell(p.length)}</td>
       </tr>`;
-        })
-        .join("")
-    : '<tr><td colspan="5" class="empty-state">Sem pacotes no buffer</td></tr>';
+        })}`
+    : htmlT`<tr><td colspan="5" class="empty-state">Sem pacotes no buffer</td></tr>`);
 }
 
 async function loadNetworkPanel() {
   try {
-    const data = await fetchJSON("/api/redblue/network");
+    const data = await apiRequest("/api/redblue/network");
     renderPanelError("#redblue-network-panel", null);
     rbNetwork.configured = !!data.configured;
     rbNetwork.packets = data.packets || [];
@@ -380,12 +421,63 @@ async function loadNetworkPanel() {
     if (rbNetwork.configured && !rbNetworkWs) connectNetworkSocket();
   } catch (err) {
     console.error(err);
-    renderPanelError("#redblue-network-panel", err.message || "Erro ao carregar a captura de rede.");
+    renderPanelError("#redblue-network-panel", apiErrorMessage(err));
   }
 }
 
-function connectNetworkSocket() {
-  rbNetworkWs = new WebSocket(RB_NETWORK_WS_URL);
+function rbTrim(arr, max) {
+  if (arr.length > max) arr.splice(0, arr.length - max);
+}
+
+// A aba só desenha quando é a ativa e o separador está visível; fora disso o
+// socket continua a acumular (com teto) mas não renderiza.
+function rbNetworkVisible() {
+  const docVisible = typeof document === "undefined" || document.visibilityState === "visible";
+  return docVisible && typeof rtRouter !== "undefined" && rtRouter.getActiveId() === RB_TAB_ID;
+}
+
+let rbRenderScheduled = false;
+let rbRenderDirty = false;
+
+// Várias mensagens no mesmo frame -> um só render (requestAnimationFrame).
+function rbScheduleNetworkRender() {
+  if (rbRenderScheduled) return;
+  rbRenderScheduled = true;
+  const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+  raf(() => {
+    rbRenderScheduled = false;
+    if (!rbNetworkVisible()) {
+      rbRenderDirty = true;
+      return;
+    }
+    rbRenderDirty = false;
+    renderNetworkPanel();
+  });
+}
+
+let rbNetworkTicketPending = false;
+async function connectNetworkSocket() {
+  if (rbNetworkTicketPending || rbNetworkWs) return;
+  rbNetworkTicketPending = true;
+  let ticket;
+  try {
+    ticket = (await apiRequest("/api/ws-ticket", { method: "POST" })).ticket;
+  } catch (err) {
+    ticket = null;
+  } finally {
+    rbNetworkTicketPending = false;
+  }
+  if (!ticket) {
+    if (rbNetworkReconnectAttempts < WS_RECONNECT_DELAYS_MS.length) {
+      const delay = WS_RECONNECT_DELAYS_MS[rbNetworkReconnectAttempts];
+      rbNetworkReconnectAttempts += 1;
+      setTimeout(() => {
+        if (rbNetwork.configured && !rbNetworkWs) connectNetworkSocket();
+      }, delay);
+    }
+    return;
+  }
+  rbNetworkWs = new WebSocket(`${RB_NETWORK_WS_BASE}?ticket=${encodeURIComponent(ticket)}`);
   rbNetworkWs.onopen = () => {
     rbNetworkReconnectAttempts = 0;
   };
@@ -399,14 +491,16 @@ function connectNetworkSocket() {
     }
     if (msg && msg.type === "packet" && msg.packet) {
       rbNetwork.packets.push(msg.packet);
-      if (rbNetwork.packets.length > RB_MAX_PACKET_ROWS * 10) rbNetwork.packets.shift();
+      rbTrim(rbNetwork.packets, RB_MAX_PACKETS_MEM);
     } else if (msg && msg.type === "network_detection" && msg.detection) {
       rbNetwork.detections.push(msg.detection);
       rbNetwork.history.push(msg.detection);
+      rbTrim(rbNetwork.detections, RB_MAX_DETECTIONS_MEM);
+      rbTrim(rbNetwork.history, RB_MAX_DETECTIONS_MEM);
     } else {
       return;
     }
-    renderNetworkPanel();
+    rbScheduleNetworkRender();
   };
   rbNetworkWs.onerror = () => rbNetworkWs.close();
   rbNetworkWs.onclose = () => {
@@ -423,5 +517,11 @@ function connectNetworkSocket() {
   };
 }
 
-refreshRedBlueTab();
-setInterval(refreshRedBlueTab, RB_REFRESH_MS);
+// W3.2: o router só chama refreshRedBlueTab com a aba ativa e o separador visível.
+function rbOnHide() {
+  rbRenderDirty = true; // o próximo load/mensagem redesenha
+}
+
+if (typeof rtRegisterTab === "function") {
+  rtRegisterTab({ id: RB_TAB_ID, load: refreshRedBlueTab, refreshMs: RB_REFRESH_MS, onHide: rbOnHide });
+}

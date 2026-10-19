@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/FASTAPI-0.115.0-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI 0.115.0">
   <img src="https://img.shields.io/badge/SQLITE-indice_de_historico-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
   <img src="https://img.shields.io/badge/WAZUH-integracao_SIEM-0B7D92?style=flat-square" alt="Integração com Wazuh">
+  <img src="https://img.shields.io/github/v/release/your-org/SentryLens?label=VM%20Release&style=flat-square&logo=virtualbox&logoColor=white" alt="VM Release">
 </p>
 
 O SentryLens liga-se a um laboratório [Wazuh](https://wazuh.com/) (SIEM open-source) e mostra, quase em tempo real, os alertas de segurança gerados pelos Windows Security Event Logs de uma máquina monitorizada. Cada evento aparece com nome legível, severidade e recomendação de ação, em vez de um Event ID numérico.
@@ -73,7 +74,7 @@ O backend nunca fala diretamente com o agente: usa as APIs do Wazuh, que já tê
 
 ## Funcionalidades
 
-O dashboard tem 17 abas:
+O dashboard tem 26 abas:
 
 | Aba | Conteúdo |
 |---|---|
@@ -91,11 +92,12 @@ O dashboard tem 17 abas:
 | **Incidentes** | Agrupamento automático de alertas e deteções de rede em incidentes, com estados, timeline e notas |
 | **Attack Registry / Attack Timeline** | Registo de ataques: esperado vs. real (regra/ML/rede) e incidentes ligados; só leitura |
 | **Attack Library** | Catálogo de referência dos cenários de ataque (risco, sensores esperados, limpeza); só leitura, nunca executa nada |
+| **Vaccines** | Vaccines propostas a partir de ataques não detetados ou só parcialmente detetados: regra proposta, origem (ataque, cenário, MITRE, incidentes) e cadeia de substituição; só leitura, nunca aplicadas no Wazuh |
 | **Live Traffic / Network Detections / PCAP Evidence** | Resumos dedicados da captura de rede e evidência de metadados persistida (nunca payload nem PCAP real) |
 
 Também inclui:
 
-- Classificação de 23 Event IDs do Windows Security Log.
+- Classificação de 31 Event IDs do Windows Security Log.
 - Atualização em tempo real por WebSocket (`/ws/alerts`), com *fallback* para polling de 30 s.
 - Histórico próprio em JSONL com índice SQLite, para além dos 90 dias do Wazuh Indexer.
 - Exportação de um relatório HTML autónomo (`GET /api/export/report`).
@@ -103,6 +105,7 @@ Também inclui:
 - Vista unificada de deteções (`GET /api/detections`): regra, ML e rede num tipo comum (`DetectionEvent`).
 - Métricas SOC (`GET /api/metrics`): MTTD, MTTR, cobertura e taxa de deteção, com FN/FP, em 3 painéis (MTTD / MTTR, Detection Coverage, Detection Rate). Sem dados mostram "Sem dados"; com alertas truncados avisam que os valores são limites inferiores.
 - Triagem experimental de incidentes via JEV (`POST /api/incidents/{id}/triage`): desligada por omissão e anonimizada.
+- Vaccine Engine (`GET /api/vaccines`): propostas de regra de deteção guardadas num store SQLite com estado fixo `proposed`, geradas pelo backend em segundo plano.
 
 ---
 
@@ -149,33 +152,95 @@ Só conta como tentativa de ligação um pacote TCP com SYN e sem ACK, para as r
 
 ---
 
+## Vaccines
+
+Uma **vaccine** é uma proposta de regra de deteção para um ataque que o SOC não apanhou. É só uma proposta: nunca é aplicada no Wazuh, não traz comandos e o estado é sempre `proposed` (aprovar ou rejeitar fica para o R12).
+
+- **De onde vem:** o veredito do Red vs Blue. Só os ataques `not_detected` ou `partial` geram uma vaccine (`detected` e `unknown` nunca). O motor (`scripts/vaccine_engine.py`) propõe uma entrada por sensor em falta: uma regra com os Event IDs do cenário, uma janela de 300 s e `min_count` 1, ou, para ML e rede, uma recomendação em texto. Cada vaccine valida-se (`validate_vaccine`) antes de ser gravada.
+- **Quando aparece:** o backend corre um ciclo no arranque e depois a cada 5 min (`main._vaccine_loop`, `scripts/vaccine_ingest.py`) e só grava vaccines de ataques com mais de 10 min, para os alertas terem tempo de chegar. Na prática uma vaccine demora cerca de 10 a 15 min a aparecer.
+- **Onde fica:** `scripts/vaccines.sqlite3` (`scripts/vaccine_store.py`, ignorado pelo git). O `GET` só lê e nunca cria o ficheiro; só o ciclo escreve. Quando o veredito de um ataque muda, a vaccine anterior fica guardada com `superseded_by`.
+- **Variáveis de ambiente opcionais:** `SENTRYLENS_VACCINE_INTERVAL_SECONDS` (omissão 300), `SENTRYLENS_VACCINE_WINDOW_HOURS` (168), `SENTRYLENS_VACCINE_SETTLE_SECONDS` (600) e `SENTRYLENS_VACCINES_DB_PATH` (omissão `scripts/vaccines.sqlite3`).
+- **O que a aba mostra:** em 💉 Candidates, a lista das vaccines com filtros por ataque, técnica MITRE e "Incluir substituídas", uma linha com o estado do gerador (última execução ou o código do erro) e, ao escolher uma linha, o detalhe com a origem, as propostas e a cadeia de substituição, sempre com o aviso "Proposta — não aplicada no Wazuh".
+- **Limites:** o id (`vac-` + 12 hex) deteta troca ou duplicação mas não autentica; o estado do gerador é em memória (volta a "ainda não correu" depois de reiniciar o backend); com alertas truncados o risco fica sinalizado. Detalhes em [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) e [`docs/API.md`](docs/API.md).
+
+---
+
 ## Machine Learning
 
 O painel **ML Anomalias** usa um `IsolationForest` (scikit-learn), um modelo não supervisionado: aprende o que é um alerta normal neste ambiente e assinala o que se afasta disso. Serve de **segunda opinião** sobre as regras, não de substituto.
 
-Resultados do primeiro ciclo com dados reais do laboratório (14 set 2026; 5 ataques lançados a partir do Kali, 35 eventos processáveis, 20 rotulados como ataque):
+### Resultados medidos, e o que eles provam
+
+O primeiro ciclo com dados reais (14 de setembro de 2026) mediu, sobre **35 eventos processáveis** de 500 alertas capturados no laboratório — números que vêm do artefacto [`scripts/ml_training_report.json`](scripts/ml_training_report.json), gerado pelo `--report` do `train_anomaly_model.py`; ainda **não** há nenhuma versão registada no registo de modelos que os produza:
 
 | | Precisão | Recall | F1 |
 |---|---|---|---|
 | ML (Isolation Forest) | 0,86 | 0,30 | 0,44 |
 | Regras (`event_catalog.py`) | 0,88 | 0,35 | 0,50 |
 
-**Atenção ao que isto significa:** a amostra é pequena, por isso não é uma estimativa de desempenho em produção. O ML não é melhor do que as regras; o interesse está em os dois falharem em sítios diferentes (5 alertas marcados por ambos, 2 só pelo ML, 3 só pelas regras) e em essa diferença ser mensurável.
+**Isto é um registo histórico, não um resultado reproduzível hoje.** A medição foi feita com o `scripts/attack_log.jsonl` de 14 de setembro, que registava os 5 ataques lançados nessa sessão. O `attack_log.jsonl` que existe no repositório hoje é de **6 de outubro de 2026** e **não cobre** a janela do dataset: avaliá-lo contra estes eventos dá **0 ataques rotulados** e recall 0 **por definição** — não por falha do modelo. O comando de avaliação avisa-o quando isso acontece, em vez de publicar o número a zero.
+
+Para uma avaliação rotulada a sério: lança os ataques com `scripts/attack_scenarios.py`, exporta os alertas **na mesma janela** com `scripts/export_raw_events.py`, e avalia com `python model_registry.py evaluate vN --events ... --attack-log ... --dataset-origin real`. O resultado fica gravado no `metadata.json` **daquela versão** e é o que a aba 📐 Evaluation mostra. Nenhum número aparece no dashboard sem dizer que versão mediu e sobre que dataset.
 
 Para treinar o modelo:
 
 ```bash
 cd scripts
-python train_anomaly_model.py
+python model_registry.py train v1 --events <ficheiro.json> --dataset-origin real
 ```
 
-Isto escreve `models/isolation_forest.pkl` e `models/scaler.pkl`, que não são versionados. Até existirem, `GET /api/ml-anomalies` devolve `503`. Metodologia, features e o ciclo de validação completo estão em [`docs/ML.md`](docs/ML.md).
+É este comando — e não o `train_anomaly_model.py` — quem cria a pasta da versão `models/vN/`, escreve o `metadata.json`, grava o `models/ACTIVE` a apontar para ela e verifica o SHA-256 dos `.pkl` **antes** de a activar. O `v1` do comando é um rótulo: o id final é o seguinte livre no registo (`next_version_id`, `max+1`). Até existirem versões registadas, `GET /api/ml-anomalies` devolve `503`. Metodologia, features e o ciclo de validação completo estão em [`docs/ML.md`](docs/ML.md).
+
+`train_anomaly_model.py` continua a existir como **primitiva de treino**, e é o que o comando usa por dentro: carrega o dataset, treina o `IsolationForest` e faz `joblib.dump` de dois `.pkl` na pasta de `--models-dir`, que é obrigatória. Não toca no registo — não cria `models/vN/`, não escreve `metadata.json`, não mexe no `ACTIVE`. Por isso `--models-dir` tem de apontar para fora de `models/`, que é o que o próprio `save_model` avisa. O `--report <ficheiro>` é opt-in e grava o resumo como artefacto avulso (ex.: `ml_training_report.json`), nunca dentro do registo.
+
+### Registo de modelos
+
+- **Versões:** cada execução de `model_registry.py train` cria uma nova pasta `models/vN/` (ex.: `v1`, `v2`) com `isolation_forest.pkl`, `scaler.pkl` e `metadata.json`. A pasta `models/ACTIVE` aponta para a versão atualmente ativa.
+- **Adopt:** `python model_registry.py adopt --models-dir models` regista o que já existe em `scripts/models/` como `v1` e a activa. Se `v1` já existir, recusa.
+- **SHA-256:** antes de a pasta `vN` ficar visível, o SHA-256 dos `.pkl` é verificado contra os bytes originais. Deteta corrupção e troca acidental, mas não autentica quem escreve — quem reescreve `models/` reescreve também o `metadata.json`.
+- **`ACTIVE`:** depois de um adopt ou de um treino, é necessário reiniciar o backend (`uvicorn main:app --reload`) para que a cache do modelo seja atualizada e a nova versão seja carregada.
+- **API:** `GET /api/ml/models` devolve o registo completo de todas as versões, incluindo a ativa, com os metadados, SHA-256 e estado de avaliação.
+- **Limitação:** até à primeira versão registada, o que o backend carrega é o modelo legado (`scripts/models/isolation_forest.pkl` + `scaler.pkl`), que não tem verificação de integridade. A partir da primeira versão registada, o backend carrega uma versão com SHA-256 verificado.
 
 ---
 
 ## Início rápido
 
-### Pré-requisitos
+### Opção A: Usar VMs Pré-configuradas (Recomendado)
+
+A forma mais rápida de começar é usar as VMs já prontas com Wazuh e Kali pré-instalados:
+
+1. **Baixar as VMs** da [página de Releases](https://github.com/your-org/SentryLens/releases):
+   - `sentrylens-wazuh-manager-virtualbox.ova` — Wazuh Manager (Ubuntu 22.04 + Wazuh)
+   - `sentrylens-kali-attacker-virtualbox.ova` — Kali Attacker (opcional, para Red vs Blue)
+
+2. **Importar no VirtualBox**: File → Import Appliance → selecionar o `.ova`
+
+3. **Iniciar as VMs** e obter os IPs:
+   ```bash
+   # Dentro da VM Wazuh Manager
+   ip a
+   ```
+
+4. **Obter credenciais do Wazuh**:
+   ```bash
+   # Dentro da VM Wazuh Manager
+   wazuh-passwords
+   ```
+
+5. **Configurar o backend** (ver abaixo) com o IP da VM e as credenciais obtidas.
+
+> **Nota**: As VMs Hyper-V (`.vhdx`) também estão disponíveis para quem usa Hyper-V em vez de VirtualBox.
+
+Ver detalhes completos em [`packer/README.md`](packer/README.md).
+
+---
+
+### Opção B: Instalação Manual
+
+Se preferires montar o laboratório do zero:
+
+#### Pré-requisitos
 
 - Python 3.12 ou superior.
 - Um laboratório Wazuh acessível por rede: uma VM Ubuntu Server 22.04 com Wazuh instalado, em VirtualBox ou Hyper-V. O guia [`docs/LAB_WAZUH_HYPERV.md`](docs/LAB_WAZUH_HYPERV.md) descreve a montagem passo a passo.
@@ -259,7 +324,7 @@ Ver [`QUICKSTART.md`](QUICKSTART.md).
 
 ## Testes
 
-33 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
+48 scripts standalone, sem pytest (`python run_all_tests.py` corre-os todos em paralelo). Correm sem laboratório, porque o Wazuh e o SSH estão simulados. Cada um imprime `[OK]` ou `[FALHOU]` por caso e termina com código 1 se algo falhar.
 
 ```bash
 cd scripts
@@ -269,6 +334,9 @@ python test_compliance.py       # motor RGPD/NIS2/AI Act
 python test_ml_anomalies.py     # /api/ml-anomalies
 python test_redblue.py          # correlação Red vs Blue
 python test_network_detections.py
+python test_frontend_static.py  # frontend: contratos estáticos (gitignore, handlers inline, modais, CSS)
+python test_ui_helpers.py       # frontend: helpers puros de ui_helpers.js (node:vm)
+python test_vaccines_api.py     # vaccines: rotas, ciclo e garantias negativas
 # ... e os restantes test_*.py
 ```
 
@@ -286,6 +354,7 @@ Todos os endpoints `/api/*` exigem o header `X-API-Key` e devolvem JSON (exceto 
 | GET | `/api/stats` | KPIs agregados |
 | GET | `/api/compliance` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/ml-anomalies` | Isolation Forest vs. regras |
+| GET | `/api/ml/models` | Registo de modelos (versões, ativa, adopt, avaliação) |
 | GET | `/api/redblue/metrics` | Cobertura e MTTD por cenário de ataque |
 | GET | `/api/redblue/network` | Snapshot da captura de rede |
 | GET | `/api/detections` | Vista unificada recente dos detetores (regra/ML/rede) |
@@ -293,24 +362,40 @@ Todos os endpoints `/api/*` exigem o header `X-API-Key` e devolvem JSON (exceto 
 | GET | `/api/incidents` | Incidentes (rotas `/api/incidents/*`) |
 | GET | `/api/attacks` | Registo de ataques, esperado vs. real |
 | GET | `/api/attack-library` | Catálogo de cenários de ataque |
+| GET | `/api/vaccines` | Vaccines propostas (R11), filtros e estado do gerador |
+| GET | `/api/vaccines/{id}` | Detalhe de uma vaccine: regra proposta e origem |
 | GET | `/api/network/live-traffic` \| `detections` \| `evidence` | Resumos dedicados de rede |
 | GET | `/api/siem/health` | Saúde do SIEM |
 | GET | `/api/history/query` | Consulta ao histórico (índice SQLite) |
 | GET | `/api/export/report` | Relatório HTML autónomo |
+| POST | `/api/ws-ticket` | Ticket de uso único (30 s) para abrir um WebSocket |
 | WS | `/ws/alerts` | Alertas novos em tempo real |
 | WS | `/ws/network` | Pacotes e deteções de rede em tempo real |
 
-Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browsers não enviam headers personalizados no handshake. A lista completa, com parâmetros, está em [`docs/API.md`](docs/API.md).
+Os WebSockets autenticam-se com `?ticket=...`: o browser pede primeiro `POST /api/ws-ticket` (com `X-API-Key`) e abre o socket com o ticket devolvido, porque os browsers não enviam headers personalizados no handshake. O ticket é opaco, de uso único, expira em 30 s e vive só em memória; `?api_key=` deixou de ser aceite. A lista completa, com parâmetros, está em [`docs/API.md`](docs/API.md).
 
 ---
 
 ## Segurança
 
-- **API key obrigatória** em todos os endpoints REST, em modo *fail-closed*: sem a variável definida, tudo devolve `401`.
-- **CORS restrito** a `localhost` e `127.0.0.1`.
-- **Sem Swagger nem `/docs`**, de propósito: as rotas automáticas do FastAPI não passam pela proteção por API key.
-- **`WAZUH_VERIFY_SSL=false` por omissão**, porque o laboratório usa o certificado autoassinado gerado pelo instalador do Wazuh. Muda para `true` se tiveres um certificado válido.
+Como o próprio dashboard está protegido (tudo verificado no código; detalhe e histórico de auditorias em [`docs/SECURITY.md`](docs/SECURITY.md)):
+
+- **API key por rota, fail-closed.** Cada rota REST `/api/*` declara `dependencies=_REQUIRE_API_KEY` (header `X-API-Key`), nunca a nível de app. Sem `SENTRYLENS_API_KEY` definida, tudo devolve `401`. A comparação usa `secrets.compare_digest` (sem fuga por tempo). Os WebSockets `/ws/alerts` e `/ws/network` autenticam-se à parte, com um ticket de uso único obtido em `POST /api/ws-ticket` (que exige a API key); a chave já não vai no URL.
+- **Sem Swagger nem `/docs`**, de propósito: as rotas automáticas do FastAPI não passam pela proteção por API key (`docs_url=None`).
+- **CORS restrito** a `localhost` e `127.0.0.1` (qualquer porta), por `allow_origin_regex`. É uma camada adicional, não substitui a API key.
+- **Servidor do frontend com whitelist.** `scripts/serve_frontend.py` só serve ficheiros de uma lista fixa (`ALLOWED_FILES`), liga só a `127.0.0.1` e envia `X-Content-Type-Options: nosniff` e `Cache-Control: no-store`. Por isso não expõe `scripts/.env`, ao contrário de `python -m http.server` na raiz.
+- **Content-Security-Policy.** `serve_frontend.py` envia CSP nas respostas HTML: `script-src 'self'` (sem `unsafe-inline`), `connect-src` só para `'self'` e loopback (`http`/`ws` em `127.0.0.1` e `localhost`), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`. `style-src` mantém `'unsafe-inline'` só porque o HTML e o JS usam atributos `style=""`.
+- **Sem handlers inline.** Nenhum `onclick=` (ou outro `on*=`) no HTML ou nos `*.js`; a interação usa `data-action`/`data-id` com listeners delegados. `scripts/test_frontend_static.py` falha se algum reaparecer. Esta regra nasceu de uma XSS confirmada na aba Equipa SOC.
+- **Escape de todo o texto dinâmico.** O frontend passa os dados por `escapeHtml()` antes de os inserir no HTML; o relatório HTML exportado pelo backend usa `html.escape()`, porque é aberto fora do dashboard.
+- **Triagem JEV opt-in.** `POST /api/incidents/{id}/triage` é a única rota que envia dados para fora (`api.typesafe.ai`). Só funciona com `SENTRYLENS_JEV_ENABLED` e `TYPESAFE_API_KEY` definidas; caso contrário não chama a rede. Envia só agregados anonimizados.
+- **Vaccines só em leitura.** Uma vaccine é sempre uma proposta (`proposed`); a API recusa qualquer escrita com `405`.
+- **Sem recursos externos.** O Chart.js 4.5.1 e as fontes são servidos localmente a partir de `vendor/` (o hash SHA-384 do Chart.js é verificado por `test_frontend_static.py`); o dashboard abre sem internet.
+- **`WAZUH_VERIFY_SSL=false` por omissão**, porque o laboratório usa o certificado autoassinado do instalador do Wazuh. Muda para `true` se tiveres um certificado válido.
 - Nunca versiones o `scripts/.env`.
+
+Limitações conhecidas (ainda por fazer, Ondas 2 a 8 da auditoria ao frontend):
+
+- A chave é entregue ao browser por `/config.js` (só same-origin, gerado a partir de `scripts/.env`).
 
 ---
 
@@ -326,12 +411,14 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 │   ├── compliance_evaluator.py / .yaml          motor RGPD, NIS2 e AI Act
 │   ├── network_monitor.py / network_detections.py   captura e deteção de rede
 │   ├── ml_anomalies.py / feature_extractor.py / train_anomaly_model.py   Machine Learning
+│   ├── model_registry.py, ml_evaluation.py, export_raw_events.py   registo, avaliação e exportação
 │   ├── attack_scenarios.py / redblue_correlator.py  Red vs Blue
 │   ├── incident_*.py, attack_registry.py, attack_library.py/.yaml   incidentes, registo e biblioteca de ataques
+│   ├── vaccine_engine.py / vaccine_store.py / vaccine_ingest.py   vaccines propostas (R11)
 │   ├── detection_event.py, network_soc.py, siem_health.py   deteções unificadas, painéis de rede, saúde do SIEM
 │   ├── history_store.py / history_index.py      histórico JSONL e índice SQLite
 │   ├── deploy/                                  serviço tshark e logrotate da VM
-│   └── test_*.py                                33 testes standalone
+│   └── test_*.py                                48 testes standalone
 └── docs/                                        API, ML e guia do laboratório
 ```
 
@@ -341,7 +428,7 @@ Os WebSockets autenticam-se com `?api_key=...` na query string, porque os browse
 
 - **API key partilhada:** não há login nem distinção entre utilizadores. Para uso real, evoluir para autenticação por utilizador.
 - **Perfil da organização fixo:** a conformidade usa um perfil estático. Falta ligar `scripts/nis2_lookup.py` a dados reais de uma empresa.
-- **ML com pouca amostra:** o modelo foi treinado com 35 eventos reais. Repetir os cenários de ataque ao longo de vários dias daria uma estimativa mais robusta.
+- **ML com pouca amostra e sem versão registada:** hoje `scripts/models/` só tem os dois `.pkl` soltos (`isolation_forest.pkl` + `scaler.pkl`), sem pasta `vN/`, sem `ACTIVE` e sem `metadata.json` — ainda não foi corrido nenhum `train` nem nenhum `adopt`, logo não há versão nem avaliação registadas, e o que o backend carrega continua a ser o legado, sem verificação de integridade. E o dataset de referência também não é reavaliável hoje: o `attack_log.jsonl` actual só cobre 2026-10-06 e não rotula a janela de 2026-09-14.
 - **Deteção de rede por limiares fixos:** não aprende uma linha de base do tráfego normal.
 - **Só Windows:** a monitorização do sistema local usa WMI e PowerShell.
 

@@ -1,6 +1,6 @@
 // Abas "Live Traffic", "Network Detections" e "PCAP / Evidence" (Roadmap v2,
 // R6 — Network SOC). Carregado depois de app.js: reutiliza os seus globais
-// (API_BASE, API_KEY, escapeHtml, formatTimestamp, renderPanelError) — não
+// (escapeHtml, formatTimestamp, renderPanelError) — não
 // redeclarar nenhum aqui. Reaproveita os dados já recolhidos por
 // network_monitor.py/network_detections.py (mesma fonte do painel de rede
 // da aba Red vs Blue, redblue.js) através de 3 rotas dedicadas
@@ -24,29 +24,16 @@ function nsIsActive(tabEl) {
 
 function nsCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function nsDetail(detail) {
   if (!detail || typeof detail !== "object" || Object.keys(detail).length === 0) return "—";
-  return escapeHtml(JSON.stringify(detail));
+  return JSON.stringify(detail);
 }
 
 function nsTypeLabel(type) {
   return NS_DETECTION_TYPE_LABELS[type] || type || "—";
-}
-
-async function nsRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
 }
 
 // ===== Live Traffic =====
@@ -54,15 +41,15 @@ async function nsRequest(path) {
 function nsRenderCountTable(bodyId, rows, labelKey, countKey, colspan) {
   const body = document.getElementById(bodyId);
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="${colspan}" class="empty-state">Sem dados.</td></tr>`;
+    htmRender(body, htmlT`<tr><td colspan="${colspan}" class="empty-state">Sem dados.</td></tr>`);
     return;
   }
-  body.innerHTML = rows.map((r) => `<tr><td>${nsCell(r[labelKey])}</td><td>${nsCell(r[countKey])}</td></tr>`).join("");
+  htmRender(body, htmlT`${rows.map((r) => htmlT`<tr><td>${nsCell(r[labelKey])}</td><td>${nsCell(r[countKey])}</td></tr>`)}`);
 }
 
 async function refreshLiveTraffic() {
   try {
-    const data = await nsRequest("/api/network/live-traffic");
+    const data = await apiRequest("/api/network/live-traffic");
     renderPanelError("#live-traffic-panel", null);
     document.getElementById("nst-note").textContent = data.configured
       ? `Captura de rede configurada — ${data.total} pacote(s) no buffer.`
@@ -80,11 +67,11 @@ async function refreshLiveTraffic() {
     const ports = (data.top_ports || []).map((p) => ({ port: p.port, packets: p.packets }));
     nsRenderCountTable("nst-ports-body", ports, "port", "packets", 2);
   } catch (err) {
-    const message = `Não foi possível carregar o Live Traffic: ${err.message}`;
+    const message = `Não foi possível carregar o Live Traffic: ${apiErrorMessage(err)}`;
     renderPanelError("#live-traffic-panel", message);
     document.getElementById("nst-note").textContent = "Sem dados.";
     ["nst-protocol-body", "nst-talkers-body", "nst-ports-body"].forEach((id) => {
-      document.getElementById(id).innerHTML = `<tr><td colspan="2" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+      htmRender(document.getElementById(id), htmlT`<tr><td colspan="2" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
     });
   }
 }
@@ -93,7 +80,7 @@ async function refreshLiveTraffic() {
 
 async function refreshNetworkDetections() {
   try {
-    const data = await nsRequest("/api/network/detections");
+    const data = await apiRequest("/api/network/detections");
     renderPanelError("#network-detections-panel", null);
     document.getElementById("nsd-note").textContent = data.configured
       ? "Captura de rede configurada."
@@ -106,21 +93,21 @@ async function refreshNetworkDetections() {
 
     const body = document.getElementById("nsd-recent-body");
     const recent = data.recent || [];
-    body.innerHTML = recent.length
-      ? recent.map((d) => `<tr>
+    htmRender(body, recent.length
+      ? htmlT`${recent.map((d) => htmlT`<tr>
           <td>${d.timestamp ? formatTimestamp(d.timestamp) : "—"}</td>
           <td>${nsCell(nsTypeLabel(d.type))}</td>
           <td>${nsCell(d.src_ip)}</td>
           <td>${nsCell(d.dst_ip)}</td>
           <td>${nsDetail(d.detail)}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`;
+        </tr>`)}`
+      : htmlT`<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`);
   } catch (err) {
-    const message = `Não foi possível carregar as Network Detections: ${err.message}`;
+    const message = `Não foi possível carregar as Network Detections: ${apiErrorMessage(err)}`;
     renderPanelError("#network-detections-panel", message);
     document.getElementById("nsd-note").textContent = "Sem dados.";
-    document.getElementById("nsd-bytype-body").innerHTML = `<tr><td colspan="2" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
-    document.getElementById("nsd-recent-body").innerHTML = `<tr><td colspan="5" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+    htmRender(document.getElementById("nsd-bytype-body"), htmlT`<tr><td colspan="2" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
+    htmRender(document.getElementById("nsd-recent-body"), htmlT`<tr><td colspan="5" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
   }
 }
 
@@ -136,7 +123,7 @@ function nsEvidenceQuery() {
 
 async function refreshPcapEvidence() {
   try {
-    const data = await nsRequest(`/api/network/evidence?${nsEvidenceQuery()}`);
+    const data = await apiRequest(`/api/network/evidence?${nsEvidenceQuery()}`);
     renderPanelError("#pcap-evidence-panel", null);
     document.getElementById("nse-disclaimer").textContent = data.note || "";
     document.getElementById("nse-notice").textContent = data.total
@@ -145,21 +132,21 @@ async function refreshPcapEvidence() {
 
     const body = document.getElementById("nse-body");
     const entries = data.entries || [];
-    body.innerHTML = entries.length
-      ? entries.map((e) => `<tr>
+    htmRender(body, entries.length
+      ? htmlT`${entries.map((e) => htmlT`<tr>
           <td>${nsCell(e.date)}</td>
           <td>${nsCell(e.time)}</td>
           <td>${nsCell(nsTypeLabel(e.type))}</td>
           <td>${nsCell(e.src_ip)}</td>
           <td>${nsCell(e.dst_ip)}</td>
           <td>${nsDetail(e.detail)}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="6" class="empty-state">Sem dados para este dia.</td></tr>`;
+        </tr>`)}`
+      : htmlT`<tr><td colspan="6" class="empty-state">Sem dados para este dia.</td></tr>`);
   } catch (err) {
-    const message = `Não foi possível carregar a evidência: ${err.message}`;
+    const message = `Não foi possível carregar a evidência: ${apiErrorMessage(err)}`;
     renderPanelError("#pcap-evidence-panel", message);
     document.getElementById("nse-notice").textContent = "";
-    document.getElementById("nse-body").innerHTML = `<tr><td colspan="6" class="empty-state">Sem dados — ${escapeHtml(err.message)}.</td></tr>`;
+    htmRender(document.getElementById("nse-body"), htmlT`<tr><td colspan="6" class="empty-state">Sem dados — ${apiErrorMessage(err)}</td></tr>`);
   }
 }
 

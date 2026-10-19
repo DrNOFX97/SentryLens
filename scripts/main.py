@@ -20,9 +20,11 @@ import os
 import secrets
 import sqlite3
 import sys
+import time
 from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Literal
+from typing_extensions import Annotated
 
 # Windows redirects stdout/stderr para o codepage da consola por omissão,
 # o que corrompe os acentos nos logs (ex: "Violações" -> "Viola��es") quando
@@ -33,15 +35,25 @@ for _stream in (sys.stdout, sys.stderr):
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 import incident_ingest
 import jev_client
 import ml_anomalies
+import model_registry
+
+# `ml_training` entra por import NORMAL e não tardio, ao contrário do
+# `train_anomaly_model`/`ml_evaluation` (que o registo só carrega dentro das
+# funções, por contrato stdlib puro). A razão é o arranque: o backend já
+# carrega scikit-learn por `ml_anomalies` -> `feature_extractor`/`joblib`, e o
+# `/api/ml-anomalies` já falha se o não tiver — portanto um import tardio aqui
+# não pouparia nada e só mudaria o sítio do erro. Não trocar por `importlib`.
+import ml_training
 import soc_metrics
+import vaccine_ingest
 from admin_activity import build_admin_activity_report
 from attack_library import ID_RE as ATTACK_LIBRARY_ID_RE, build_attack_library, get_entry as get_attack_library_entry, load_attack_library
 from attack_registry import build_attack_registry, summarize as summarize_attacks
@@ -81,6 +93,8 @@ from system_monitor import (
     measure_network_speed,
     record_usage_sample,
 )
+from vaccine_engine import VACCINE_ID_RE, build_vaccine_candidates
+from vaccine_store import VaccineStore, resolve_db_path as resolve_vaccines_db_path
 from wazuh_client import WazuhIndexerClient, WazuhManagerClient
 from websocket_alerts import ConnectionManager, alert_poll_loop
 
@@ -762,14 +776,292 @@ async def get_ml_anomalies(hours: int = Query(24, ge=1, le=168, description="Jan
         model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except model_registry.ModelRegistryError as e:
+        # O registo recusou a versão ativa (hash adulterado, ACTIVE
+        # inválido, metadados corrompidos): 503 com o código estável, nunca
+        # 500 e nunca texto de exceção — a causa fica no log (API-02).
+        logger.warning("/api/ml-anomalies: registo de modelos recusou o carregamento (%s)", e.code)
+        raise HTTPException(status_code=503, detail=e.code)
 
     try:
         raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
         report = ml_anomalies.build_ml_anomalies_report(raw_alerts, model, scaler)
         report["window_hours"] = hours
+        # Sinais de INTEGRIDADE da janela, não métricas: o fetch é limitado a
+        # 1000 alertas (newest-first), e uma concordância calculada sobre uma
+        # janela truncada não é uma concordância completa — sem este sinal o
+        # dashboard não teria como distinguir "concordância total" de "concordância
+        # só no que coube no tecto" (D-10). Mesmo padrão de /api/redblue/metrics.
+        # Aditivo: nenhuma chave que já existia muda de nome nem de significado.
+        report["alerts_fetched"] = len(raw_alerts)
+        report["alerts_truncated"] = len(raw_alerts) >= 1000
+        # D-06: o relatório não dizia que versão mediu. Durante e depois de um
+        # reset_cache um relatório pode ser de uma versão que já não é a
+        # activa, e sem esta linha o painel Evaluation diz "o modelo" e não
+        # diz qual — que é o número inventado por omissão.
+        #
+        # Ler DEPOIS do build_ml_anomalies_report é deliberado: o valor tem de
+        # ser o do load_model que carregou o modelo que produziu estes
+        # números. Lê-lo antes abriria a janela de um reset_cache concorrente
+        # a trocar `_loaded_from` entre a leitura e o `predict`.
+        #
+        # Aditivo, pela mesma regra de alerts_truncated: nenhuma chave que já
+        # existia muda de nome nem de significado. "legacy" é uma resposta
+        # honesta (o modelo sem metadados, sem hash verificado), None é
+        # "nada carregado".
+        report["model_version"] = ml_anomalies.loaded_version()
         return report
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contactar Wazuh Indexer: {e}")
+
+
+@app.get("/api/ml/models", dependencies=_REQUIRE_API_KEY)
+async def get_ml_models():
+    """
+    Registo de versões do modelo ML (R9): versões em models/vN/, qual está
+    ativa (models/ACTIVE) e os metadados de cada uma.
+
+    Esta rota continua SÓ LEITURA sobre o registo. A escrita por HTTP existe
+    desde o R10 e vive em duas rotas novas — `POST /api/ml/train` e
+    `POST /api/ml/models/{version_id}/activate` —, não nesta. Inverteu-se a
+    afirmação anterior ("treinar é operação de CLI, nunca por HTTP"); as quatro
+    protecções que fecham a superfície nova (nenhum caminho do pedido,
+    single-flight, tetos no corpo, `Literal` de catálogo fechado) estão em
+    .planning/phases/10-ml-learning-loop/10-CONTEXT.md, decisão D-01, e o
+    risco residual aceite está em docs/SECURITY.md.
+
+    `loaded` é a versão que o ml_anomalies tem de facto em memória (D-02),
+    que pode não ser a ativa: a cache do modelo é por processo.
+
+    O contrato da resposta está em
+    .planning/phases/01-registo-de-modelos-ponta-a-ponta/SKELETON.md e a
+    transformação dos dados é toda de model_registry.build_models_report;
+    aqui só há o mapeamento de erros. `registry_unavailable` dá sempre 503,
+    venha de um ModelRegistryError ou de uma exceção inesperada — a causa
+    dessa última fica só no log do servidor, nunca no `detail`, que carrega
+    sempre um código da lista fechada de D-06 (nunca texto de exceção nem
+    caminhos).
+    """
+    try:
+        return await run_in_threadpool(
+            model_registry.build_models_report, ML_MODEL_DIR, ml_anomalies.loaded_version()
+        )
+    except model_registry.ModelRegistryError as e:
+        logger.warning("GET /api/ml/models: %s", e.code)
+        raise HTTPException(status_code=503, detail=e.code)
+    except Exception:
+        logger.exception("GET /api/ml/models: erro inesperado ao ler o registo")
+        raise HTTPException(status_code=503, detail="registry_unavailable")
+
+
+# --- R10: escrita no registo por HTTP (D-01) -------------------------------------
+#
+# A afirmação de `get_ml_models` acima — "treinar é operação de CLI, nunca por
+# HTTP" — foi INVERTIDA por D-01. O que fica escrito aqui é o que a superfície
+# nova garante, e a lista é curta de propósito:
+#
+#   1. Nenhum caminho vem do corpo. O `dataset` é um `Literal` de um catálogo
+#      fechado que o servidor resolve (`ml_training.resolve_export_path`), e o
+#      registo é sempre o `ML_MODEL_DIR` lido a nível de módulo.
+#   2. Um Só treino (e uma só activação) a cada vez — `ml_training._slot()`,
+#      que responde 409 a quem chega enquanto a outra corre.
+#   3. Três tetos no corpo, porque sem tecto `n_estimators=10**9` é um DoS de
+#      uma linha.
+#   4. `extra="forbid"`, porque o default do Pydantic v2 é IGNORAR uma chave
+#      desconhecida: sem isto, um `{"models_dir": "..."}" no corpo seria
+#      descartado em silêncio e o utilizador acreditaria ter escolhido o sítio.
+#
+# O que NÃO fecha: a chave continua a ser global e sem papéis. Quem a tem passa
+# a poder escrever em `models/` — e o SHA-256 dos `.pkl` deixa de ser uma
+# defesa e passa a ser um detector de corrupção. Isso é o risco residual que
+# D-08 manda escrever em docs/SECURITY.md.
+
+# Código de TRAINING_ERROR_CODES -> status HTTP. Escrita aqui como constante
+# fechada, e o `test_ml_models_api.py` tem uma cópia escrita à mão dela para
+# comparar — a mesma costura que `EVALUATION_KEYS` impõe ao registo.
+# `dataset_not_found` é 404 (o ficheiro não existe) e `dataset_unusable` é 422
+# (existe mas não dá linhas treináveis): são sintomas diferentes para quem lê.
+_ML_WRITE_STATUS = {
+    "dataset_not_found": 404,
+    "dataset_unusable": 422,
+    "training_in_progress": 409,
+    "training_failed": 503,
+}
+
+# Código de ERROR_CODES -> status HTTP. NÃO é "ModelRegistryError dá sempre
+# 503": uma versão que não existe é um 404 honesto (é o que `GET /api/ml/models`
+# já provoca no leitor, e o frontend traduz `active_not_found`), e o 503 fica
+# para o que é de facto indisponibilidade — registo ilegível, `ACTIVE` que não
+# decodifica, `.pkl` cujo hash não bate. As nove chaves estão escritas: um
+# código novo que não entre aqui cai em 503, que é o fail-closed certo (nunca
+# 500, nunca um `detail` que não seja código).
+_ML_REGISTRY_STATUS = {
+    "invalid_version_id": 404,
+    "active_not_found": 404,
+    "metadata_missing": 404,
+    "metadata_invalid": 503,
+    "artifact_missing": 404,
+    "hash_mismatch": 503,
+    "already_adopted": 409,
+    "no_legacy_model": 404,
+    "registry_unavailable": 503,
+}
+
+# As duas escolhas que o servidor faz em nome do cliente, e a tripla de
+# proveniência do lote. `dataset_origin` é o mesmo `DATASET_ORIGINS` do
+# `ml_evaluation` — os doisórãos são listas separadas e iguais por construção,
+# não por importação (o registo não importa o motor).
+MLTrainDataset = Literal["latest_export", "sample_fixture"]
+MLTrainOrigin = Literal["real", "synthetic", "unknown"]
+
+
+class MLTrainRequest(BaseModel):
+    """
+    O corpo de `POST /api/ml/train`. Cinco campos, e a lista é a barreira de
+    D-01.1 — por isso não há aqui nenhum caminho, nome de ficheiro, pasta ou
+    URL, e `extra="forbid"` garante que acrescentar um não passa em silêncio.
+
+    `dataset` e `dataset_origin` são OBRIGATÓRIOS, sem default, e essa é uma
+    decisão deliberada. O default natural de `dataset` seria `"sample_fixture"`
+    (o fixture sintético versionado), e um botão de treinar que em silêncio
+    treina sobre o fixture enquanto o utilizador acredita que treina sobre o
+    laboratório é exactamente o número inventado que PROJECT.md proíbe. Sem
+    default, o frontend tem de MOSTRAR a escolha. O mesmo vale para
+    `dataset_origin`: o CLI tem `"unknown"` por omissão, mas por HTTP o "não
+    declarado" é uma decisão de quem carrega no botão, não um esquecimento de
+    quem o escreveu.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    dataset: MLTrainDataset
+    dataset_origin: MLTrainOrigin
+    # Os três tetos são de D-01.3. Testados pelos dois lados no
+    # `test_ml_models_api.py`: fora -> 422, dentro -> 200 — um tecto que nunca
+    # deixa passar nada também não é um contrato.
+    contamination: float = Field(default=0.2, ge=0.01, le=0.5)
+    random_state: int = Field(default=42, ge=0, le=4294967295)
+    n_estimators: int = Field(default=200, ge=10, le=1000)
+
+
+def _ml_write_error(exc) -> HTTPException:
+    """
+    Tradutor ÚNICO das falhas das duas rotas de escrita em resposta HTTP.
+
+    O `detail` é sempre um código — de `ml_training.TRAINING_ERROR_CODES`, de
+    `model_registry.ERROR_CODES`, ou a `NO_MODEL_MESSAGE` (que já é uma frase
+    PT sem caminho, e o frontend já a conhece). Nunca texto de excepção, nunca
+    caminho, nunca traceback: a causa fica no log do servidor e o corpo da
+    resposta fica no código. É a mesma política de API-02 que `get_ml_models`
+    já aplica, e o `test_ml_models_api.py` mede a tabela linha a linha.
+    """
+    if isinstance(exc, ml_training.TrainingError):
+        codigo = exc.code
+        return HTTPException(status_code=_ML_WRITE_STATUS[codigo], detail=codigo)
+    if isinstance(exc, model_registry.ModelRegistryError):
+        return HTTPException(
+            status_code=_ML_REGISTRY_STATUS.get(exc.code, 503), detail=exc.code
+        )
+    if isinstance(exc, FileNotFoundError):
+        # `load_model` não encontrou modelo nenhum: a mensagem é a do registo,
+        # que é accionável e não contém caminho. Uma FileNotFoundError
+        # tracada de fora é traduzida para a mesma, que é a resposta honesta
+        # ("não há modelo") em vez de um caminho do host.
+        return HTTPException(status_code=503, detail=model_registry.NO_MODEL_MESSAGE)
+    if isinstance(exc, KeyboardInterrupt):
+        # `BaseException`, não `Exception`: fica AQUI de propósito, porque o
+        # `except Exception` abaixo não a apanharia e o treino ficava preso
+        # no 500 do uvicorn em vez de dar um 503 com código. O `_slot()` do
+        # motor liberta o lock no `finally` antes de isto chegar aqui.
+        logger.warning("Escrita no registo interrompida a meio (KeyboardInterrupt)")
+        return HTTPException(status_code=503, detail="training_failed")
+    logger.exception("Escrita no registo: erro inesperado")
+    return HTTPException(status_code=503, detail="registry_unavailable")
+
+
+@app.post("/api/ml/train", dependencies=_REQUIRE_API_KEY)
+async def train_ml_model(body: MLTrainRequest):
+    """
+    Treina uma versão nova a partir de um dataset escolhido pelo servidor,
+    regista-a, activa-a e recarrega a cache — em UM pedido, que é o que D-07
+    exige (sem 202, sem `job_id`, sem polling: um treino são ~3 s medidos).
+
+    Devolve 200 com `{version, active, loaded, dataset, parameters,
+    evaluation, catalog_sha256, report}`, onde `report` é o
+    `build_models_report` COMPLETO. Embedder o relatório é o que evita um
+    segundo `GET` só para repintar a tabela no browser sem introduzir uma
+    superfície nova: o payload é o mesmo que `GET /api/ml/models` já devolve.
+
+    `evaluation` é sempre `None` numa versão recém-treinada: um treino não
+    publica métricas sobre o próprio conjunto de treino como se fossem uma
+    avaliação (EVAL-03). Quem avalia é o `model_registry evaluate vN`.
+
+    `loaded` vem do `ml_anomalies` DEPOIS do `reset_cache`/`load_model` que o
+    motor faz dentro do lock, portanto aqui já é a versão nova — reiniciar o
+    backend não é preciso (ao contrário do que a aba Models tem de dizer
+    depois de um `adopt` feito pela CLI).
+    """
+    # A dependency de autenticação corre ANTES da validação do corpo: um
+    # pedido sem chave gets 401 sem que o Pydantic veja sequer o JSON. Por isso
+    # o `except` daqui nunca apanha um HTTPException alheio (422 do FastAPI) —
+    # e por isso o `except Exception` genérico do `_ml_write_error` só é
+    # alcançado por uma falha a sério, nunca por uma validação.
+    try:
+        evento = ml_training.resolve_export_path(body.dataset)
+        log_ataques = ml_training.resolve_attack_log_path(body.dataset)
+        resultado = await run_in_threadpool(
+            ml_training.train_next_version,
+            ML_MODEL_DIR, str(evento), str(log_ataques),
+            contamination=body.contamination,
+            random_state=body.random_state,
+            n_estimators=body.n_estimators,
+            dataset_origin=body.dataset_origin,
+        )
+    except (Exception, KeyboardInterrupt) as exc:
+        # O `KeyboardInterrupt` é nomeado à mão porque é `BaseException` e não
+        # `Exception`: um `Ctrl-C` a meio de um `joblib.dump` dentro do
+        # threadpool chegaria aqui e, sem esta linha, sairia como um 500 do
+        # uvicorn em vez de um 503 com código. O `_slot()` do motor já libertou
+        # o lock no `finally` antes disto.
+        raise _ml_write_error(exc) from None
+    # O relatório vai DEPOIS do treino, e é por esta ordem: o `loaded` que ele
+    # recebe é o de um cache já recarregado, não o da cache anterior.
+    return {
+        **resultado,
+        "report": await run_in_threadpool(
+            model_registry.build_models_report, ML_MODEL_DIR, ml_anomalies.loaded_version()
+        ),
+    }
+
+
+@app.post("/api/ml/models/{version_id}/activate", dependencies=_REQUIRE_API_KEY)
+async def activate_ml_model(version_id: str = Path(..., pattern=r"^v[0-9]{1,4}$")):
+    """
+    Torna a `vN` pedida a activa e recarrega a cache, sem treinar nada.
+
+    Duas camadas validam o id, e são diferentes de propósito: o `pattern` do
+    `Path` do FastAPI é a primeira (um id mal formado é 422 do FastAPI, sem
+    entrar na função) e o `validate_version_id` do registo é a segunda, que
+    protege a CLI e nunca é alcançada por HTTP — porque `VERSION_ID_RE` é a
+    mesma regex, e um `../x` nem casa o `{version_id}` (não casa slashes).
+
+    A verificação de integridade acontece ANTES de escrever o `ACTIVE`: um
+    `.pkl` cujo SHA-256 não bata dá 503 `hash_mismatch` com o `ACTIVE`
+    byte-idêntico e ZERO chamadas a `joblib.load`. A escrita é um
+    compare-and-set, e um `ACTIVE` que mudeu entre a leitura e a escrita dá
+    `training_failed` sem sobrescrever o que o outro escritor deixou.
+    """
+    try:
+        resultado = await run_in_threadpool(
+            ml_training.activate_version, ML_MODEL_DIR, version_id
+        )
+    except (Exception, KeyboardInterrupt) as exc:
+        raise _ml_write_error(exc) from None
+    return {
+        **resultado,
+        "report": await run_in_threadpool(
+            model_registry.build_models_report, ML_MODEL_DIR, ml_anomalies.loaded_version()
+        ),
+    }
 
 
 @app.get("/api/redblue/metrics", dependencies=_REQUIRE_API_KEY)
@@ -787,6 +1079,10 @@ async def get_redblue_metrics(
         model, scaler = ml_anomalies.load_model(ML_MODEL_DIR)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except model_registry.ModelRegistryError as e:
+        # Mesmo mapeamento de /api/ml-anomalies: 503 com o código estável.
+        logger.warning("/api/redblue/metrics: registo de modelos recusou o carregamento (%s)", e.code)
+        raise HTTPException(status_code=503, detail=e.code)
 
     try:
         raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=1000)
@@ -1011,6 +1307,49 @@ class IncidentNote(BaseModel):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 
 
+class IncidentAssignment(BaseModel):
+    analyst: str | None = Field(default=None, max_length=128, description="Nome do analista (null para desatribuir)")
+
+
+# --- SOC Team Models ---
+class AnalystCreate(BaseModel):
+    id: str = Field(..., pattern=r"^analyst-[a-z0-9-]{1,64}$", description="ID do analista (ex: analyst-joao)")
+    name: str = Field(..., max_length=128)
+    tier: int = Field(..., ge=1, le=3, description="Tier SOC: 1=Triagem, 2=Investigação, 3=Caça")
+    email: str | None = Field(default=None, max_length=256)
+
+
+class AnalystUpdate(BaseModel):
+    tier: int | None = Field(default=None, ge=1, le=3)
+    email: str | None = Field(default=None, max_length=256)
+    active: int | None = Field(default=None, ge=0, le=1)
+
+
+class ShiftCreate(BaseModel):
+    analyst_id: str = Field(..., max_length=128)
+    start_ts: str = Field(..., description="ISO 8601 com timezone")
+    end_ts: str = Field(..., description="ISO 8601 com timezone")
+    role: str = Field(..., pattern=r"^(primary|secondary|on_call)$", description="primary, secondary, ou on_call")
+
+
+class EscalationRuleCreate(BaseModel):
+    from_tier: int = Field(..., ge=1, le=3)
+    to_tier: int | None = Field(default=None, ge=1, le=3)
+    severity: str = Field(..., pattern=r"^(critical|high|medium|low|info)$")
+    auto_escalate: int = Field(default=0, ge=0, le=1)
+    sla_minutes: int | None = Field(default=None, ge=1)
+
+
+class TeamAssign(BaseModel):
+    tier: int = Field(..., ge=1, le=3)
+    analyst: str | None = Field(default=None, max_length=128)
+
+
+class EscalateRequest(BaseModel):
+    to_tier: int = Field(..., ge=1, le=3)
+    analyst: str | None = Field(default=None, max_length=128)
+
+
 class BackfillRequest(BaseModel):
     days: int = Field(default=7, ge=1, le=90)
 
@@ -1048,11 +1387,13 @@ async def list_incidents(
     status: IncidentStatus | None = Query(None),
     severity: IncidentSeverity | None = Query(None),
     hours: int = Query(168, ge=1, le=720, description="Janela temporal (última evidência), em horas"),
+    assigned_to: str | None = Query(None, max_length=128, description="Filtrar por analista atribuído"),
+    assigned_team_tier: int | None = Query(None, ge=1, le=3, description="Filtrar por tier da equipa (1, 2, ou 3)"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    incidents = await _incidents_call(incident_store.list_incidents, status, severity, since, limit, offset)
+    incidents = await _incidents_call(incident_store.list_incidents, status, severity, since, assigned_to, assigned_team_tier, limit, offset)
     summary = await _incidents_call(incident_store.summary, since)
     return {"window_hours": hours, "incidents": incidents, "summary": summary}
 
@@ -1146,18 +1487,29 @@ async def change_incident_status(incident_id: str, body: StatusChange):
 
 
 @app.post("/api/incidents/{incident_id}/triage", dependencies=_REQUIRE_API_KEY)
-async def triage_incident(incident_id: str):
+async def triage_incident(incident_id: str, force: bool = False):
     """Triagem EXPERIMENTAL via JEV (TypeSafe AI), opt-in. Consultiva: não
     altera o incidente. Envia ao serviço externo só um resumo agregado e
-    anonimizado (ver jev_client.build_state)."""
+    anonimizado (ver jev_client.build_state). Salva resultado em cache."""
     if not jev_client.jev_enabled():
         raise HTTPException(status_code=503, detail="jev_disabled")
     incident = await _incidents_call(incident_store.get_incident, incident_id)
     if incident is None:
         raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    
+    # Check cache first (unless force=true)
+    if not force:
+        cached = await _incidents_call(incident_store.get_triage, incident_id)
+        if cached:
+            return {"incident_id": incident_id, "advisory": True, "cached": True, **cached}
+    
     result = await jev_client.triage(incident)
     if not result["ok"]:
         raise HTTPException(status_code=502, detail=result["error"])
+    
+    # Save to cache
+    await _incidents_call(incident_store.save_triage, incident_id, result, _now_iso())
+    
     return {"incident_id": incident_id, "advisory": True, **{k: v for k, v in result.items() if k != "ok"}}
 
 
@@ -1168,6 +1520,189 @@ async def add_incident_note(incident_id: str, body: IncidentNote):
     except IncidentNotFound:
         raise HTTPException(status_code=404, detail="Incidente não encontrado")
     return await _incident_detail(incident_id)
+
+
+@app.patch("/api/incidents/{incident_id}/assignment", dependencies=_REQUIRE_API_KEY)
+async def assign_incident_analyst(incident_id: str, body: IncidentAssignment):
+    """Assign or unassign an analyst to an incident."""
+    try:
+        await _incidents_call(incident_store.assign_analyst, incident_id, body.analyst, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return await _incident_detail(incident_id)
+
+
+# ============================================================
+# SOC Team Management (Tier 1/2/3)
+# ============================================================
+
+# --- Analysts ---
+@app.post("/api/soc/analysts", dependencies=_REQUIRE_API_KEY)
+async def create_analyst(body: AnalystCreate):
+    """Create a new SOC analyst."""
+    try:
+        await _incidents_call(incident_store.create_analyst, body.id, body.name, body.tier, body.email, _now_iso())
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail="Analyst ID or name already exists")
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"ok": True, "id": body.id}
+
+
+@app.get("/api/soc/analysts", dependencies=_REQUIRE_API_KEY)
+async def list_analysts(tier: int | None = Query(None, ge=1, le=3), active_only: bool = True):
+    """List SOC analysts, optionally filtered by tier."""
+    analysts = await _incidents_call(incident_store.list_analysts, tier, active_only)
+    return {"analysts": analysts}
+
+
+@app.get("/api/soc/analysts/{analyst_id}", dependencies=_REQUIRE_API_KEY)
+async def get_analyst(analyst_id: str):
+    """Get a specific analyst by ID."""
+    analyst = await _incidents_call(incident_store.get_analyst, analyst_id)
+    if analyst is None:
+        raise HTTPException(status_code=404, detail="Analista não encontrado")
+    return analyst
+
+
+@app.patch("/api/soc/analysts/{analyst_id}", dependencies=_REQUIRE_API_KEY)
+async def update_analyst(analyst_id: str, body: AnalystUpdate):
+    """Update an analyst's tier, email, or active status."""
+    try:
+        await _incidents_call(incident_store.update_analyst, analyst_id, body.tier, body.email, body.active)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    analyst = await _incidents_call(incident_store.get_analyst, analyst_id)
+    if analyst is None:
+        raise HTTPException(status_code=404, detail="Analista não encontrado")
+    return analyst
+
+
+@app.post("/api/soc/analysts/{analyst_id}/deactivate", dependencies=_REQUIRE_API_KEY)
+async def deactivate_analyst(analyst_id: str):
+    """Deactivate an analyst (soft delete)."""
+    await _incidents_call(incident_store.deactivate_analyst, analyst_id)
+    return {"ok": True}
+
+
+# --- Shifts ---
+@app.post("/api/soc/shifts", dependencies=_REQUIRE_API_KEY)
+async def create_shift(body: ShiftCreate):
+    """Create a shift for an analyst."""
+    try:
+        shift_id = await _incidents_call(incident_store.create_shift, body.analyst_id, body.start_ts, body.end_ts, body.role, _now_iso())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=404, detail="Analista não encontrado")
+    return {"ok": True, "shift_id": shift_id}
+
+
+@app.get("/api/soc/shifts", dependencies=_REQUIRE_API_KEY)
+async def get_shifts(analyst_id: str | None = Query(None, max_length=128, description="Só os turnos deste analista; sem ele, os de todos"),
+                     since: str | None = None, until: str | None = None):
+    """Turnos de um analista ou, sem `analyst_id`, de todos (com nome e tier do analista)."""
+    shifts = await _incidents_call(incident_store.get_shifts, analyst_id or None, since, until)
+    return {"shifts": shifts}
+
+
+@app.get("/api/soc/on-call", dependencies=_REQUIRE_API_KEY)
+async def get_on_call(tier: int = Query(..., ge=1, le=3)):
+    """Get analysts currently on-call for a tier."""
+    now = _now_iso()
+    analysts = await _incidents_call(incident_store.get_current_on_call, tier, now)
+    return {"tier": tier, "on_call": analysts}
+
+
+@app.get("/api/soc/primary", dependencies=_REQUIRE_API_KEY)
+async def get_primary(tier: int = Query(..., ge=1, le=3)):
+    """Get analysts currently on primary shift for a tier."""
+    now = _now_iso()
+    analysts = await _incidents_call(incident_store.get_current_primary, tier, now)
+    return {"tier": tier, "primary": analysts}
+
+
+# --- Escalation Rules ---
+@app.post("/api/soc/escalation-rules", dependencies=_REQUIRE_API_KEY)
+async def create_escalation_rule(body: EscalationRuleCreate):
+    """Create an escalation rule."""
+    try:
+        rule_id = await _incidents_call(
+            incident_store.create_escalation_rule,
+            body.from_tier, body.to_tier, body.severity,
+            body.auto_escalate, body.sla_minutes, _now_iso()
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"ok": True, "rule_id": rule_id}
+
+
+@app.get("/api/soc/escalation-rules", dependencies=_REQUIRE_API_KEY)
+async def list_escalation_rules(from_tier: int | None = Query(None, ge=1, le=3), severity: str | None = Query(None)):
+    """List escalation rules."""
+    rules = await _incidents_call(incident_store.get_escalation_rules, from_tier, severity)
+    return {"rules": rules}
+
+
+@app.get("/api/soc/escalation-rules/{from_tier}/{severity}", dependencies=_REQUIRE_API_KEY)
+async def get_escalation_rule(from_tier: int, severity: str):
+    """Get a specific escalation rule."""
+    rule = await _incidents_call(incident_store.get_escalation_rule, from_tier, severity)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Regra não encontrada")
+    return rule
+
+
+# --- Team-based Incident Operations ---
+@app.patch("/api/incidents/{incident_id}/team", dependencies=_REQUIRE_API_KEY)
+async def assign_incident_team(incident_id: str, body: TeamAssign):
+    """Assign incident to a team tier (and optionally an analyst)."""
+    try:
+        await _incidents_call(incident_store.assign_to_tier, incident_id, body.tier, body.analyst, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return await _incident_detail(incident_id)
+
+
+@app.post("/api/incidents/{incident_id}/escalate", dependencies=_REQUIRE_API_KEY)
+async def escalate_incident(incident_id: str, body: EscalateRequest):
+    """Escalate incident to a higher tier."""
+    try:
+        await _incidents_call(incident_store.escalate_incident, incident_id, body.to_tier, body.analyst, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return await _incident_detail(incident_id)
+
+
+@app.patch("/api/incidents/{incident_id}/sla", dependencies=_REQUIRE_API_KEY)
+async def set_incident_sla(incident_id: str, deadline_iso: str = Body(..., embed=True)):
+    """Set SLA deadline for an incident."""
+    try:
+        await _incidents_call(incident_store.set_sla_deadline, incident_id, deadline_iso, _now_iso())
+    except IncidentNotFound:
+        raise HTTPException(status_code=404, detail="Incidente não encontrado")
+    return await _incident_detail(incident_id)
+
+
+@app.get("/api/soc/sla-breaches", dependencies=_REQUIRE_API_KEY)
+async def get_sla_breaches():
+    """Get incidents with breached SLA."""
+    breaches = await _incidents_call(incident_store.get_sla_breaches, _now_iso())
+    return {"breaches": breaches, "count": len(breaches)}
+
+
+@app.get("/api/soc/summary-by-tier", dependencies=_REQUIRE_API_KEY)
+async def get_summary_by_tier(hours: int = Query(168, ge=1, le=720)):
+    """Summary of incidents grouped by team tier."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    summary = await _incidents_call(incident_store.summary_by_tier, since)
+    return {"window_hours": hours, "by_tier": summary}
 
 
 # ---------------------------------------------------------------------------
@@ -1215,7 +1750,7 @@ async def _build_attack_registry(attack_log: list, hours: int | None) -> tuple[d
     incidents_available = True
     incidents: list[dict] = []
     try:
-        incidents = await run_in_threadpool(incident_store.list_incidents, None, None, None, 100000, 0)
+        incidents = await run_in_threadpool(incident_store.list_incidents, limit=100000, offset=0)
     except sqlite3.Error:
         logger.exception("Attack Registry: base de incidentes indisponível")
         incidents_available = False
@@ -1320,6 +1855,139 @@ async def get_attack_library_item(
     return entry
 
 
+# ---------------------------------------------------------------------------
+# Vaccines (Roadmap v2, R11, Phase 13)
+# O ciclo do backend escreve (attack log -> registo -> motor -> validate_vaccine
+# -> store); as rotas GET só leem. Nenhuma rota de escrita nesta fase.
+# ---------------------------------------------------------------------------
+
+VACCINES_DB_PATH = resolve_vaccines_db_path(os.getenv("SENTRYLENS_VACCINES_DB_PATH"))
+VACCINE_WINDOW_HOURS = vaccine_ingest.env_int(
+    os.environ, "SENTRYLENS_VACCINE_WINDOW_HOURS", vaccine_ingest.DEFAULT_WINDOW_HOURS, 1, ATTACK_MAX_HOURS)
+VACCINE_SETTLE_SECONDS = vaccine_ingest.env_int(
+    os.environ, "SENTRYLENS_VACCINE_SETTLE_SECONDS", vaccine_ingest.DEFAULT_SETTLE_SECONDS,
+    vaccine_ingest.MIN_SETTLE_SECONDS, vaccine_ingest.MAX_SETTLE_SECONDS)
+vaccine_store = VaccineStore(VACCINES_DB_PATH)
+VACCINE_INTERVAL_SECONDS = vaccine_ingest.env_int(
+    os.environ, "SENTRYLENS_VACCINE_INTERVAL_SECONDS", vaccine_ingest.DEFAULT_INTERVAL_SECONDS,
+    vaccine_ingest.MIN_INTERVAL_SECONDS, vaccine_ingest.MAX_INTERVAL_SECONDS)
+vaccine_loop_state = vaccine_ingest.VaccineLoopState()
+
+
+async def _run_vaccine_cycle() -> dict:
+    """Um ciclo (D-01): lê o attack log, constrói o registo, corre o motor e
+    grava as vaccines validadas de ataques já assentes. Devolve sempre
+    {status, error_code, counts, alerts_truncated} e deixa o resultado em
+    vaccine_loop_state. Nunca levanta (salvo cancelamento): o detalhe de uma
+    falha fica só no log, o estado leva um código estável (D-03)."""
+    try:
+        result = await _vaccine_cycle_body()
+    except Exception:
+        logger.exception("Vaccines: ciclo falhou")
+        result = {"status": "error", "error_code": "unexpected_error", "counts": None, "alerts_truncated": None}
+    vaccine_loop_state.record(_now_iso(), **result)
+    return result
+
+
+async def _vaccine_cycle_body() -> dict:
+    def outcome(status: str, error_code: str | None = None, counts: dict | None = None,
+                truncated: bool | None = None) -> dict:
+        return {"status": status, "error_code": error_code, "counts": counts, "alerts_truncated": truncated}
+
+    try:
+        attack_log = await run_in_threadpool(load_attack_log, ATTACK_LOG_PATH)
+    except (OSError, UnicodeDecodeError):
+        logger.exception("Vaccines: attack log ilegível")
+        return outcome("error", "attack_log_unreadable")
+    if not attack_log:
+        return outcome("no_data")
+    registry, correlation, incidents_available = await _build_attack_registry(attack_log, VACCINE_WINDOW_HOURS)
+    result = build_vaccine_candidates(registry, correlation)
+    if result["reason"] == "source_unavailable":
+        return outcome("error", correlation["error_code"] or "source_unavailable")
+    if not incidents_available:  # gravar agora congelaria incident_ids vazios (Pitfall 6)
+        return outcome("error", "incidents_unavailable")
+    if result["reason"] == "no_data":
+        return outcome("no_data")
+    now = datetime.now(timezone.utc)
+    attack_ids = vaccine_ingest.select_attack_ids(
+        registry["attacks"], now, VACCINE_WINDOW_HOURS, VACCINE_SETTLE_SECONDS, incident_engine_parse)
+    try:
+        counts = await run_in_threadpool(
+            vaccine_ingest.persist_vaccines, vaccine_store, result["vaccines"], attack_ids, now.isoformat())
+    except sqlite3.Error:
+        logger.exception("Vaccines: escrita no store falhou")
+        return outcome("error", "store_unavailable")
+    return outcome("ok", None, counts, correlation["alerts_truncated"])
+
+
+async def _vaccine_loop() -> None:
+    """Corre para sempre em background (D-01): um ciclo logo no arranque e
+    depois um a cada VACCINE_INTERVAL_SECONDS (D-02). Uma falha nunca sai do
+    loop; CancelledError (BaseException) propaga e termina-o."""
+    while True:
+        try:
+            await _run_vaccine_cycle()
+        except Exception:
+            logger.exception("Vaccines: falha inesperada no loop")
+            vaccine_loop_state.record(_now_iso(), "error", "unexpected_error")
+        await asyncio.sleep(VACCINE_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_vaccine_loop() -> None:
+    """Lança o loop de geração de vaccines em background."""
+    app.state.vaccine_task = asyncio.create_task(_vaccine_loop())
+
+
+@app.get("/api/vaccines", dependencies=_REQUIRE_API_KEY)
+async def list_vaccines(
+    attack_id: int | None = Query(None, ge=1, le=999_999_999, description="Só as vaccines deste ataque"),
+    technique: str | None = Query(None, pattern=r"^T\d{4}(\.\d{3})?$", description="Técnica MITRE, ex. T1110"),
+    include_superseded: bool = Query(False, description="Incluir as vaccines já substituídas por uma mais recente do mesmo ataque"),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Vaccines propostas, das mais recentes (attack_id mais alto) para as mais
+    antigas. Só leitura. Filtros: `attack_id`, `technique` (MITRE) e
+    `include_superseded`. Por omissão só aparece a vaccine atual de cada ataque:
+    quando o veredito muda, a anterior fica com `superseded_by` e só aparece com
+    `include_superseded=true` (o detalhe devolve-a sempre). `total` conta com
+    os mesmos filtros. 200 com `no_data` só se o store não tem linhas (um filtro
+    sem resultados dá `reason` null); 503 estável se não for possível lê-lo."""
+    try:
+        rows, total, store_total = await run_in_threadpool(
+            vaccine_store.list_vaccines,
+            attack_id=attack_id, technique=technique, include_superseded=include_superseded,
+            limit=limit, offset=offset)
+    except (sqlite3.Error, ValueError):
+        logger.exception("Vaccines: store ilegível")
+        raise HTTPException(status_code=503, detail="store_unavailable")
+    return {
+        "available": store_total > 0,
+        "reason": None if store_total > 0 else "no_data",
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "vaccines": rows,
+        "generator": vaccine_loop_state.snapshot(),
+    }
+
+
+@app.get("/api/vaccines/{vaccine_id}", dependencies=_REQUIRE_API_KEY)
+async def get_vaccine(vaccine_id: Annotated[str, Path(pattern=VACCINE_ID_RE)]):
+    """Detalhe de uma vaccine pelo id (inclui as substituídas). 404 com código
+    estável se não existir; 503 estável se o store não for legível."""
+    try:
+        vaccine = await run_in_threadpool(vaccine_store.get_vaccine, vaccine_id)
+    except (sqlite3.Error, ValueError):
+        logger.exception("Vaccines: store ilegível")
+        raise HTTPException(status_code=503, detail="store_unavailable")
+    if vaccine is None:
+        raise HTTPException(status_code=404, detail="entry_not_found")
+    return {"vaccine": vaccine}
+
+
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)
 async def export_report(hours: int = Query(24, ge=1, le=168, description="Janela temporal em horas")):
     """
@@ -1379,19 +2047,54 @@ async def export_report(hours: int = Query(24, ge=1, le=168, description="Janela
     )
 
 
+# --- Tickets de WebSocket (S2) ---------------------------------------------
+# A API key deixou de ir no URL dos WebSockets (o uvicorn grava o query string
+# em claro no access log). O frontend pede um ticket por REST (autenticado com
+# X-API-Key) e abre o socket com ?ticket=. Ticket: opaco (token_urlsafe), uso
+# único, curta duração, só em memória (reiniciar o backend invalida-os; o
+# cliente pede outro a cada (re)ligação). Fail-closed.
+WS_TICKET_TTL_SECONDS = 30
+WS_TICKET_MAX_PENDING = 1000
+_ws_tickets: dict[str, float] = {}  # ticket -> instante de expiração (monotonic)
+
+
+def issue_ws_ticket() -> str:
+    now = time.monotonic()
+    for t in [t for t, exp in _ws_tickets.items() if exp <= now]:
+        _ws_tickets.pop(t, None)
+    if len(_ws_tickets) >= WS_TICKET_MAX_PENDING:
+        raise HTTPException(status_code=429, detail="too_many_pending_tickets")
+    ticket = secrets.token_urlsafe(32)
+    _ws_tickets[ticket] = now + WS_TICKET_TTL_SECONDS
+    return ticket
+
+
+def consume_ws_ticket(ticket: str) -> bool:
+    """Apaga o ticket sempre que existe; True só se ainda estava válido."""
+    if not ticket or not SENTRYLENS_API_KEY:
+        return False
+    expires = _ws_tickets.pop(ticket, None)
+    return expires is not None and expires > time.monotonic()
+
+
+@app.post("/api/ws-ticket", dependencies=_REQUIRE_API_KEY)
+async def create_ws_ticket() -> dict:
+    """Ticket de uso único para abrir /ws/alerts ou /ws/network (?ticket=)."""
+    return {"ticket": issue_ws_ticket(), "expires_in": WS_TICKET_TTL_SECONDS}
+
+
 @app.websocket("/ws/alerts")
 async def websocket_alerts_endpoint(websocket: WebSocket) -> None:
     """
     Push de alertas novos aos clientes ligados. Autenticação própria via
-    query param `api_key` (?api_key=...) — o handshake de WebSocket do
-    browser não permite enviar headers HTTP arbitrários como X-API-Key, e
-    dependencies=[Depends(...)] a nível de app pode não proteger
-    automaticamente rotas @app.websocket (mesma família de armadilha que já
-    mordeu /docs — ver git log). Verificação explícita e independente, com
-    a mesma comparação segura (secrets.compare_digest) da autenticação REST.
+    query param `ticket` (?ticket=...), obtido em POST /api/ws-ticket: o
+    handshake de WebSocket do browser não permite enviar headers como
+    X-API-Key, e dependencies=[Depends(...)] a nível de app não serve para
+    rotas @app.websocket (ver git log). O ticket é de uso único e curto; a
+    API key já não vai no URL (nem fica no access log) e `?api_key=` já
+    não é aceite.
     """
-    api_key = websocket.query_params.get("api_key", "")
-    if not SENTRYLENS_API_KEY or not secrets.compare_digest(api_key, SENTRYLENS_API_KEY):
+    if not consume_ws_ticket(websocket.query_params.get("ticket", "")):
         await websocket.close(code=1008)
         return
 
@@ -1407,12 +2110,9 @@ async def websocket_alerts_endpoint(websocket: WebSocket) -> None:
 async def websocket_network_endpoint(websocket: WebSocket) -> None:
     """
     Push de pacotes e deteções de rede novos (Fase 11, Onda 2). Mesma
-    autenticação de /ws/alerts: query param api_key, secrets.compare_digest
-    — ver o comentário junto a /ws/alerts para o porquê de não poder usar
-    dependencies=[Depends(...)] aqui.
+    autenticação de /ws/alerts: `?ticket=` de uso único (POST /api/ws-ticket).
     """
-    api_key = websocket.query_params.get("api_key", "")
-    if not SENTRYLENS_API_KEY or not secrets.compare_digest(api_key, SENTRYLENS_API_KEY):
+    if not consume_ws_ticket(websocket.query_params.get("ticket", "")):
         await websocket.close(code=1008)
         return
 

@@ -1,0 +1,28 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v1.1 — R11 Vaccine Engine",
+  "phases": [
+    {
+      "number": "12",
+      "name": "Motor de vaccines",
+      "status": "complete"
+    },
+    {
+      "number": "13",
+      "name": "Store e API de leitura",
+      "status": "complete"
+    },
+    {
+      "number": "14",
+      "name": "Aba Vaccines, testes e documentação",
+      "status": "in_progress"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step (verify)",
+    "reason": "Phase 14 of 3 · 67% · ready to verify"
+  },
+  "updated_at": "2026-10-12T10:12:59.399Z"
+}

@@ -359,6 +359,33 @@ agora a biblioteca).
 
 **Testes:** `scripts/test_attack_library.py`.
 
+## 💉 Vaccines (R11)
+
+Vaccines **propostas** a partir de ataques do Red vs Blue que ficaram
+`not_detected` ou `partial`: a regra de deteção que faltou, com a origem
+(ataque, cenário, MITRE, incidentes). Só leitura. São geradas pelo backend em
+segundo plano (no arranque e a cada 5 min), nunca aplicadas no Wazuh e nunca
+levam comandos. Não existe rota de escrita: POST, PUT, PATCH e DELETE dão `405`.
+As duas rotas exigem `X-API-Key`.
+
+| Método | Rota | Parâmetros | Resposta | Erros |
+|---|---|---|---|---|
+| GET | `/api/vaccines` | `attack_id` (1–999999999), `technique` (`^T\d{4}(\.\d{3})?$`), `include_superseded` (default `false`), `limit` (1–500, default 200), `offset` (>= 0) | `{available, reason, total, limit, offset, vaccines[], generator}` | 401, 422, 503 (`store_unavailable`) |
+| GET | `/api/vaccines/{id}` | `id`: `^vac-[0-9a-f]{12}$` | `{vaccine}` (inclui as substituídas) | 401, 404 (`entry_not_found`), 422 (id malformado), 503 (`store_unavailable`) |
+
+`reason: "no_data"` (com `available: false`) só quando o store não tem nenhuma
+vaccine; um filtro sem resultados dá `200`, lista vazia e `reason: null`. Por
+omissão a lista só traz a vaccine atual de cada ataque; as substituídas
+(`superseded_by` preenchido) precisam de `include_superseded=true`. O bloco
+`generator` diz como correu o último ciclo de geração (`status`, `error_code`
+estável, `last_run_at`, `last_success_at`, `alerts_truncated`, `counts`): um
+Indexer em baixo chega aqui como código, nunca como lista vazia nem como texto de
+exceção. Campos de cada vaccine, regras do id e do store, gerador e limites
+conhecidos em [DATA_MODEL.md](DATA_MODEL.md) (secção Vaccine (R11)).
+
+**Testes:** `scripts/test_vaccine_engine.py`, `test_vaccine_store.py`,
+`test_vaccine_ingest.py`, `test_vaccines_api.py`, `test_vaccines_frontend.py`.
+
 ## 📡 Network SOC (R6)
 
 Três painéis dedicados de rede (sidebar: Live Traffic / Network Detections /
@@ -421,11 +448,11 @@ a `limit`; `truncated: true` se havia mais eventos do que `limit` entre as
 está disponível via `/api/alerts`, `/api/ml-anomalies` e
 `/api/network/detections`.
 
-**Sem painel frontend nesta fase** — a sidebar mantém "Detections" como
-`data-planned="R7"` (decisão documentada em
-`docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md`, ruling
-6): o backend é o primeiro consumidor seguro de `detection_event.py`; a UI
-fica para uma fase seguinte.
+**Com painel frontend** — a sidebar tem `data-tab="detections"` sem
+`is-planned`/`data-planned` (`index.html:64`), e o painel é servido por
+`detections.js` (`index.html:1286`), que só consome esta rota (nenhum dado
+novo sai do browser). A nota de `docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md`
+(ruling 6) ficou ultrapassada pela entrega do painel.
 
 **Testes:** `scripts/test_detection_event.py` (construtores puros),
 `scripts/test_detections_api.py` (rota).
@@ -439,9 +466,11 @@ fica para uma fase seguinte.
 | GET | `/api/alerts` | `hours`, `min_level`, `agent_name`, `severity` | Alertas recentes, classificados |
 | GET | `/api/stats` | `hours` | KPIs agregados |
 | GET | `/api/brute-force` | `hours`, `threshold` | Agrupa Event ID 4625 por utilizador-alvo |
-| GET | `/api/ml-anomalies` | `hours` (máx. 168) | Deteção por Isolation Forest vs. regras — ver [ML.md](ML.md) |
+| GET | `/api/ml-anomalies` | `hours` (máx. 168) | Deteção por Isolation Forest vs. regras — ver [ML.md](ML.md). Além do relatório, devolve `alerts_fetched` (quantos alertas entraram na janela) e `alerts_truncated` (`true` quando o fetch atingiu o teto de 1000, newest-first — nesse caso a concordância calculada é um limite inferior, não uma concordância completa) |
+| GET | `/api/ml/models` | — | Registo de versões do modelo ML (R9), só leitura — ver [DATA_MODEL.md](DATA_MODEL.md#registo-de-modelo-r9). Devolve `loaded` (a versão que o processo tem **de facto** em memória, que pode não ser a ativa: a cache é por processo, logo depois de um `adopt` é preciso reiniciar o backend), `active` (versão apontada por `models/ACTIVE`, ou `"legacy"` quando só existem os dois `.pkl` soltos), `active_error` (código estável quando o `ACTIVE` é inválido ou aponta para uma pasta inexistente), `total` (nº de entradas em `versions[]`) e `versions[]`, cada uma com `id`, `kind` (`versioned`/`legacy`), `label`, `active`, `status`, `error_code`, `metadata` (a projeção `METADATA_PUBLIC_KEYS`) e `evaluation` — `null` enquanto a versão não tiver sido avaliada, e um objeto de 14 chaves depois de `model_registry.py evaluate vN`. Ativar, adotar ou treinar é operação de CLI, nunca por HTTP |
 | GET | `/api/redblue/metrics` | `hours` (máx. 168), `window_seconds` (30–3600) | Correlação Red vs Blue por cenário de ataque (Fase 11) — ver [ML.md](ML.md#-correlação-red-vs-blue-getapiredbluemetrics-fase-11) |
 | GET | `/api/incidents` | `status`, `severity`, `hours`, `limit`, `offset` | Incidentes + resumo (R3) |
+| GET | `/api/metrics` | `hours` (1–168, default 168) | Métricas SOC: MTTD, MTTR, cobertura e taxa de deteção, com FN/FP (R8). Cada fonte é isolada — Red vs Blue e base de incidentes —: a que falhar fica `reason: "source_unavailable"`, nunca 5xx nem texto de exceção. `alerts_truncated` sinaliza o teto de 1000 alertas (newest-first), onde a taxa/MTTD/cobertura são limites inferiores |
 | GET | `/api/incidents/{id}` | — | Detalhe: evidências, timeline, `ml_summary` (R3) |
 | POST | `/api/incidents/{id}/status` | `{status, note?}` | Muda o estado (R3) |
 | POST | `/api/incidents/{id}/notes` | `{text}` | Acrescenta nota à timeline (R3) |
@@ -453,6 +482,8 @@ fica para uma fase seguinte.
 | GET | `/api/detections` | `hours` (máx. 168), `limit` (≤200) | Vista unificada regra/ML/rede via `DetectionEvent` (R7) |
 | GET | `/api/attack-library` | — | Catálogo de referência dos cenários de ataque (R5) |
 | GET | `/api/attack-library/{id}` | — | Detalhe de uma entrada da biblioteca (R5) |
+| GET | `/api/vaccines` | `attack_id`, `technique`, `include_superseded`, `limit`, `offset` | Vaccines propostas (R11), só leitura, com o estado do gerador |
+| GET | `/api/vaccines/{id}` | — | Detalhe de uma vaccine: regra proposta e origem (R11) |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | `cae_principal` (obrig.), `cae_secundarios`, `nipc`, `colaboradores`, `faturacao_eur`, `excecao_conhecida` | Classificação NIS2 sugerida |
 | GET | `/api/history/query` | `date_from`, `date_to`, `severity`, `rgpd_estado`, `nis2_estado`, `ai_act_estado`, `limit` (máx. 1000) | Consulta o histórico via índice SQLite |
@@ -468,7 +499,11 @@ fica para uma fase seguinte.
 
 Erros seguem `502 {"detail": "Erro ao contactar Wazuh Manager/Indexer: ..."}`
 quando a falha vem do Wazuh, ou `503` em `/api/ml-anomalies` e
-`/api/redblue/metrics` se o modelo ainda não foi treinado. Os endpoints
+`/api/redblue/metrics` se o modelo ainda não foi treinado. Em
+`/api/ml/models`, qualquer recusa do registo dá `503` com um código da
+lista fechada de `model_registry.ERROR_CODES` no `detail` (nunca texto de
+exceção nem caminhos); uma versão com problema aparece marcada na lista
+(`status`/`error_code`) sem derrubar as restantes. Os endpoints
 de sistema (não dependem do Wazuh) falham com `500` só se a recolha de
 specs desta máquina falhar.
 
@@ -479,13 +514,15 @@ velocidade desce).
 
 ## Catálogo de Event IDs (`scripts/event_catalog.py`)
 
-23 Event IDs do Windows Security Log — mapa central `CRITICAL_EVENTS`
+31 Event IDs do Windows Security Log — mapa central `CRITICAL_EVENTS`
 (nome + severidade) e `RECOMMENDATIONS` (ação sugerida):
 
 | Event ID | Nome | Severidade |
 |---|---|---|
+| 4624 | Successful Logon | low |
 | 4625 | Failed Logon | high |
 | 4672 | Special Privileges Assigned | high |
+| 4688 | Process Created | medium |
 | 4698 | Scheduled Task Created | high |
 | 4699 | Scheduled Task Deleted | medium |
 | 4700 | Scheduled Task Disabled | low |
@@ -499,11 +536,17 @@ velocidade desce).
 | 4722 | User Account Enabled | low |
 | 4723 | Password Change Attempt | low |
 | 4724 | Password Reset Attempt | medium |
+| 4725 | User Account Disabled | medium |
 | 4726 | User Account Deleted | high |
 | 4728 | Member Added to Global Group | high |
+| 4729 | Member Removed from Global Group | medium |
 | 4732 | Member Added to Local Group | medium |
+| 4733 | Member Removed from Local Group | low |
 | 4738 | User Account Changed | medium |
+| 4740 | User Account Locked Out | medium |
 | 4756 | Member Added to Universal Group | high |
+| 4757 | Member Removed from Universal Group | medium |
+| 4767 | User Account Unlocked | low |
 | 4797 | Blank Password Query Attempt | medium |
 | 5140 | Network Share Accessed | low |
 | 5145 | Network Share Permission Checked | low |
