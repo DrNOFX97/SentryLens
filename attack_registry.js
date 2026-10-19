@@ -1,11 +1,11 @@
 // Abas "Attack Registry" e "Attack Timeline" (Roadmap v2, R4). Carregado depois
-// de app.js: reutiliza os seus globais (API_BASE, API_KEY, escapeHtml,
-// severityBadge, formatTimestamp, renderPanelError, periodSelect) — não
+// de app.js: reutiliza os seus globais (API_BASE, API_KEY,
+// severityBadge, formatTimestamp, renderPanelError, windowSelect) — não
 // redeclarar nenhum aqui. As duas abas partilham o mesmo pedido a
 // GET /api/attacks; só mostram dados reais, sem dados -> estado vazio. Só
 // trabalha com uma das abas ativa e o separador visível (sem refresh em
 // segundo plano) e não abre WebSockets. Todo o texto dinâmico (operador,
-// ferramenta, alvo, cenário...) passa por escapeHtml.
+// ferramenta, alvo, cenário...) é escapado pelo htmlT.
 
 const ATK_REFRESH_MS = 30000;
 const ATK_VERDICT_LABELS = {
@@ -30,9 +30,10 @@ function atkIsActive() {
   return atkTabs.some((t) => t.classList.contains("active")) && document.visibilityState === "visible";
 }
 
+// Texto simples: o htmlT escapa na interpolação.
 function atkCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function atkSetText(id, text) {
@@ -46,7 +47,7 @@ function atkSources(list) {
 
 function atkVerdictBadge(verdict) {
   const label = ATK_VERDICT_LABELS[verdict] || verdict;
-  return `<span class="atk-verdict atk-verdict-${escapeHtml(verdict)}">${escapeHtml(label)}</span>`;
+  return htmlT`<span class="atk-verdict atk-verdict-${verdict}">${label}</span>`;
 }
 
 function atkFormatSeconds(seconds) {
@@ -55,22 +56,13 @@ function atkFormatSeconds(seconds) {
   return `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s`;
 }
 
-async function atkRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
+function atkRequest(path) {
+  return apiRequest(path);
 }
 
 function atkQuery() {
-  // period-select está em dias; o endpoint aceita no máximo 720 h (30 dias).
-  const params = new URLSearchParams({ hours: String(Math.min(Number(periodSelect.value) * 24, 720)), limit: "500" });
+  // O endpoint aceita no máximo 720 h (30 dias); a nota da aba diz o recorte.
+  const params = new URLSearchParams({ hours: String(slEffectiveWindow(windowSelect.value, 720).hours), limit: "500" });
   const status = document.getElementById("atk-status-filter").value;
   const technique = document.getElementById("atk-technique-filter").value.trim().toUpperCase();
   if (status) params.set("status", status);
@@ -111,40 +103,83 @@ function renderAttackKpis(summary) {
 function renderAttacksTable(attacks) {
   const body = document.getElementById("attacks-body");
   if (!attacks.length) {
-    body.innerHTML = `<tr><td colspan="10" class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</td></tr>`;
+    htmRender(body, htmlT`<tr><td colspan="10" class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</td></tr>`);
     return;
   }
-  body.innerHTML = attacks.map((a) => {
+  htmRender(body, htmlT`${attacks.map((a) => {
     const clickable = a.id !== null;
     const incidents = a.incidents.length ? a.incidents.map((i) => i.id).join(", ") : "—";
-    return `<tr class="${clickable ? "atk-row" : ""}${a.id === atkSelectedId ? " selected" : ""}"${clickable ? ` data-id="${escapeHtml(String(a.id))}" tabindex="0"` : ""}>
-      <td>${a.id === null ? "—" : escapeHtml(String(a.id))}${a.duplicate_id ? " ⚠️" : ""}</td>
-      <td>${escapeHtml(formatTimestamp(a.timestamp))}</td>
+    const rowAttrs = clickable ? htmlT` data-id="${String(a.id)}" tabindex="0"` : "";
+    return htmlT`<tr class="${clickable ? "atk-row" : ""}${a.id === atkSelectedId ? " selected" : ""}"${rowAttrs}>
+      <td>${a.id === null ? "—" : String(a.id)}${a.duplicate_id ? " ⚠️" : ""}</td>
+      <td>${formatTimestamp(a.timestamp)}</td>
       <td>${atkCell(a.scenario)}</td>
       <td>${atkCell(a.mitre_technique)}</td>
       <td>${atkCell(a.tool)}</td>
       <td>${atkCell(a.target)}</td>
       <td>${atkCell(a.operator)}</td>
-      <td>${escapeHtml(atkSources(a.expected.detection))}</td>
+      <td>${atkSources(a.expected.detection)}</td>
       <td>${atkVerdictBadge(a.actual.verdict)}</td>
       <td>${a.id === null ? "—" : atkCell(incidents === "—" ? "" : incidents)}</td>
     </tr>`;
-  }).join("");
+  })}`);
+}
+
+// Faixa ataque -> deteção (W6.5), SVG à mão: uma linha por ataque, losango no lançamento,
+// um ponto por sensor à distância do MTTD. Sem deteção: só o losango e «não detetado».
+const ATK_STRIP = { labelW: 190, plotW: 520, rowH: 28, top: 26, right: 24 };
+
+function renderAttackStrip(attacks) {
+  const box = document.getElementById("atk-strip");
+  const details = document.getElementById("atk-strip-details");
+  const { rows, maxSeconds } = slAttackStrip(attacks);
+  if (!rows.length) {
+    box.textContent = "Sem dados — nenhum ataque lançado nesta janela.";
+    box.setAttribute("aria-label", "Faixa ataque → deteção: sem dados nesta janela");
+    details.hidden = true;
+    return;
+  }
+  const { labelW, plotW, rowH, top, right } = ATK_STRIP;
+  const width = labelW + plotW + right;
+  const height = top + rows.length * rowH + 8;
+  const x = (sec) => labelW + (sec / maxSeconds) * plotW;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * maxSeconds);
+  const cy = (i) => top + i * rowH + rowH / 2;
+  const dy = { rule: -4, ml: 4, network: 0 };
+  const svg = htmlT`<svg class="atk-strip-svg" viewBox="0 0 ${width} ${height}" width="${width}" aria-hidden="true" focusable="false">
+    ${ticks.map((t) => htmlT`<line class="atk-strip-grid" x1="${x(t)}" x2="${x(t)}" y1="${top - 6}" y2="${height - 8}"/><text class="atk-strip-tick" x="${x(t)}" y="${top - 12}" text-anchor="middle">${fmtDuration(t)}</text>`)}
+    ${rows.map((r, i) => htmlT`<g>
+      <text class="atk-strip-label" x="${labelW - 10}" y="${cy(i) + 4}" text-anchor="end">${slTruncate(r.label, 26)}<title>${r.label}</title></text>
+      ${r.points.length ? htmlT`<line class="atk-strip-link" x1="${x(0)}" x2="${x(Math.max(...r.points.map((p) => p.seconds)))}" y1="${cy(i)}" y2="${cy(i)}"/>` : ""}
+      <polygon class="atk-strip-launch" points="${x(0)},${cy(i) - 6} ${x(0) + 6},${cy(i)} ${x(0)},${cy(i) + 6} ${x(0) - 6},${cy(i)}"><title>Lançamento</title></polygon>
+      ${r.points.map((p) => htmlT`<circle class="atk-strip-dot atk-strip-${p.sensor}" cx="${x(p.seconds)}" cy="${cy(i) + dy[p.sensor]}" r="5"><title>${SL_SENSOR_LABELS[p.sensor]}: ${fmtDuration(p.seconds)}</title></circle>`)}
+      ${r.detected ? "" : htmlT`<text class="atk-strip-miss" x="${x(0) + 14}" y="${cy(i) + 4}">${r.verdict === "unknown" ? "sem correlação" : "não detetado"}</text>`}
+    </g>`)}
+  </svg>`;
+  const legend = htmlT`<p class="atk-strip-legend"><span class="atk-key atk-strip-rule"></span> Regra <span class="atk-key atk-strip-ml"></span> ML <span class="atk-key atk-strip-network"></span> Rede <span class="atk-key-diamond"></span> Lançamento · a distância ao losango é o MTTD (regra e ML partilham o mesmo valor)</p>`;
+  htmRender(box, htmlT`${svg}${legend}`);
+  const detected = rows.filter((r) => r.detected).length;
+  box.setAttribute("aria-label", `Faixa ataque → deteção: ${rows.length} ataques, ${detected} detetados, ${rows.length - detected} sem deteção`);
+  details.hidden = false;
+  const cell = (r, s) => fmtDuration((r.points.find((p) => p.sensor === s) || {}).seconds);
+  chartFillTable(document.getElementById("atk-strip-data"), ["Ataque", "Veredito", "Regra", "ML", "Rede"],
+    rows.map((r) => [r.label, r.verdict, cell(r, "rule"), cell(r, "ml"), cell(r, "network")]));
 }
 
 function renderAttackTimeline(attacks) {
+  renderAttackStrip(attacks);
   const list = document.getElementById("atk-timeline");
   if (!attacks.length) {
-    list.innerHTML = `<li class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</li>`;
+    htmRender(list, htmlT`<li class="empty-state">Sem dados — nenhum ataque lançado nesta janela.</li>`);
     return;
   }
-  list.innerHTML = [...attacks].reverse().map((a) => `<li>
-    <time>${escapeHtml(formatTimestamp(a.timestamp))}</time>
-    ${a.id === null ? "" : `#${escapeHtml(String(a.id))} `}<strong>${atkCell(a.scenario)}</strong>
+  htmRender(list, htmlT`${[...attacks].reverse().map((a) => htmlT`<li>
+    <time>${formatTimestamp(a.timestamp)}</time>
+    ${a.id === null ? "" : `#${String(a.id)} `}<strong>${atkCell(a.scenario)}</strong>
     (${atkCell(a.mitre_technique)} / ${atkCell(a.tool)}) → ${atkCell(a.target)} · ${atkCell(a.operator)}
     ${atkVerdictBadge(a.actual.verdict)}
-    <span class="panel-note">esperado: ${escapeHtml(atkSources(a.expected.detection))}; observado: ${escapeHtml(atkSources(a.actual.achieved))}${a.incidents.length ? `; incidentes: ${escapeHtml(a.incidents.map((i) => i.id).join(", "))}` : ""}</span>
-  </li>`).join("");
+    <span class="panel-note">esperado: ${atkSources(a.expected.detection)}; observado: ${atkSources(a.actual.achieved)}${a.incidents.length ? `; incidentes: ${a.incidents.map((i) => i.id).join(", ")}` : ""}</span>
+  </li>`)}`);
 }
 
 function renderAttackDetail(payload) {
@@ -152,25 +187,25 @@ function renderAttackDetail(payload) {
   const panel = document.getElementById("attack-detail-panel");
   panel.hidden = false;
   atkSetText("atk-detail-title", `Ataque #${a.id}`);
-  document.getElementById("atk-detail-meta").innerHTML = `
+  htmRender(document.getElementById("atk-detail-meta"), htmlT`
     <span>${atkVerdictBadge(a.actual.verdict)}</span>
-    <span>Hora: ${escapeHtml(formatTimestamp(a.timestamp))}</span>
+    <span>Hora: ${formatTimestamp(a.timestamp)}</span>
     <span>Cenário: <strong>${atkCell(a.scenario)}</strong></span>
     <span>MITRE: ${atkCell(a.mitre_technique)} (${atkCell(a.mitre_tactic)})</span>
     <span>Ferramenta: ${atkCell(a.tool)}</span>
     <span>Origem: ${atkCell(a.source)}</span>
     <span>Alvo: ${atkCell(a.target)}</span>
     <span>Operador: ${atkCell(a.operator)}</span>
-    <span>MTTD: ${escapeHtml(atkFormatSeconds(a.actual.mttd_seconds))}</span>
-    ${a.actual.coverage_gap ? "<span>⚠️ Só a rede detetou (ponto cego Wazuh)</span>" : ""}`;
+    <span>MTTD: ${atkFormatSeconds(a.actual.mttd_seconds)}</span>
+    ${a.actual.coverage_gap ? htmlT`<span>⚠️ Só a rede detetou (ponto cego Wazuh)</span>` : ""}`);
 
   const achieved = a.actual.achieved || [];
   const known = payload.correlation && payload.correlation.available;
-  document.getElementById("atk-detail-compare").innerHTML = ["rule", "ml", "network"].map((src) => {
+  htmRender(document.getElementById("atk-detail-compare"), htmlT`${["rule", "ml", "network"].map((src) => {
     const expected = a.expected.detection.includes(src);
     const seen = known ? (achieved.includes(src) ? "Sim" : "Não") : "Desconhecido";
-    return `<tr><td>${escapeHtml(ATK_SOURCE_LABELS[src])}</td><td>${expected ? "Sim" : "—"}</td><td>${escapeHtml(seen)}</td></tr>`;
-  }).join("");
+    return htmlT`<tr><td>${ATK_SOURCE_LABELS[src]}</td><td>${expected ? "Sim" : "—"}</td><td>${seen}</td></tr>`;
+  })}`);
 
   const ev = a.evidence;
   const items = [
@@ -179,11 +214,9 @@ function renderAttackDetail(payload) {
     `Deteções de rede: ${ev.network_detection_types.length ? ev.network_detection_types.join(", ") : "—"}`,
     `Incidentes ligados: ${a.incidents.length ? a.incidents.map((i) => `${i.id} (${i.status}, ${i.severity})`).join("; ") : "nenhum"}`,
   ];
-  document.getElementById("atk-detail-evidence").innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join("");
-  if (!known) {
-    const note = atkCorrelationNote(payload);
-    if (note) document.getElementById("atk-detail-evidence").innerHTML += `<li>${escapeHtml(note)}</li>`;
-  }
+  const note = known ? "" : atkCorrelationNote(payload);
+  if (note) items.push(note);
+  htmRender(document.getElementById("atk-detail-evidence"), htmlT`${items.map((t) => htmlT`<li>${t}</li>`)}`);
 }
 
 function atkShowDetailError(message) {
@@ -205,7 +238,7 @@ async function selectAttack(id) {
     renderAttackDetail(detail);
   } catch (err) {
     if (seq !== atkSelectSeq) return;
-    atkShowDetailError(err.message);
+    atkShowDetailError(apiErrorMessage(err));
   }
 }
 
@@ -228,11 +261,11 @@ async function refreshAttacks() {
     renderAttacksTable(atkAttacks);
     renderAttackTimeline(atkAttacks);
   } catch (err) {
-    const message = `Não foi possível carregar os ataques: ${err.message}`;
+    const message = `Não foi possível carregar os ataques: ${apiErrorMessage(err)}`;
     renderPanelError("#attack-registry-panel", message);
     renderPanelError("#attack-timeline-panel", message);
-    document.getElementById("attacks-body").innerHTML = `<tr><td colspan="10" class="empty-state">Indisponível.</td></tr>`;
-    document.getElementById("atk-timeline").innerHTML = `<li class="empty-state">Indisponível.</li>`;
+    htmRender(document.getElementById("attacks-body"), htmlT`<tr><td colspan="10" class="empty-state">Indisponível.</td></tr>`);
+    htmRender(document.getElementById("atk-timeline"), htmlT`<li class="empty-state">Indisponível.</li>`);
   } finally {
     atkRefreshing = false;
     if (atkPending) { atkPending = false; refreshAttacks(); }
@@ -256,7 +289,7 @@ document.getElementById("atk-technique-filter").addEventListener("input", () => 
   clearTimeout(atkTechniqueTimer);
   atkTechniqueTimer = setTimeout(() => { if (atkIsActive()) refreshAttacks(); }, 250);
 });
-periodSelect.addEventListener("change", () => { if (atkIsActive()) refreshAttacks(); });
+windowSelect.addEventListener("change", () => { if (atkIsActive()) refreshAttacks(); });
 
 // Ciclo de vida: só pede dados com uma das abas ativa e o separador visível.
 let atkLoadedOnce = false;

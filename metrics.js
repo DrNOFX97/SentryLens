@@ -1,6 +1,5 @@
 // Abas "MTTD / MTTR", "Detection Coverage" e "Detection Rate" (Roadmap v2, R8).
-// Carregado depois de app.js: reutiliza os seus globais (API_BASE, API_KEY,
-// escapeHtml, renderPanelError) — não redeclarar nenhum aqui. Consome só
+// Carregado depois de app.js: reutiliza os seus globais (escapeHtml, renderPanelError) — não redeclarar nenhum aqui. Consome só
 // GET /api/metrics (um único pedido serve as 3 abas). Só pede dados com uma
 // das abas ativa e o separador visível. Só mostra dados reais: sem amostra ->
 // "Sem dados"; amostra pequena -> aviso. Todo o texto dinâmico passa por
@@ -42,23 +41,14 @@ function metNote(id, block, label) {
   metText(id, block.small_sample ? `${label}: amostra pequena (n=${block.n}).` : `${label}: n=${block.n}.`);
 }
 
-async function metRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
-}
-
 function metRenderMttd(data) {
   const mttd = data.mttd || {};
   const mttr = data.mttr || {};
-  metText("met-mttd-median", metFormatSeconds(mttd.median_s));
+  // Mesmo valor/rótulo dos outros 3 painéis (ui_helpers.js slMttdView).
+  const view = slMttdView(data, false);
+  metText("met-mttd-median", view.value);
+  const medianCard = document.getElementById("met-mttd-median").parentElement.querySelector("h3");
+  if (medianCard) medianCard.textContent = view.label;
   metText("met-mttd-p90", metFormatSeconds(mttd.p90_s));
   metText("met-mttr-median", metFormatSeconds(mttr.median_s));
   metText("met-mttr-p90", metFormatSeconds(mttr.p90_s));
@@ -69,22 +59,22 @@ function metRenderMttd(data) {
   metText("met-mttd-def", `${(data.definitions || {}).mttd || ""} ${(data.definitions || {}).mttr || ""}`);
 
   const rows = Object.entries(mttd.by_scenario || {});
-  document.getElementById("met-mttd-body").innerHTML = rows.length
-    ? rows.map(([name, b]) => `<tr>
-        <td>${escapeHtml(name)}</td>
+  htmRender(document.getElementById("met-mttd-body"), rows.length
+    ? htmlT`${rows.map(([name, b]) => htmlT`<tr>
+        <td>${name}</td>
         <td>${b.n}</td>
         <td>${metFormatSeconds(b.median_s)}</td>
         <td>${metFormatSeconds(b.p90_s)}</td>
         <td>${metFormatSeconds(b.avg_s)}</td>
-      </tr>`).join("")
-    : `<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`;
+      </tr>`)}`
+    : htmlT`<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>`);
 }
 
 function metGapList(id, items, available) {
   // Sem dados != sem lacunas: só afirma "Nenhuma lacuna" se a cobertura foi calculada.
-  document.getElementById(id).innerHTML = items && items.length
-    ? items.map((x) => `<li>${escapeHtml(x)}</li>`).join("")
-    : `<li class="empty-state">${available === false ? "Sem dados." : "Nenhuma lacuna."}</li>`;
+  htmRender(document.getElementById(id), items && items.length
+    ? htmlT`${items.map((x) => htmlT`<li>${x}</li>`)}`
+    : htmlT`<li class="empty-state">${available === false ? "Sem dados." : "Nenhuma lacuna."}</li>`);
 }
 
 function metRenderCoverage(data) {
@@ -99,6 +89,34 @@ function metRenderCoverage(data) {
   metText("met-cov-def", (data.definitions || {}).coverage || "");
   metGapList("met-gaps-scenarios", cov.gaps && cov.gaps.scenarios, cov.available);
   metGapList("met-gaps-techniques", cov.gaps && cov.gaps.techniques, cov.available);
+}
+
+// Matriz cenário x sensor (W6.4): vem de /api/attacks (esperado vs alcançado por tentativa).
+function metRenderMatrix(attacks) {
+  const { rows, unknown } = slCoverageMatrix(attacks);
+  const table = document.getElementById("met-matrix");
+  table.hidden = rows.length === 0;
+  metText("met-matrix-note", rows.length
+    ? `Janela de ${SL_MTTD_WINDOW_HOURS} h.${unknown ? ` ${unknown} tentativa(s) sem correlação disponível ficaram de fora.` : ""}`
+    : "Sem dados: nenhuma tentativa com correlação disponível na janela.");
+  htmRender(document.getElementById("met-matrix-body"), htmlT`${rows.map((r) => htmlT`<tr>
+    <th scope="row">${r.scenario}</th>
+    <td class="num">${r.attempts}</td>
+    ${SL_SENSORS.map((s) => {
+      const c = slMatrixCellText(r.cells[s]);
+      return htmlT`<td class="matrix-cell matrix-${r.cells[s].state}" title="${SL_SENSOR_LABELS[s]}: ${c.label}">${c.text}</td>`;
+    })}
+  </tr>`)}`);
+}
+
+async function metLoadMatrix() {
+  try {
+    const data = await apiRequest(`/api/attacks?hours=${SL_MTTD_WINDOW_HOURS}&limit=500`);
+    metRenderMatrix(data.attacks || []);
+  } catch (err) {
+    document.getElementById("met-matrix").hidden = true;
+    metText("met-matrix-note", `Não foi possível carregar a matriz: ${apiErrorMessage(err)}`);
+  }
 }
 
 function metRenderRate(data) {
@@ -121,18 +139,19 @@ function metRenderRate(data) {
   metText("met-rate-def", `${(data.definitions || {}).rate || ""} ${(data.definitions || {}).fn || ""} ${(data.definitions || {}).fp || ""}`);
 
   const by = rate.by_source;
-  document.getElementById("met-rate-body").innerHTML = by
-    ? Object.keys(MET_SOURCE_LABELS).map((k) => `<tr><td>${escapeHtml(MET_SOURCE_LABELS[k])}</td><td>${by[k]}</td></tr>`).join("")
-    : `<tr><td colspan="2" class="empty-state">Sem dados.</td></tr>`;
+  htmRender(document.getElementById("met-rate-body"), by
+    ? htmlT`${Object.keys(MET_SOURCE_LABELS).map((k) => htmlT`<tr><td>${MET_SOURCE_LABELS[k]}</td><td>${by[k]}</td></tr>`)}`
+    : htmlT`<tr><td colspan="2" class="empty-state">Sem dados.</td></tr>`);
 }
 
 async function refreshMetrics() {
   try {
-    const data = await metRequest("/api/metrics?hours=168");
+    const data = await apiRequest(`/api/metrics?hours=${SL_MTTD_WINDOW_HOURS}`);
     for (const id of ["#mttd-mttr-panel", "#detection-coverage-panel", "#detection-rate-panel"]) renderPanelError(id, null);
     metRenderMttd(data);
     metRenderCoverage(data);
     metRenderRate(data);
+    metLoadMatrix();
     if (data.alerts_truncated) {
       // O Indexer devolveu o teto de alertas: ataques antigos podem ficar sem os
       // seus alertas e parecer não detetados — os valores são limites inferiores.
@@ -143,7 +162,7 @@ async function refreshMetrics() {
     }
   } catch (err) {
     for (const id of ["#mttd-mttr-panel", "#detection-coverage-panel", "#detection-rate-panel"]) {
-      renderPanelError(id, `Não foi possível carregar as métricas: ${err.message}`);
+      renderPanelError(id, `Não foi possível carregar as métricas: ${apiErrorMessage(err)}`);
     }
   }
 }

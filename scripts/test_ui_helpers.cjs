@@ -112,11 +112,19 @@ check("Ativos", af("1") === '{"activeOnly":true,"onlyInactive":false}');
 check("Inativos", af("0") === '{"activeOnly":false,"onlyInactive":true}');
 check("Todos", af("") === '{"activeOnly":false,"onlyInactive":false}');
 check("filtro desconhecido -> Todos", af("x") === '{"activeOnly":false,"onlyInactive":false}');
-check("7 dias -> 168 h", ctx.slTierWindowHours(7) === 168);
-check("30 dias -> 720 h", ctx.slTierWindowHours(30) === 720);
-check("90 dias -> 720 h (le=720)", ctx.slTierWindowHours(90) === 720);
-check("inválido -> 168 h", ctx.slTierWindowHours("abc") === 168);
-check("zero/negativo -> 168 h", ctx.slTierWindowHours(0) === 168 && ctx.slTierWindowHours(-3) === 168);
-check("Infinity -> 168 h", ctx.slTierWindowHours(Infinity) === 168);
+
+// Janela global (W5.3): horas selecionadas, teto por fonte, nota «A mostrar».
+check("slWindowHours: valor válido passa", ctx.slWindowHours("24") === 24 && ctx.slWindowHours(2160) === 2160);
+check("slWindowHours: inválido/zero/negativo/Infinity -> 168", [undefined, "abc", 0, -3, Infinity].every((v) => ctx.slWindowHours(v) === 168));
+const ew = (s, m) => JSON.stringify(ctx.slEffectiveWindow(s, m));
+check("janela abaixo do teto não recorta", ew(24, 168) === '{"hours":24,"clamped":false}');
+check("janela igual ao teto não recorta", ew(168, 168) === '{"hours":168,"clamped":false}');
+check("90 dias numa fonte de 168 h recorta", ew(2160, 168) === '{"hours":168,"clamped":true}');
+check("90 dias numa fonte de 720 h recorta", ew(2160, 720) === '{"hours":720,"clamped":true}');
+check("inválido usa 168 h", ew("abc", 720) === '{"hours":168,"clamped":false}');
+check("slWindowDays arredonda para cima e tem mínimo 1", ctx.slWindowDays(1) === 1 && ctx.slWindowDays(24) === 1 && ctx.slWindowDays(25) === 2 && ctx.slWindowDays(2160) === 90);
+check("rótulos da janela", ctx.slWindowLabel(1) === "última hora" && ctx.slWindowLabel(6) === "últimas 6 horas" && ctx.slWindowLabel(24) === "últimas 24 horas" && ctx.slWindowLabel(168) === "últimos 7 dias" && ctx.slWindowLabel(720) === "últimos 30 dias" && ctx.slWindowLabel(2160) === "últimos 90 dias");
+check("nota sem recorte", ctx.slWindowNote(168, 720) === "A mostrar: últimos 7 dias");
+check("nota com recorte diz o máximo da fonte", ctx.slWindowNote(2160, 168) === "A mostrar: últimos 7 dias (máximo desta fonte)");
 
 finish();

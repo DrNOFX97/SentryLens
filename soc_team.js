@@ -1,6 +1,6 @@
-// Aba "Equipa SOC" (Tier 1/2/3). Carregado depois de app.js e incidents.js:
+// Aba "Equipa SOC" (Tier 1/2/3). Carregado depois de app.js, api.js e state.js (apiRequest, apiErrorMessage, stt*):
 // reutiliza os seus globais (API_BASE, API_KEY, escapeHtml, severityBadge,
-// formatTimestamp, renderPanelError, periodSelect) — não redeclarar nenhum aqui.
+// formatTimestamp, renderPanelError, windowSelect) — não redeclarar nenhum aqui.
 // Só mostra dados reais de /api/soc/*; sem dados, estado vazio.
 
 function stText(id, text) {
@@ -10,53 +10,63 @@ function stText(id, text) {
 
 function stCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 function tierBadge(tier) {
-  if (!tier) return '<span class="inc-status inc-status-NEW">—</span>';
+  if (!tier) return htmlT`<span class="inc-status inc-status-NEW">—</span>`;
   const labels = { 1: "Tier 1", 2: "Tier 2", 3: "Tier 3" };
   const cls = { 1: "inc-status-NEW", 2: "inc-status-INVESTIGATING", 3: "inc-status-CONTAINED" };
-  return `<span class="inc-status ${cls[tier]}">${escapeHtml(String(labels[tier] || tier))}</span>`;
+  return htmlT`<span class="inc-status ${cls[tier]}">${String(labels[tier] || tier)}</span>`;
 }
 
 function roleBadge(role) {
   const labels = { primary: "Principal", secondary: "Secundário", on_call: "De prevenção" };
   const cls = { primary: "inc-status-CONTAINED", secondary: "inc-status-INVESTIGATING", on_call: "inc-status-NEW" };
-  return `<span class="inc-status ${cls[role]}">${escapeHtml(String(labels[role] || role))}</span>`;
+  return htmlT`<span class="inc-status ${cls[role]}">${String(labels[role] || role)}</span>`;
 }
 
 function formatDateTimeLocal(ts) {
   if (!ts) return "—";
   const d = new Date(ts.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
-  if (isNaN(d.getTime())) return escapeHtml(ts);
+  if (isNaN(d.getTime())) return String(ts);
   return d.toLocaleString("pt-PT");
 }
 
 function formatTimeOnly(ts) {
   if (!ts) return "—";
   const d = new Date(ts.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
-  if (isNaN(d.getTime())) return escapeHtml(ts);
+  if (isNaN(d.getTime())) return String(ts);
   return d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
 }
 
-async function stRequest(method, path, body) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { }
-    const error = new Error(detail);
-    error.status = response.status;
-    throw error;
+// Estados de carregar/vazio/erro (state.js) dentro de <tbody> ou <ul>: o <p> do
+// state.js não é filho válido de tbody/ul, por isso vai embrulhado em <tr><td>/<li>.
+function stShowState(container, kind, textOrErr, colspan) {
+  if (!container) return;
+  // Auto-refresh: o «A carregar» só aparece na primeira carga, para não piscar.
+  if (kind === "loading" && container.dataset.stReady) return;
+  if (kind === "loading" || kind === "error") delete container.dataset.stReady;
+  else container.dataset.stReady = "1";
+  const isList = container.tagName === "UL";
+  const wrap = document.createElement(isList ? "li" : "tr");
+  const cell = isList ? wrap : document.createElement("td");
+  if (!isList) {
+    cell.colSpan = colspan || 1;
+    wrap.appendChild(cell);
   }
-  return response.json();
+  if (kind === "loading") sttShowLoading(cell, textOrErr);
+  else if (kind === "error") sttShowError(cell, textOrErr);
+  else sttShowEmpty(cell, textOrErr);
+  container.replaceChildren(wrap);
+}
+
+// Erro de carregamento de um painel: aviso, banner e estado na tabela.
+function stLoadFailed(err, noticeId, panelSel, label, body, colspan) {
+  const msg = apiErrorMessage(err);
+  stText(noticeId, `⚠️ ${msg}`);
+  if (panelSel) renderPanelError(panelSel, `${label}: ${msg}`);
+  if (body) stShowState(body, "error", err, colspan);
 }
 
 // ====== Analysts ======
@@ -65,13 +75,14 @@ let stAnalystsCache = [];
 
 async function loadAnalysts() {
   stText("analyst-notice", "A carregar analistas...");
+  stShowState(document.getElementById("analysts-body"), "loading", "A carregar analistas…", 6);
   try {
     const tier = document.getElementById("analyst-tier-filter").value;
     const filter = slAnalystActiveFilter(document.getElementById("analyst-active-filter").value);
     const params = new URLSearchParams();
     if (tier) params.set("tier", tier);
     params.set("active_only", filter.activeOnly ? "true" : "false");
-    const data = await stRequest("GET", `/api/soc/analysts?${params}`);
+    const data = await apiRequest(`/api/soc/analysts?${params}`);
     const received = data.analysts || [];
     // O select de turnos precisa dos analistas ativos da resposta completa,
     // por isso recebe a lista antes do filtro "Inativos" (feito no cliente).
@@ -80,37 +91,39 @@ async function loadAnalysts() {
     renderAnalystsTable(stAnalystsCache);
     stText("analyst-notice", `${stAnalystsCache.length} analista(s)`);
   } catch (err) {
-    renderPanelError("#analysts-section", `Falha ao carregar analistas: ${err.message}`);
-    stText("analyst-notice", `⚠️ ${err.message}`);
+    stAnalystsCache = [];
+    stLoadFailed(err, "analyst-notice", "#analysts-section", "Falha ao carregar analistas", document.getElementById("analysts-body"), 6);
   }
 }
 
 function renderAnalystsTable(analysts) {
   const body = document.getElementById("analysts-body");
   if (!analysts.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Sem analistas.</td></tr>';
+    stShowState(body, "empty", "Sem analistas.", 6);
     return;
   }
-  body.innerHTML = analysts.map((a) => `
-    <tr data-id="${escapeHtml(a.id)}">
-      <td>${escapeHtml(a.id)}</td>
-      <td>${escapeHtml(a.name)}</td>
+  body.dataset.stReady = "1";
+  htmRender(body, htmlT`${analysts.map((a) => htmlT`
+    <tr data-id="${a.id}">
+      <td>${a.id}</td>
+      <td>${a.name}</td>
       <td>${tierBadge(a.tier)}</td>
       <td>${stCell(a.email)}</td>
-      <td>${a.active ? '<span class="inc-status inc-status-RESOLVED">Ativo</span>' : '<span class="inc-status inc-status-CLOSED">Inativo</span>'}</td>
+      <td>${a.active ? htmlT`<span class="inc-status inc-status-RESOLVED">Ativo</span>` : htmlT`<span class="inc-status inc-status-CLOSED">Inativo</span>`}</td>
       <td>
-        <button class="btn-sm" data-action="edit" data-id="${escapeHtml(a.id)}">Editar</button>
-        ${a.active ? `<button class="btn-sm btn-danger" data-action="deactivate" data-id="${escapeHtml(a.id)}">Desativar</button>` : ""}
+        <button class="btn-sm" data-action="edit" data-id="${a.id}">Editar</button>
+        ${a.active ? htmlT`<button class="btn-sm btn-danger" data-action="deactivate" data-id="${a.id}">Desativar</button>` : ""}
       </td>
     </tr>
-  `).join("");
+  `)}`);
 }
 
 function updateShiftAnalystSelect(analysts) {
   const select = document.getElementById("shift-analyst");
   const current = select.value;
-  select.innerHTML = '<option value="">Selecione...</option>' +
-    analysts.filter(a => a.active).map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} (${tierBadge(a.tier).replace(/<[^>]+>/g, '')})</option>`).join("");
+  const tierLabels = { 1: "Tier 1", 2: "Tier 2", 3: "Tier 3" };
+  htmRender(select, htmlT`<option value="">Selecione...</option>${analysts.filter(a => a.active).map(a =>
+    htmlT`<option value="${a.id}">${a.name} (${a.tier ? String(tierLabels[a.tier] || a.tier) : "—"})</option>`)}`);
   if (analysts.some(a => a.id === current)) select.value = current;
 }
 
@@ -145,16 +158,16 @@ document.getElementById("analyst-form").addEventListener("submit", async (e) => 
 
   try {
     if (id) {
-      await stRequest("PATCH", `/api/soc/analysts/${encodeURIComponent(id)}`, { tier, email, active: parseInt(active, 10) });
+      await apiRequest(`/api/soc/analysts/${encodeURIComponent(id)}`, { method: "PATCH", body: { tier, email, active: parseInt(active, 10) } });
       stText("analyst-notice", `✅ Analista ${name} atualizado`);
     } else {
-      await stRequest("POST", "/api/soc/analysts", { id: analystId, name, tier, email });
+      await apiRequest("/api/soc/analysts", { method: "POST", body: { id: analystId, name, tier, email } });
       stText("analyst-notice", `✅ Analista ${name} criado`);
     }
     closeAnalystModal();
     await loadAnalysts();
   } catch (err) {
-    stText("analyst-notice", `❌ ${err.message}`);
+    stText("analyst-notice", `❌ ${apiErrorMessage(err)}`);
   } finally {
     btn.disabled = false;
     btn.textContent = "Guardar";
@@ -199,11 +212,11 @@ function closeAnalystModal() {
 async function deactivateAnalyst(id, name) {
   if (!confirm(`Desativar analista ${name}?`)) return;
   try {
-    await stRequest("POST", `/api/soc/analysts/${encodeURIComponent(id)}/deactivate`);
+    await apiRequest(`/api/soc/analysts/${encodeURIComponent(id)}/deactivate`, { method: "POST" });
     stText("analyst-notice", `✅ Analista ${name} desativado`);
     await loadAnalysts();
   } catch (err) {
-    stText("analyst-notice", `❌ ${err.message}`);
+    stText("analyst-notice", `❌ ${apiErrorMessage(err)}`);
   }
 }
 
@@ -211,34 +224,35 @@ async function deactivateAnalyst(id, name) {
 
 async function loadShifts() {
   stText("shift-notice", "A carregar turnos...");
+  stShowState(document.getElementById("shifts-body"), "loading", "A carregar turnos…", 5);
   try {
     const analystId = document.getElementById("shift-analyst-filter").value;
     const params = new URLSearchParams();
     if (analystId) params.set("analyst_id", analystId);
-    const data = await stRequest("GET", `/api/soc/shifts?${params}`);
+    const data = await apiRequest(`/api/soc/shifts?${params}`);
     renderShiftsTable(data.shifts || []);
     stText("shift-notice", `${(data.shifts || []).length} turno(s)`);
   } catch (err) {
-    renderPanelError("#shifts-section", `Falha ao carregar turnos: ${err.message}`);
-    stText("shift-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "shift-notice", "#shifts-section", "Falha ao carregar turnos", document.getElementById("shifts-body"), 5);
   }
 }
 
 function renderShiftsTable(shifts) {
   const body = document.getElementById("shifts-body");
   if (!shifts.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem turnos.</td></tr>';
+    stShowState(body, "empty", "Sem turnos.", 5);
     return;
   }
-  body.innerHTML = shifts.map((s) => `
-    <tr data-id="${escapeHtml(String(s.id))}">
+  body.dataset.stReady = "1";
+  htmRender(body, htmlT`${shifts.map((s) => htmlT`
+    <tr data-id="${String(s.id)}">
       <td>${stCell(s.analyst_name || s.analyst_id)}</td>
       <td>${tierBadge(s.analyst_tier)}</td>
       <td>${formatDateTimeLocal(s.start_ts)}</td>
       <td>${formatDateTimeLocal(s.end_ts)}</td>
       <td>${roleBadge(s.role)}</td>
     </tr>
-  `).join("");
+  `)}`);
 }
 
 document.getElementById("shift-analyst-filter").addEventListener("change", loadShifts);
@@ -257,12 +271,12 @@ document.getElementById("shift-form").addEventListener("submit", async (e) => {
   btn.textContent = "A guardar...";
 
   try {
-    await stRequest("POST", "/api/soc/shifts", { analyst_id, start_ts, end_ts, role });
+    await apiRequest("/api/soc/shifts", { method: "POST", body: { analyst_id, start_ts, end_ts, role } });
     stText("shift-notice", "✅ Turno criado");
     closeShiftModal();
     await loadShifts();
   } catch (err) {
-    stText("shift-notice", `❌ ${err.message}`);
+    stText("shift-notice", `❌ ${apiErrorMessage(err)}`);
   } finally {
     btn.disabled = false;
     btn.textContent = "Guardar";
@@ -288,31 +302,32 @@ function closeShiftModal() {
 
 async function loadEscalationRules() {
   stText("escalation-notice", "A carregar regras...");
+  stShowState(document.getElementById("escalation-body"), "loading", "A carregar regras…", 5);
   try {
-    const data = await stRequest("GET", "/api/soc/escalation-rules");
+    const data = await apiRequest("/api/soc/escalation-rules");
     renderEscalationTable(data.rules || []);
     stText("escalation-notice", `${(data.rules || []).length} regra(s)`);
   } catch (err) {
-    renderPanelError("#escalation-section", `Falha ao carregar regras: ${err.message}`);
-    stText("escalation-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "escalation-notice", "#escalation-section", "Falha ao carregar regras", document.getElementById("escalation-body"), 5);
   }
 }
 
 function renderEscalationTable(rules) {
   const body = document.getElementById("escalation-body");
   if (!rules.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem regras de escalamento.</td></tr>';
+    stShowState(body, "empty", "Sem regras de escalamento.", 5);
     return;
   }
-  body.innerHTML = rules.map((r) => `
-    <tr data-id="${escapeHtml(String(r.id))}">
+  body.dataset.stReady = "1";
+  htmRender(body, htmlT`${rules.map((r) => htmlT`
+    <tr data-id="${String(r.id)}">
       <td>${tierBadge(r.from_tier)}</td>
-      <td>${r.to_tier ? tierBadge(r.to_tier) : '<span class="inc-status inc-status-CLOSED">Final</span>'}</td>
-      <td>${severityBadge(r.severity)}</td>
-      <td>${r.auto_escalate ? '<span class="inc-status inc-status-RESOLVED">Sim</span>' : '<span class="inc-status inc-status-NEW">Não</span>'}</td>
+      <td>${r.to_tier ? tierBadge(r.to_tier) : htmlT`<span class="inc-status inc-status-CLOSED">Final</span>`}</td>
+      <td>${htmlRaw(severityBadge(r.severity))}</td>
+      <td>${r.auto_escalate ? htmlT`<span class="inc-status inc-status-RESOLVED">Sim</span>` : htmlT`<span class="inc-status inc-status-NEW">Não</span>`}</td>
       <td>${stCell(r.sla_minutes)}</td>
     </tr>
-  `).join("");
+  `)}`);
 }
 
 document.getElementById("escalation-create-btn").addEventListener("click", () => openEscalationModal("create"));
@@ -331,12 +346,12 @@ document.getElementById("escalation-form").addEventListener("submit", async (e) 
   btn.textContent = "A guardar...";
 
   try {
-    await stRequest("POST", "/api/soc/escalation-rules", { from_tier, to_tier: to_tier ? parseInt(to_tier, 10) : null, severity, auto_escalate, sla_minutes: sla });
+    await apiRequest("/api/soc/escalation-rules", { method: "POST", body: { from_tier, to_tier: to_tier ? parseInt(to_tier, 10) : null, severity, auto_escalate, sla_minutes: sla } });
     stText("escalation-notice", "✅ Regra criada");
     closeEscalationModal();
     await loadEscalationRules();
   } catch (err) {
-    stText("escalation-notice", `❌ ${err.message}`);
+    stText("escalation-notice", `❌ ${apiErrorMessage(err)}`);
   } finally {
     btn.disabled = false;
     btn.textContent = "Guardar";
@@ -361,27 +376,32 @@ function closeEscalationModal() {
 
 async function loadOnCall() {
   stText("oncall-notice", "A carregar...");
+  stShowState(document.getElementById("oncall-list"), "loading", "A carregar…");
+  stShowState(document.getElementById("primary-list"), "loading", "A carregar…");
   try {
     const tier = parseInt(document.getElementById("oncall-tier-filter").value, 10);
     const [oncallData, primaryData] = await Promise.all([
-      stRequest("GET", `/api/soc/on-call?tier=${tier}`),
-      stRequest("GET", `/api/soc/primary?tier=${tier}`),
+      apiRequest(`/api/soc/on-call?tier=${tier}`),
+      apiRequest(`/api/soc/primary?tier=${tier}`),
     ]);
     renderOnCallList(oncallData.on_call || [], "oncall-list");
     renderOnCallList(primaryData.primary || [], "primary-list");
-    stText("oncall-notice", `Tier ${tier} — ${oncallData.on_call?.length || 0} on-call, ${primaryData.primary?.length || 0} principal`);
+    stText("oncall-notice", `Tier ${tier} — ${(oncallData.on_call || []).length} on-call, ${(primaryData.primary || []).length} principal`);
   } catch (err) {
-    stText("oncall-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "oncall-notice", null, "", null);
+    stShowState(document.getElementById("oncall-list"), "error", err);
+    stShowState(document.getElementById("primary-list"), "error", err);
   }
 }
 
 function renderOnCallList(analysts, listId) {
   const list = document.getElementById(listId);
   if (!analysts.length) {
-    list.innerHTML = '<li class="empty-state">Nenhum</li>';
+    stShowState(list, "empty", "Nenhum");
     return;
   }
-  list.innerHTML = analysts.map(a => `<li>${escapeHtml(a.name)} (${escapeHtml(a.id)})${a.email ? ` — ${escapeHtml(a.email)}` : ""}</li>`).join("");
+  list.dataset.stReady = "1";
+  htmRender(list, htmlT`${analysts.map(a => htmlT`<li>${a.name} (${a.id})${a.email ? ` — ${a.email}` : ""}</li>`)}`);
 }
 
 document.getElementById("oncall-tier-filter").addEventListener("change", loadOnCall);
@@ -391,52 +411,53 @@ document.getElementById("oncall-refresh-btn").addEventListener("click", loadOnCa
 
 async function loadSLABreaches() {
   stText("sla-breaches-notice", "A carregar...");
+  stShowState(document.getElementById("sla-breaches-body"), "loading", "A carregar…", 7);
   try {
-    const data = await stRequest("GET", "/api/soc/sla-breaches");
+    const data = await apiRequest("/api/soc/sla-breaches");
     renderSLABreaches(data.breaches || []);
-    stText("sla-breaches-notice", `${data.count || 0} breach(es)`);
+    stText("sla-breaches-notice", `${(data.breaches || []).length} breach(es)`);
   } catch (err) {
-    stText("sla-breaches-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "sla-breaches-notice", null, "", document.getElementById("sla-breaches-body"), 7);
   }
 }
 
 function renderSLABreaches(breaches) {
   const body = document.getElementById("sla-breaches-body");
   if (!breaches.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum SLA breach.</td></tr>';
+    stShowState(body, "empty", "Nenhum SLA breach.", 7);
     return;
   }
   const now = new Date();
-  body.innerHTML = breaches.map((b) => {
+  body.dataset.stReady = "1";
+  htmRender(body, htmlT`${breaches.map((b) => {
     const deadline = new Date(b.sla_deadline.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
     const overdue = now > deadline;
-    return `
+    return htmlT`
       <tr>
-        <td>${escapeHtml(b.id)}</td>
-        <td>${severityBadge(b.severity)}</td>
+        <td>${b.id}</td>
+        <td>${htmlRaw(severityBadge(b.severity))}</td>
         <td>${stCell(b.asset)}</td>
         <td>${tierBadge(b.assigned_team_tier)}</td>
         <td>${stCell(b.assigned_to)}</td>
-        <td>${formatDateTimeLocal(b.sla_deadline)} ${overdue ? '<span style="color:#e74c3c">⚠️ ULTRAPASSADO</span>' : ""}</td>
+        <td>${formatDateTimeLocal(b.sla_deadline)} ${overdue ? htmlT`<span class="sla-overdue">⚠️ ULTRAPASSADO</span>` : ""}</td>
         <td>${b.status}</td>
       </tr>
     `;
-  }).join("");
+  })}`);
 }
 
 // ====== Summary by Tier ======
 
 async function loadTierSummary() {
   stText("tier-summary-notice", "A carregar...");
+  stShowState(document.getElementById("tier-summary-body"), "loading", "A carregar…", 5);
   try {
-    const days = parseInt(periodSelect.value, 10);
-    const hours = slTierWindowHours(days);
-    const clamped = Number.isFinite(days) && days > 0 && days * 24 > hours;
-    const data = await stRequest("GET", `/api/soc/summary-by-tier?hours=${hours}`);
+    const { hours } = slEffectiveWindow(windowSelect.value, 720); // le=720 no backend
+    const data = await apiRequest(`/api/soc/summary-by-tier?hours=${hours}`);
     renderTierSummary(data.by_tier || {});
-    stText("tier-summary-notice", clamped ? `Janela de ${hours} h (máximo desta fonte)` : `Janela de ${hours} h`);
+    stText("tier-summary-notice", slWindowNote(windowSelect.value, 720));
   } catch (err) {
-    stText("tier-summary-notice", `⚠️ ${err.message}`);
+    stLoadFailed(err, "tier-summary-notice", null, "", document.getElementById("tier-summary-body"), 5);
   }
 }
 
@@ -444,22 +465,23 @@ function renderTierSummary(byTier) {
   const body = document.getElementById("tier-summary-body");
   const tiers = [1, 2, 3, 0].filter(t => byTier[t] !== undefined); // 0 = sem tier
   if (!tiers.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">Sem dados.</td></tr>';
+    stShowState(body, "empty", "Sem dados", 5);
     return;
   }
-  body.innerHTML = tiers.map(t => {
+  body.dataset.stReady = "1";
+  htmRender(body, htmlT`${tiers.map(t => {
     const d = byTier[t];
     const statusStr = Object.entries(d.by_status || {}).map(([s, c]) => `${s}: ${c}`).join(", ") || "—";
     const sevStr = Object.entries(d.by_severity || {}).map(([s, c]) => `${s}: ${c}`).join(", ") || "—";
     const tierLabel = t === 0 ? "Sem tier" : `Tier ${t}`;
-    return `<tr>
+    return htmlT`<tr>
       <td>${tierLabel}</td>
       <td>${d.total}</td>
       <td>${d.open}</td>
       <td>${statusStr}</td>
       <td>${sevStr}</td>
     </tr>`;
-  }).join("");
+  })}`);
 }
 
 // ====== Modais ======

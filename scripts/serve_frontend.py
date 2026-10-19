@@ -40,7 +40,21 @@ ALLOWED_FILES = {
     "/": "index.html",
     "/index.html": "index.html",
     "/ui_helpers.js": "ui_helpers.js",
+    "/router.js": "router.js",
+    "/api.js": "api.js",
+    "/state.js": "state.js",
+    "/fmt.js": "fmt.js",
+    "/html.js": "html.js",
+    "/table.js": "table.js",
+    "/kpi.js": "kpi.js",
     "/app.js": "app.js",
+    "/overview-alerts.js": "overview-alerts.js",
+    "/system.js": "system.js",
+    "/iam.js": "iam.js",
+    "/ml-anomalies.js": "ml-anomalies.js",
+    "/compliance.js": "compliance.js",
+    "/realtime.js": "realtime.js",
+    "/shell.js": "shell.js",
     "/redblue.js": "redblue.js",
     "/incidents.js": "incidents.js",
     "/soc_team.js": "soc_team.js",
@@ -57,6 +71,11 @@ ALLOWED_FILES = {
     "/style.css": "style.css",
     "/logo.png": "logo.png",
     "/favicon.png": "favicon.png",
+    # Dependências locais (offline): Chart.js 4.5.1 e fontes latin (woff2).
+    "/vendor/chart.umd.min.js": "vendor/chart.umd.min.js",
+    "/vendor/fonts/inter-latin.woff2": "vendor/fonts/inter-latin.woff2",
+    "/vendor/fonts/jetbrains-mono-latin.woff2": "vendor/fonts/jetbrains-mono-latin.woff2",
+    "/vendor/fonts/space-grotesk-latin.woff2": "vendor/fonts/space-grotesk-latin.woff2",
 }
 
 CONTENT_TYPES = {
@@ -64,7 +83,29 @@ CONTENT_TYPES = {
     ".js": "application/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".png": "image/png",
+    ".woff2": "font/woff2",
 }
+
+
+# Content-Security-Policy (S3), enviada em todas as respostas HTML.
+# - script-src 'self' SEM unsafe-inline: o frontend não tem JS inline nem
+#   handlers on*= (garantido por test_frontend_static.py).
+# - style-src 'self' 'unsafe-inline': o index.html tem atributos style=""
+#   (e o JS gera alguns) e o CSP bloqueia-os sem 'unsafe-inline'. É o único
+#   afrouxamento; estilos não executam código.
+# - connect-src: o backend corre noutra porta de loopback (8001) -> http/ws
+#   para 127.0.0.1 e localhost em qualquer porta.
+CSP = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+])
 
 
 def load_api_key() -> str:
@@ -120,6 +161,8 @@ class FrontendHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        if content_type.startswith("text/html"):
+            self.send_header("Content-Security-Policy", CSP)
         self.end_headers()
         self.wfile.write(data)
 

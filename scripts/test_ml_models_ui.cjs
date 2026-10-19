@@ -56,8 +56,14 @@ const D06_CODES = [
 
 const mlSource = fs.readFileSync(path.join(__dirname, "..", "ml_models.js"), "utf8");
 const mleSource = fs.readFileSync(path.join(__dirname, "..", "ml_evaluation.js"), "utf8");
+// Transporte único (W2): mlmPost/mlmRequest passam por apiRequest de api.js.
+const apiSource = fs.readFileSync(path.join(__dirname, "..", "api.js"), "utf8");
+const apiGlobals = { setTimeout, clearTimeout, AbortController, JSON, Promise };
+function loadApi(ctx) { vm.runInContext(apiSource, ctx, { filename: "api.js" }); }
+const htmlSource = fs.readFileSync(path.join(__dirname, "..", "html.js"), "utf8");
 const ctx = vm.createContext({ escapeHtml, console });
 try {
+  vm.runInContext(htmlSource, ctx, { filename: "html.js" });
   vm.runInContext(mlSource, ctx, { filename: "ml_models.js" });
   vm.runInContext(mleSource, ctx, { filename: "ml_evaluation.js" });
 } catch (err) {
@@ -68,6 +74,20 @@ try {
 }
 check("ml_models.js e ml_evaluation.js carregam no MESMO contexto sem DOM "
   + "(nenhuma linha de topo toca em document, nenhum identificador colide)", true);
+
+// Os construtores de HTML devolvem SafeHtml (htmlT, de html.js); os testes
+// inspecionam o texto final, por isso desembrulham-no (a escapagem já foi feita
+// na interpolação do htmlT, que é exatamente o que se verifica).
+function unsafe(valor) {
+  if (valor && valor.htmSafe === true) return String(valor);
+  if (valor && typeof valor === "object" && !Array.isArray(valor)) {
+    const copia = {};
+    for (const k of Object.keys(valor)) copia[k] = unsafe(valor[k]);
+    return copia;
+  }
+  return valor;
+}
+function desembrulha(fn) { return (...args) => unsafe(fn(...args)); }
 
 const helpers = vm.runInContext(
   "({ MLM_ERROR_TEXT, MLM_GENERIC_ERROR, mlmErrorText, mlmCodeFromResponse, mlmCell,"
@@ -85,17 +105,17 @@ const {
   mlmCell,
   mlmStatusText,
   mlmFormatDate,
-  mlmOriginHtml,
   mlmTrainedAtText,
   mlmEntryKey,
   mlmFindEntryIndex,
   mlmRowIndexFromEvent,
   mlmIsSelectKey,
   mlmHandleRowKey,
-  mlmBuildDetail,
-  mlmBuildModelsRows,
   mlmModelsNoticeText,
 } = helpers;
+const mlmOriginHtml = desembrulha(helpers.mlmOriginHtml);
+const mlmBuildDetail = desembrulha(helpers.mlmBuildDetail);
+const mlmBuildModelsRows = desembrulha(helpers.mlmBuildModelsRows);
 
 // Os helpers da Evaluation vivem agora em ml_evaluation.js (D-09): saem do
 // MESMO contexto, depois de o segundo ficheiro ter carregado.
@@ -109,15 +129,9 @@ const helpersEval = vm.runInContext(
   ctx
 );
 const {
-  mleEmptyState,
   mlePercent,
-  mleMetricCell,
-  mleBuildEvalRows,
   mleEvalNoticeText,
-  mleOriginHtml,
   mleSmallSampleNotice,
-  mleBuildLiveAgreement,
-  mleLiveErrorHtml,
   mleLiveErrorMessage,
   MLE_LIVE_SEM_DADOS,
   MLE_LIVE_TRUNCADO,
@@ -133,6 +147,12 @@ const {
   mleDeltaTexto,
   mleVeredicto,
 } = helpersEval;
+const mleEmptyState = desembrulha(helpersEval.mleEmptyState);
+const mleMetricCell = desembrulha(helpersEval.mleMetricCell);
+const mleBuildEvalRows = desembrulha(helpersEval.mleBuildEvalRows);
+const mleOriginHtml = desembrulha(helpersEval.mleOriginHtml);
+const mleBuildLiveAgreement = desembrulha(helpersEval.mleBuildLiveAgreement);
+const mleLiveErrorHtml = desembrulha(helpersEval.mleLiveErrorHtml);
 
 // --- relatórios reais gerados pelo wrapper ------------------------------------
 
@@ -221,7 +241,7 @@ check("503 com detail que é objeto -> http_503",
 check("mlmCell(null) -> desconhecido", mlmCell(null) === "desconhecido");
 check("mlmCell(undefined) -> desconhecido", mlmCell(undefined) === "desconhecido");
 check("mlmCell('') -> desconhecido", mlmCell("") === "desconhecido");
-check("mlmCell escapa HTML", mlmCell("<b>") === "&lt;b&gt;");
+check("mlmCell devolve texto simples (o escape é do htmlT, na interpolação)", mlmCell("<b>") === "<b>");
 
 // --- fixtures inline segundo o contrato do SKELETON.md -----------------------
 //
@@ -310,10 +330,10 @@ check("mlmFormatDate formata uma data ISO em pt-PT",
   mlmFormatDate("2026-09-14T15:40:00+00:00").includes("2026"));
 check("mlmFormatDate sem data -> desconhecido", mlmFormatDate(null) === "desconhecido");
 check("mlmFormatDate(undefined) -> desconhecido", mlmFormatDate(undefined) === "desconhecido");
-check("mlmFormatDate que não é data devolve o texto escapado",
+check("mlmFormatDate que não é data devolve o texto como veio",
   mlmFormatDate("nao-e-data") === "nao-e-data");
-check("mlmFormatDate escapa texto que não é data",
-  mlmFormatDate("<b>x") === "&lt;b&gt;x");
+check("mlmFormatDate devolve texto simples (o escape é do htmlT)",
+  mlmFormatDate("<b>x") === "<b>x");
 
 // --- mlmOriginHtml / mlmTrainedAtText -----------------------------------------
 
@@ -328,6 +348,7 @@ check("mlmOriginHtml: sem metadados -> desconhecido",
   mlmOriginHtml(versioned({ metadata: null })).includes("desconhecido"));
 
 const metaBase = versioned().metadata;
+check("mlmCell: o htmlT escapa o valor", String(helpers.mlmBuildDetail(versioned({ metadata: Object.assign({}, versioned().metadata, { model_type: "<b>" }) })).metaHtml).includes("&lt;b&gt;"));
 const treadoEstimada = mlmTrainedAtText(versioned());
 const treadoReal = mlmTrainedAtText(versioned({
   metadata: Object.assign({}, metaBase, { trained_at_estimated: false }),
@@ -971,7 +992,7 @@ const avisoSemLimiares = mleSmallSampleNotice({
 check("aviso de amostra pequena: limiar em falta -> '—', não um número inventado",
   avisoSemLimiares.includes("35") && avisoSemLimiares.includes("—")
   && !avisoSemLimiares.includes("50"));
-check("aviso de amostra pequena: o texto vem escapado",
+check("aviso de amostra pequena: o valor cru nunca aparece (texto simples; o htmlT escapa ao desenhar)",
   !mleSmallSampleNotice({ total_events: "<img src=x>", attacks_in_dataset: 1, small_sample: true })
     .includes("<img"));
 
@@ -1179,7 +1200,8 @@ const mlmFakeFetch = async (url, options) => {
 vm.runInContext("({})", vm.createContext({ fetch: mlmFakeFetch, console }), { filename: "stub.js" });
 
 // Re-carregar o contexto com o fetch stubado para mlmPost poder usá-lo
-const ctxTrain = vm.createContext({ escapeHtml, console, fetch: mlmFakeFetch });
+const ctxTrain = vm.createContext({ ...apiGlobals, escapeHtml, console, fetch: mlmFakeFetch });
+loadApi(ctxTrain);
 vm.runInContext(mlSource, ctxTrain, { filename: "ml_models.js" });
 vm.runInContext(mleSource, ctxTrain, { filename: "ml_evaluation.js" });
 
@@ -1284,7 +1306,8 @@ const fakeFetch200 = async (url, options) => {
   };
 };
 vm.runInContext("({})", vm.createContext({ fetch: fakeFetch200, console }), { filename: "stub2.js" });
-const ctxPost = vm.createContext({ escapeHtml, console, fetch: fakeFetch200, API_BASE: "/api", API_KEY: "test-key" });
+const ctxPost = vm.createContext({ ...apiGlobals, escapeHtml, console, fetch: fakeFetch200, API_BASE: "/api", API_KEY: "test-key" });
+loadApi(ctxPost);
 vm.runInContext(mlSource, ctxPost, { filename: "ml_models.js" });
 // Usar mlmPost e mlmCodeFromResponse do contexto novo (evita redeclarar no mesmo scope)
 const { mlmPost: mlmPost2, mlmCodeFromResponse: mlmCodeFromResponse2 } = vm.runInContext(
@@ -1317,8 +1340,9 @@ check("mlmPost 409 -> rejeita Error('training_in_progress')",
       fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
       return { ok: false, status: 409, json: async () => ({ detail: "training_in_progress" }) };
     };
-    const ctx409 = vm.createContext({ escapeHtml, console, fetch: fakeFetch409, API_BASE: "/api", API_KEY: "test-key" });
-    vm.runInContext(mlSource, ctx409, { filename: "ml_models.js" });
+    const ctx409 = vm.createContext({ ...apiGlobals, escapeHtml, console, fetch: fakeFetch409, API_BASE: "/api", API_KEY: "test-key" });
+    loadApi(ctx409);
+vm.runInContext(mlSource, ctx409, { filename: "ml_models.js" });
     const { mlmPost: mlmPost409 } = vm.runInContext("({ mlmPost })", ctx409);
     try { await mlmPost409("/api/ml/train", {}); return false; }
     catch (e) { return e.message === "training_in_progress"; }
@@ -1331,8 +1355,9 @@ check("mlmPost corpo não-JSON -> rejeita Error('http_500')",
       fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
       return { ok: false, status: 500, json: async () => { throw new Error("não é JSON"); } };
     };
-    const ctx500 = vm.createContext({ escapeHtml, console, fetch: fakeFetch500, API_BASE: "/api", API_KEY: "test-key" });
-    vm.runInContext(mlSource, ctx500, { filename: "ml_models.js" });
+    const ctx500 = vm.createContext({ ...apiGlobals, escapeHtml, console, fetch: fakeFetch500, API_BASE: "/api", API_KEY: "test-key" });
+    loadApi(ctx500);
+vm.runInContext(mlSource, ctx500, { filename: "ml_models.js" });
     const { mlmPost: mlmPost500 } = vm.runInContext("({ mlmPost })", ctx500);
     try { await mlmPost500("/api/ml/train", {}); return false; }
     catch (e) { return e.message === "http_500"; }
@@ -1345,8 +1370,9 @@ check("mlmPost 422 com detail lista -> rejeita Error('http_422')",
       fetchCalls.push({ url, options: JSON.parse(JSON.stringify(options)) });
       return { ok: false, status: 422, json: async () => ({ detail: [{ loc: ["body", "dataset"] }] }) };
     };
-    const ctx422 = vm.createContext({ escapeHtml, console, fetch: fakeFetch422, API_BASE: "/api", API_KEY: "test-key" });
-    vm.runInContext(mlSource, ctx422, { filename: "ml_models.js" });
+    const ctx422 = vm.createContext({ ...apiGlobals, escapeHtml, console, fetch: fakeFetch422, API_BASE: "/api", API_KEY: "test-key" });
+    loadApi(ctx422);
+vm.runInContext(mlSource, ctx422, { filename: "ml_models.js" });
     const { mlmPost: mlmPost422 } = vm.runInContext("({ mlmPost })", ctx422);
     try { await mlmPost422("/api/ml/train", {}); return false; }
     catch (e) { return e.message === "http_422"; }

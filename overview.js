@@ -29,17 +29,8 @@ function ovwIsActive() {
   return ovwTab.classList.contains("active") && document.visibilityState === "visible";
 }
 
-async function ovwRequest(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "X-API-Key": API_KEY } });
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(detail);
-  }
-  return response.json();
+function ovwRequest(path) {
+  return apiRequest(path);
 }
 
 function ovwText(id, text) {
@@ -141,17 +132,11 @@ function ovwRenderIncidentKpi(incidents, error) {
 }
 
 function ovwRenderMttdKpi(metrics, error) {
-  if (!metrics) {
-    ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", "—", error ? "Fonte indisponível" : "A carregar…", "");
-    return;
-  }
-  const m = metrics.mttd || {};
-  if (m.available === false) {
-    ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", "—", m.reason === "source_unavailable" ? "Fonte indisponível" : "Sem dados", "");
-    return;
-  }
-  ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", ovwFormatSeconds(m.median_s),
-    `mediana · n=${m.n}${m.small_sample ? " · amostra pequena" : ""}`, "");
+  // Fonte única de MTTD (ui_helpers.js slMttdView, sobre GET /api/metrics).
+  const view = slMttdView(metrics, error);
+  const title = document.getElementById("ovw-kpi-mttd").parentElement.querySelector("h3");
+  if (title) title.textContent = view.label;
+  ovwKpi("ovw-kpi-mttd", "ovw-kpi-mttd-sub", view.value, view.sub, "");
 }
 
 function ovwRenderRateKpi(metrics, error) {
@@ -240,21 +225,18 @@ function ovwRenderAttention(result) {
   const list = document.getElementById("ovw-attention-list");
   const { items, unavailable } = result;
   const shown = items.slice(0, OVW_MAX_ATTENTION);
-  let html = shown.map((it) =>
-    `<li><button type="button" class="ovw-attn ovw-${it.level}" data-tab="${escapeHtml(it.tab)}">` +
-    `<span class="ovw-attn-title">${escapeHtml(it.title)}</span>` +
-    `<span class="ovw-attn-detail">${escapeHtml(it.detail)}</span></button></li>`).join("");
-  if (items.length > shown.length) {
-    html += `<li class="ovw-attn-more">+ ${items.length - shown.length} mais — ver a aba respetiva.</li>`;
-  }
+  const rows = shown.map((it) => htmlT`<li><button type="button" class="ovw-attn ovw-${it.level}" data-tab="${it.tab}"><span class="ovw-attn-title">${it.title}</span><span class="ovw-attn-detail">${it.detail}</span></button></li>`);
+  const more = items.length > shown.length
+    ? htmlT`<li class="ovw-attn-more">+ ${items.length - shown.length} mais — ver a aba respetiva.</li>`
+    : "";
   // Nunca "tudo em ordem" quando uma fonte falhou: não sabemos se está.
-  if (!items.length && !unavailable.length) {
-    html = `<li class="ovw-attn-clear">✓ Nada a exigir atenção neste momento.</li>`;
-  }
-  if (unavailable.length) {
-    html += `<li class="ovw-attn-unavailable">⚠ Sem dados de: ${escapeHtml(unavailable.join(", "))} — esta lista pode estar incompleta.</li>`;
-  }
-  list.innerHTML = html;
+  const clear = !items.length && !unavailable.length
+    ? htmlT`<li class="ovw-attn-clear">✓ Nada a exigir atenção neste momento.</li>`
+    : "";
+  const missing = unavailable.length
+    ? htmlT`<li class="ovw-attn-unavailable">⚠ Sem dados de: ${unavailable.join(", ")} — esta lista pode estar incompleta.</li>`
+    : "";
+  htmRender(list, clear ? htmlT`${clear}${missing}` : htmlT`${rows}${more}${missing}`);
   ovwText("ovw-attention-count", items.length ? String(items.length) : "");
 }
 
@@ -267,7 +249,7 @@ async function ovwRefresh() {
     const [h, i, m, v] = await Promise.allSettled([
       ovwRequest("/api/siem/health"),
       ovwRequest(`/api/incidents?hours=${OVW_WINDOW_HOURS}&limit=100`),
-      ovwRequest(`/api/metrics?hours=${OVW_WINDOW_HOURS}`),
+      ovwRequest(`/api/metrics?hours=${SL_MTTD_WINDOW_HOURS}`),
       ovwRequest("/api/vaccines?limit=1"),
     ]);
     const val = (r) => (r.status === "fulfilled" ? r.value : null);

@@ -111,8 +111,24 @@ def run() -> None:
         check("Host localhost:porta é aceite", status == 200)
 
         # --- whitelist continua intacta ---
-        status, _, _ = get(port, "/index.html")
+        status, headers, _ = get(port, "/index.html")
         check("/index.html continua a ser servido", status == 200)
+        csp = headers.get("content-security-policy", "")
+        directives = {d.strip().split(" ", 1)[0]: d.strip() for d in csp.split(";") if d.strip()}
+        check("/index.html traz Content-Security-Policy", bool(csp))
+        check("CSP: script-src 'self' sem unsafe-inline/unsafe-eval",
+              directives.get("script-src") == "script-src 'self'")
+        check("CSP: object-src none, base-uri none, frame-ancestors none",
+              directives.get("object-src") == "object-src 'none'"
+              and directives.get("base-uri") == "base-uri 'none'"
+              and directives.get("frame-ancestors") == "frame-ancestors 'none'")
+        check("CSP: connect-src permite o backend loopback http e ws",
+              all(x in directives.get("connect-src", "") for x in
+                  ("'self'", "http://127.0.0.1:*", "http://localhost:*", "ws://127.0.0.1:*", "ws://localhost:*")))
+        check("CSP: img-src e font-src locais", "data:" in directives.get("img-src", "")
+              and directives.get("font-src") == "font-src 'self'")
+        status, headers, _ = get(port, "/app.js")
+        check("/app.js (não-HTML) não leva CSP", status == 200 and "content-security-policy" not in headers)
         status, headers, _ = get(port, "/incidents.js")
         check("/incidents.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/live_soc.js")
@@ -123,6 +139,39 @@ def run() -> None:
         check("/attack_library.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/ui_helpers.js")
         check("/ui_helpers.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/router.js")
+        check("/router.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/fmt.js")
+        check("/fmt.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/html.js")
+        check("/html.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/table.js")
+        check("/table.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/kpi.js")
+        check("/kpi.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+
+        status, headers, _ = get(port, "/api.js")
+        check("/api.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/state.js")
+        check("/state.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/overview-alerts.js")
+        check("/overview-alerts.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/system.js")
+        check("/system.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/iam.js")
+        check("/iam.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/ml-anomalies.js")
+        check("/ml-anomalies.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/compliance.js")
+        check("/compliance.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/realtime.js")
+        check("/realtime.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/shell.js")
+        check("/shell.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/network_soc.js")
         check("/network_soc.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/detections.js")
@@ -139,6 +188,15 @@ def run() -> None:
         check("/soc_team.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
         status, headers, _ = get(port, "/overview.js")
         check("/overview.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        status, headers, _ = get(port, "/vendor/chart.umd.min.js")
+        check("/vendor/chart.umd.min.js é servido como JavaScript", status == 200 and headers.get("content-type", "").startswith("application/javascript"))
+        for fonte in ("inter-latin", "jetbrains-mono-latin", "space-grotesk-latin"):
+            status, headers, _ = get(port, f"/vendor/fonts/{fonte}.woff2")
+            check(f"/vendor/fonts/{fonte}.woff2 é servido como font/woff2", status == 200 and headers.get("content-type") == "font/woff2")
+        status, _, _ = get(port, "/vendor/")
+        check("/vendor/ (listagem) dá 404", status == 404)
+        status, _, _ = get(port, "/vendor/fonts/../../scripts/.env")
+        check("travessia a partir de /vendor/ dá 404", status == 404)
         status, _, _ = get(port, "/scripts/.env")
         check("/scripts/.env continua a dar 404", status == 404)
         status, _, _ = get(port, "/.env")

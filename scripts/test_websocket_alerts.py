@@ -4,7 +4,7 @@ fallback para polling assumido pelo frontend), sem precisar do laboratório
 Wazuh real ligado.
 
 Cobre dois aspetos independentes:
-  1. Autenticação do endpoint /ws/alerts (query param api_key), usando
+  1. Autenticação do endpoint /ws/alerts (query param ticket), usando
      TestClient(main.app).websocket_connect(...).
   2. _poll_once (websocket_alerts.py), a função pura que deteta alertas
      novos por _id e os enriquece via main._enrich_alert — testada
@@ -121,21 +121,27 @@ def _attempt_connect(url: str, headers: dict | None = None, timeout: float = CON
     return result
 
 
+def _ticket() -> str:
+    """Ticket de uso único via REST (a API key já não vai no URL do WebSocket)."""
+    r = TestClient(main.app).post("/api/ws-ticket", headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+    return r.json()["ticket"]
+
+
 def run_connection_tests() -> None:
     api_key = os.environ["SENTRYLENS_API_KEY"]
 
     # --- Sem api_key -> ligação devia ser recusada (close 1008) ---
     r1 = _attempt_connect("/ws/alerts")
     check(
-        "Ligação a /ws/alerts sem api_key não fica autenticada/aceite "
+        "Ligação a /ws/alerts sem ticket não fica autenticada/aceite "
         + ("(nota: bloqueou/hang em vez de close(1008) limpo - ver achado no topo do ficheiro)" if r1["hung"] else ""),
         not r1["connected"],
     )
 
-    # --- api_key errada -> ligação devia ser recusada (close 1008) ---
-    r2 = _attempt_connect("/ws/alerts?api_key=chave-errada")
+    # --- ticket errado -> ligação devia ser recusada (close 1008) ---
+    r2 = _attempt_connect("/ws/alerts?ticket=ticket-errado")
     check(
-        "Ligação a /ws/alerts com api_key errada não fica autenticada/aceite "
+        "Ligação a /ws/alerts com ticket errado não fica autenticada/aceite "
         + ("(nota: bloqueou/hang em vez de close(1008) limpo - ver achado no topo do ficheiro)" if r2["hung"] else ""),
         not r2["connected"],
     )
@@ -144,9 +150,9 @@ def run_connection_tests() -> None:
     # Este é o caminho real usado por um cliente WebSocket de browser (só
     # query param, sem header X-API-Key - browsers não conseguem enviar
     # headers arbitrários no handshake de WebSocket).
-    r3 = _attempt_connect(f"/ws/alerts?api_key={api_key}")
+    r3 = _attempt_connect(f"/ws/alerts?ticket={_ticket()}")
     check(
-        "Ligação a /ws/alerts com api_key correta (só query param, sem X-API-Key) "
+        "Ligação a /ws/alerts com ticket válido (só query param, sem X-API-Key) "
         "é aceite dentro do timeout"
         + (" -- FALHA REAL: bloqueia indefinidamente, ver achado documentado no topo do ficheiro" if r3["hung"] else ""),
         r3["connected"] and not r3["hung"],
@@ -156,19 +162,19 @@ def run_connection_tests() -> None:
     # nunca envia num handshake de WebSocket) não deve ter nenhum efeito —
     # confirma que /ws/alerts continua fora de qualquer dependency a nível
     # de app e depende só da sua própria verificação por query param.
-    r4 = _attempt_connect(f"/ws/alerts?api_key={api_key}", headers={"X-API-Key": api_key})
+    r4 = _attempt_connect(f"/ws/alerts?ticket={_ticket()}", headers={"X-API-Key": api_key})
     check(
-        "Ligação com X-API-Key extra (ignorado) + api_key correto continua aceite",
+        "Ligação com X-API-Key extra (ignorado) + ticket válido continua aceite",
         r4["connected"] and not r4["hung"],
     )
 
     # --- /ws/network (Fase 11, Onda 2): mesma autenticação de /ws/alerts ---
     r5 = _attempt_connect("/ws/network")
-    check("Ligação a /ws/network sem api_key não fica aceite", not r5["connected"])
+    check("Ligação a /ws/network sem ticket não fica aceite", not r5["connected"])
 
-    r6 = _attempt_connect(f"/ws/network?api_key={api_key}")
+    r6 = _attempt_connect(f"/ws/network?ticket={_ticket()}")
     check(
-        "Ligação a /ws/network com api_key correta é aceite"
+        "Ligação a /ws/network com ticket válido é aceite"
         + (" -- FALHA REAL: bloqueia indefinidamente" if r6["hung"] else ""),
         r6["connected"] and not r6["hung"],
     )

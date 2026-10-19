@@ -180,10 +180,11 @@ def real_api_keys(extra_paths=()) -> tuple[set, dict]:
 # --- varrimentos do ficheiro inteiro ----------------------------------------
 
 _DECL_RE = re.compile(r"^(?:const|let|var|class|function|async function)\s+([A-Za-z_$][\w$]*)", re.M)
-# Um helper vac* só conta como chamada (vacCell(...)): um identificador que
-# apenas começa por "vac", como vaccine, é um dado cru da API.
-_SAFE_INTERPOLATION_RE = re.compile(r"escapeHtml\(|vac[A-Za-z0-9_$]*\(|VAC_[A-Z_]+\b")
-_INNERHTML_RE = re.compile(r"\.innerHTML\s*(\+?=)\s*(\S{0,40})")
+# Desde a W7 o HTML desenha-se só com htmlT/htmRender (html.js), que escapa
+# toda a interpolação: não há innerHTML nem htmlRaw em vaccines.js, e um
+# escapeHtml( dentro de um htmlT escaparia duas vezes.
+_INNERHTML_RE = re.compile(r"\.innerHTML\b")
+_RAW_RE = re.compile(r"\bhtmlRaw\(|\bescapeHtml\(")
 _MESSAGE_RE = re.compile(r"\.message\b")
 _MESSAGE_SINKS = ("vacErrorText", "vacRenderError", "vacRenderDetailError")
 
@@ -194,26 +195,15 @@ def top_level_decls(js: str) -> list[str]:
 
 
 def interpolation_violations(js: str) -> list[str]:
-    """Cada `${` tem de começar por escapeHtml(, por um helper vac* ou por uma
-    constante VAC_*. Um identificador que só começa por vac (vaccine) não conta. Devolve o início das que não começam."""
-    found = []
-    for m in re.finditer(r"\$\{", js):
-        resto = js[m.end():].lstrip()
-        if not _SAFE_INTERPOLATION_RE.match(resto):
-            found.append(resto[:40])
-    return found
+    """Nenhum htmlRaw( (HTML que escapa ao htmlT) nem escapeHtml( (escape à mão,
+    que dentro de um htmlT escaparia duas vezes) em vaccines.js."""
+    return [m.group(0) for m in _RAW_RE.finditer(js)]
 
 
 def innerhtml_violations(js: str) -> list[str]:
-    """`.innerHTML =` só com um template (crase), uma chamada vac...( ou "";
-    `.innerHTML +=` é sempre violação."""
-    found = []
-    for m in _INNERHTML_RE.finditer(js):
-        operador, valor = m.group(1), m.group(2)
-        if operador == "+=" or not (valor.startswith("`") or valor.startswith('""')
-                                    or re.match(r"vac[A-Za-z0-9_$]*\(", valor)):
-            found.append(m.group(0))
-    return found
+    """Qualquer uso de .innerHTML (leitura, `=` ou `+=`) é violação: o HTML
+    desenha-se com htmRender(el, htmlT`...`) e limpa-se com replaceChildren()."""
+    return [m.group(0) for m in _INNERHTML_RE.finditer(js)]
 
 
 def message_violations(js: str) -> list[str]:
@@ -261,13 +251,15 @@ def run_tracer() -> None:
     linhas = index_html.splitlines()
     candidates = [l for l in linhas if 'data-tab="vaccines"' in l]
     check('exatamente um botão com data-tab="vaccines"', len(candidates) == 1)
-    check("o botão Candidates abre a aba e deixou de ser planeado",
-          len(candidates) == 1 and "Candidates" in candidates[0]
+    check("o botão Vaccines abre a aba e não é planeado",
+          len(candidates) == 1 and "Vaccines" in candidates[0]
           and "is-planned" not in candidates[0] and "nav-badge" not in candidates[0])
+    # W5.1: os itens planeados saíram do menu e vivem na página Roadmap.
+    roadmap = index_html[index_html.index('id="tab-roadmap"'):]
     for label, planned in (("Validation", "R12"), ("Approved", "R14"), ("Regression", "R14")):
-        linha = [l for l in linhas if f'data-label="{label}"' in l]
-        check(f"{label} continua planeado ({planned})",
-              len(linha) == 1 and "is-planned" in linha[0] and f'data-planned="{planned}"' in linha[0])
+        check(f"{label} listado no Roadmap como planeado ({planned}), fora do menu",
+              f"<strong>{label}</strong> <span class=\"roadmap-status\">Planeado ({planned})" in roadmap
+              and f'data-label="{label}"' not in index_html)
     check("index.html já não tem nenhum marcador de planeado R11", 'data-planned="R11"' not in index_html)
 
     # c) markup
@@ -290,10 +282,10 @@ def run_tracer() -> None:
           index_html.count(tag) == 1 and app_tag in index_html and index_html.index(tag) > index_html.index(app_tag))
 
     # e) pedidos
-    check("vaccines.js tem exatamente um fetch(", js.count("fetch(") == 1)
+    check("vaccines.js não faz fetch( próprio (o transporte é do apiRequest)", js.count("fetch(") == 0)
     corpo_request = function_body(js, "vacRequest")
-    check("o fetch está dentro de vacRequest e leva X-API-Key", "fetch(" in corpo_request
-          and '"X-API-Key": API_KEY' in corpo_request)
+    check("vacRequest delega em apiRequest (a chave X-API-Key é posta por api.js)",
+          "apiRequest(" in corpo_request)
     check('vaccines.js pede "/api/vaccines"', '"/api/vaccines"' in js)
     check("a chave nunca vai na query (sem api_key=)", "api_key=" not in js)
     check("sem opção method nem verbos HTTP de escrita",
@@ -355,18 +347,20 @@ def run_guards() -> None:
           not ({"API_BASE", "API_KEY", "escapeHtml", "renderPanelError"} & set(decls)))
 
     # b) escape: cada varrimento tem de apanhar uma violação sintética conhecida
-    check("cada interpolação ${...} começa por escapeHtml(, vac* ou VAC_*", not interpolation_violations(js))
-    check("cada atribuição a innerHTML é um template, um helper vac* ou vazia", not innerhtml_violations(js))
+    check("vaccines.js não usa htmlRaw( nem escapeHtml( (a interpolação do htmlT já escapa)", not interpolation_violations(js))
+    check("vaccines.js não usa innerHTML (htmRender / replaceChildren)", not innerhtml_violations(js))
+    check("vaccines.js desenha HTML com htmRender e htmlT", "htmRender(" in js and "htmlT`" in js)
     check("vaccines.js não usa insertAdjacentHTML, outerHTML nem document.write",
           not any(x in js for x in ("insertAdjacentHTML", "outerHTML", "document.write")))
-    check("o varrimento de interpolações apanha uma violação sintética",
-          len(interpolation_violations("x = `<td>${vaccine.id}</td>`;")) >= 1
-          and not interpolation_violations("x = `<td>${escapeHtml(a)}${vacCell(b)}${VAC_X}</td>`;"))
-    check("o varrimento de innerHTML apanha uma atribuição de variável sintética",
+    check("o varrimento de escape à mão apanha violações sintéticas",
+          len(interpolation_violations("x = htmlT`<td>${escapeHtml(a)}</td>`;")) >= 1
+          and len(interpolation_violations("x = htmlRaw(a);")) >= 1
+          and not interpolation_violations("x = htmlT`<td>${vacCell(b)}${VAC_X}</td>`;"))
+    check("o varrimento de innerHTML apanha atribuição, leitura e += sintéticos",
           len(innerhtml_violations("body.innerHTML = texto;")) >= 1
-          and not innerhtml_violations('a.innerHTML = `<b></b>`; b.innerHTML = vacRowsHtml(l); c.innerHTML = "";'))
-    check("o varrimento de innerHTML apanha o operador += sintético",
-          len(innerhtml_violations("body.innerHTML += `<tr></tr>`;")) >= 1)
+          and len(innerhtml_violations("x = body.innerHTML;")) >= 1
+          and len(innerhtml_violations("body.innerHTML += `<tr></tr>`;")) >= 1
+          and not innerhtml_violations("htmRender(body, vacRowsHtml(l)); c.replaceChildren();"))
     check("o varrimento de .message apanha um uso solto sintético",
           len(message_violations("alert(err.message);")) >= 1
           and not message_violations("vacRenderError(err.message);"))
@@ -544,8 +538,9 @@ def run_states() -> None:
           all(x in linhas for x in ("vacVerdictBadge", "vacRowClass", "vacSupersededNote")))
     check("os rótulos de veredito mantêm Não detetado e Parcial",
           re.search(r'VAC_VERDICT_LABELS = \{[^}]*not_detected: "Não detetado"[^}]*partial: "Parcial"', js) is not None)
-    check("vacVerdictBadge escapa o veredito e o rótulo",
-          function_body(js, "vacVerdictBadge").count("escapeHtml(") >= 2)
+    badge = function_body(js, "vacVerdictBadge")
+    check("vacVerdictBadge interpola o veredito e o rótulo num htmlT (escapados)",
+          "htmlT`" in badge and "${String(verdict)}" in badge and "${String(label)}" in badge)
     check("vacSupersededNote desenha o id substituto por vacCell",
           "vacCell(vaccine.superseded_by)" in function_body(js, "vacSupersededNote"))
 

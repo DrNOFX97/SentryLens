@@ -1,13 +1,13 @@
 // Aba "Vaccines" (Roadmap v2, R11). Carregado depois de app.js: reutiliza os
-// seus globais (API_BASE, API_KEY, escapeHtml, renderPanelError) e nunca os
+// seus globais (API_BASE, API_KEY, htmlT/htmRender de html.js, renderPanelError) e nunca os
 // redeclara. Só leitura: um único pedido GET a /api/vaccines com o cabeçalho
 // X-API-Key; nenhuma ação altera uma vaccine nem o Wazuh (as vaccines são
 // regras PROPOSTAS, nunca aplicadas).
 //
 // Todos os identificadores de topo começam por vac ou VAC_: os scripts
 // clássicos partilham um só escopo global e um nome repetido rebenta o
-// script inteiro. Todo o texto dinâmico passa por escapeHtml (ou por um
-// helper vac* que o devolve já escapado). O backend nunca envia texto de erro
+// script inteiro. Todo o texto dinâmico é interpolado em htmlT (escapado por
+// omissão) e desenhado com htmRender; nunca se atribui HTML à mão. O backend nunca envia texto de erro
 // para o ecrã: o campo detail só serve de chave de lookup em VAC_ERROR_TEXT
 // e nunca entra no DOM.
 //
@@ -74,7 +74,7 @@ function vacIsActive() {
 
 function vacCell(value) {
   if (value === null || value === undefined || value === "") return "—";
-  return escapeHtml(String(value));
+  return String(value);
 }
 
 // Texto cru: quem o mete em HTML passa-o por vacCell.
@@ -98,26 +98,30 @@ function vacCodeFromResponse(status, body) {
 function vacErrorText(code) {
   if (typeof code !== "string") return VAC_GENERIC_ERROR;
   if (Object.prototype.hasOwnProperty.call(VAC_ERROR_TEXT, code)) return VAC_ERROR_TEXT[code];
+  if ((code === "timeout" || code === "invalid_response") && typeof ApiError === "function"
+      && typeof apiErrorMessage === "function") {
+    return apiErrorMessage(new ApiError(code, 0));
+  }
   if (/^http_\d{3}$/.test(code)) return VAC_GENERIC_ERROR + " (HTTP " + code.slice(5) + ")";
   return VAC_GENERIC_ERROR;
 }
 
 // A mensagem do erro lançado é sempre um código, nunca texto do servidor.
+// O transporte (fetch, chave, timeout) é do apiRequest em api.js.
 async function vacRequest(path) {
-  let response;
   try {
-    response = await fetch(API_BASE + path, { headers: { "X-API-Key": API_KEY } });
-  } catch (_) {
-    throw new Error("network_error");
+    return await apiRequest(path);
+  } catch (err) {
+    throw new Error(vacCodeFromApiError(err));
   }
-  if (!response.ok) {
-    let body = null;
-    try {
-      body = await response.json();
-    } catch (_) { /* corpo não-JSON: fica o código HTTP */ }
-    throw new Error(vacCodeFromResponse(response.status, body));
-  }
-  return response.json();
+}
+
+// ApiError -> a chave de lookup de VAC_ERROR_TEXT (403/422 sem slug ficam
+// http_403/http_422, como em vacCodeFromResponse).
+function vacCodeFromApiError(err) {
+  if (!err || err.name !== "ApiError") return "unexpected_error";
+  if (err.code === "validation_error" || err.code === "forbidden") return "http_" + (err.status || 422);
+  return err.code;
 }
 
 // Texto cru de uma lista, ou o travessão quando está vazia.
@@ -130,11 +134,10 @@ function vacLabel(labels, key) {
   return Object.prototype.hasOwnProperty.call(labels, key) ? labels[key] : key;
 }
 
-// Veredito em badge: classe pelo valor escapado, rótulo escapado (ou o valor).
+// Veredito em badge: classe pelo valor e rótulo (ou o valor), ambos escapados pelo htmlT.
 function vacVerdictBadge(verdict) {
   const label = VAC_VERDICT_LABELS[verdict] || verdict;
-  return '<span class="vac-verdict vac-verdict-' + escapeHtml(String(verdict)) + '">' +
-    escapeHtml(String(label)) + "</span>";
+  return htmlT`<span class="vac-verdict vac-verdict-${String(verdict)}">${String(label)}</span>`;
 }
 
 // A condição fica em helpers: cada interpolação do template começa por vac*.
@@ -146,14 +149,14 @@ function vacRowClass(vaccine) {
 
 function vacSupersededNote(vaccine) {
   if (vaccine.superseded_by === null || vaccine.superseded_by === undefined) return "";
-  return '<span class="vac-superseded-note">Substituída por ' + vacCell(vaccine.superseded_by) + "</span>";
+  return htmlT`<span class="vac-superseded-note">Substituída por ${vacCell(vaccine.superseded_by)}</span>`;
 }
 
 function vacRowsHtml(vaccines) {
-  return vaccines.map((vaccine) => {
+  return htmlT`${vaccines.map((vaccine) => {
     const origin = vaccine.origin || {};
     const attack = origin.attack_id === null || origin.attack_id === undefined ? "" : "#" + origin.attack_id;
-    return `<tr class="atk-row${vacRowClass(vaccine)}" data-id="${escapeHtml(vaccine.id)}" tabindex="0">
+    return htmlT`<tr class="atk-row${vacRowClass(vaccine)}" data-id="${vaccine.id}" tabindex="0">
     <td>${vacCell(vaccine.id)}${vacSupersededNote(vaccine)}</td>
     <td>${vacCell(attack)}</td>
     <td>${vacCell(origin.scenario)}</td>
@@ -163,24 +166,24 @@ function vacRowsHtml(vaccines) {
     <td>${vacCell(VAC_STATE_LABELS[vaccine.state] || vaccine.state)}</td>
     <td>${vacCell(vacDate(vaccine.created_at))}</td>
   </tr>`;
-  }).join("");
+  })}`;
 }
 
 function vacRenderList(envelope) {
   const body = document.getElementById("vac-body");
   const notice = document.getElementById("vac-notice");
   if (envelope.reason === "no_data") {
-    body.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(VAC_NO_DATA_TEXT)}</td></tr>`;
+    htmRender(body, htmlT`<tr><td colspan="8" class="empty-state">${VAC_NO_DATA_TEXT}</td></tr>`);
     notice.textContent = "";
     return;
   }
   const vaccines = envelope.vaccines || [];
   if (!vaccines.length) {
-    body.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(VAC_FILTER_EMPTY_TEXT)}</td></tr>`;
+    htmRender(body, htmlT`<tr><td colspan="8" class="empty-state">${VAC_FILTER_EMPTY_TEXT}</td></tr>`);
     notice.textContent = "";
     return;
   }
-  body.innerHTML = vacRowsHtml(vaccines);
+  htmRender(body, vacRowsHtml(vaccines));
   let text = vaccines.length + " vaccine(s)";
   if (envelope.total > vaccines.length) text += " — a mostrar as primeiras " + vaccines.length;
   notice.textContent = text;
@@ -189,8 +192,14 @@ function vacRenderList(envelope) {
 function vacRenderError(code) {
   const text = vacErrorText(code);
   renderPanelError("#vaccines-panel", text);
-  document.getElementById("vac-body").innerHTML =
-    `<tr><td colspan="8" class="vac-error-state">${escapeHtml(text)}</td></tr>`;
+  const tbody = document.getElementById("vac-body");
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = 8;
+  td.className = "vac-error-state";
+  tr.appendChild(td);
+  tbody.replaceChildren(tr);
+  sttShowError(td, text);
   document.getElementById("vac-notice").textContent = "";
 }
 
@@ -260,13 +269,13 @@ function vacBuildQuery() {
   return text ? "?" + text : "";
 }
 
-// Cada option é escapada; só entram técnicas que casam VAC_TECHNIQUE_RE.
+// Cada option é escapada (htmlT); só entram técnicas que casam VAC_TECHNIQUE_RE.
 function vacTechniqueOptionsHtml() {
-  const options = ['<option value="">Todas</option>'];
+  const options = [htmlT`<option value="">Todas</option>`];
   for (const technique of Array.from(vacTechniques).sort()) {
-    options.push(`<option value="${escapeHtml(technique)}">${escapeHtml(technique)}</option>`);
+    options.push(htmlT`<option value="${technique}">${technique}</option>`);
   }
-  return options.join("");
+  return htmlT`${options}`;
 }
 
 function vacAddTechniques(vaccines) {
@@ -278,8 +287,18 @@ function vacAddTechniques(vaccines) {
       vacTechniques.add(origin.mitre_technique);
     }
   }
-  select.innerHTML = vacTechniqueOptionsHtml();
+  htmRender(select, vacTechniqueOptionsHtml());
   select.value = selected;
+}
+
+// Linha "A carregar" (só quando a tabela ainda não tem vaccines).
+function vacShowLoadingRow() {
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = 8;
+  tr.appendChild(td);
+  document.getElementById("vac-body").replaceChildren(tr);
+  sttShowLoading(td, "A carregar as vaccines…");
 }
 
 async function vacRefresh() {
@@ -290,6 +309,7 @@ async function vacRefresh() {
     return;
   }
   vacLoading = true;
+  if (!document.querySelector("#vac-body tr[data-id]")) vacShowLoadingRow();
   try {
     const envelope = await vacRequest("/api/vaccines" + query);
     renderPanelError("#vaccines-panel", "");
@@ -316,15 +336,15 @@ function vacAttackLabel(attackId) {
 }
 
 function vacSourceNote(source) {
-  if (typeof source !== "string") return "";
-  return " (fonte: " + vacCell(vacLabel(VAC_EXPECTED_SOURCE_LABELS, source)) + ")";
+  if (typeof source !== "string") return htmlT``;
+  return htmlT` (fonte: ${vacCell(vacLabel(VAC_EXPECTED_SOURCE_LABELS, source))})`;
 }
 
 function vacOriginHtml(vaccine) {
   const origin = vaccine.origin;
   const evidence = origin.evidence || {};
   const incidents = origin.incident_ids && origin.incident_ids.length ? vacList(origin.incident_ids) : "nenhum incidente ligado";
-  return `<span>Veredito: ${vacVerdictBadge(vaccine.verdict)}</span>
+  return htmlT`<span>Veredito: ${vacVerdictBadge(vaccine.verdict)}</span>
     <span>Ataque: <strong>${vacCell(vacAttackLabel(origin.attack_id))}</strong></span>
     <span>Cenário: <strong>${vacCell(origin.scenario)}</strong></span>
     <span>MITRE: ${vacCell(origin.mitre_technique)} (${vacCell(origin.mitre_tactic)})</span>
@@ -337,35 +357,35 @@ function vacOriginHtml(vaccine) {
 }
 
 function vacEventRowsHtml(events) {
-  return (events || []).map((catalogEvent) => `<tr>
+  return htmlT`${(events || []).map((catalogEvent) => htmlT`<tr>
     <td>${vacCell(catalogEvent.event_id)}</td>
     <td>${vacCell(catalogEvent.name)}</td>
     <td>${vacCell(catalogEvent.severity)}</td>
-  </tr>`).join("");
+  </tr>`)}`;
 }
 
 function vacRuleHtml(proposal) {
   const rule = proposal.rule;
-  if (!rule) return "";
-  return `<p>Regra proposta: Event IDs <strong>${vacCell(vacList(rule.event_ids))}</strong> — pelo menos
+  if (!rule) return htmlT``;
+  return htmlT`<p>Regra proposta: Event IDs <strong>${vacCell(vacList(rule.event_ids))}</strong> — pelo menos
     ${vacCell(rule.min_count)} ocorrência(s) em ${vacCell(rule.window_seconds)} s</p>
     <table><thead><tr><th>Event ID</th><th>Nome</th><th>Severidade</th></tr></thead>
     <tbody>${vacEventRowsHtml(proposal.events)}</tbody></table>`;
 }
 
 function vacRecommendationHtml(proposal) {
-  if (!proposal.recommendation) return "";
-  return `<p>Recomendação: ${vacCell(proposal.recommendation)}</p>`;
+  if (!proposal.recommendation) return htmlT``;
+  return htmlT`<p>Recomendação: ${vacCell(proposal.recommendation)}</p>`;
 }
 
 function vacProposalsHtml(vaccine) {
   const proposals = vaccine.proposals || [];
-  if (!proposals.length) return "<p>Nenhuma proposta registada.</p>";
-  return proposals.map((proposal) => `<div class="vac-proposal">
+  if (!proposals.length) return htmlT`<p>Nenhuma proposta registada.</p>`;
+  return htmlT`${proposals.map((proposal) => htmlT`<div class="vac-proposal">
     <h4>${vacCell(vacLabel(VAC_SENSOR_LABELS, proposal.sensor))}</h4>
     ${vacRuleHtml(proposal)}
     ${vacRecommendationHtml(proposal)}
-  </div>`).join("");
+  </div>`)}`;
 }
 
 // O que a própria vaccine já diz da cadeia, em texto simples.
@@ -377,13 +397,13 @@ function vacChainLead(vaccine) {
 // replacedIds é a lista calculada a partir do segundo pedido; sem ela (ainda
 // por chegar) só se desenha a linha que a própria vaccine permite afirmar.
 function vacChainHtml(vaccine, replacedIds) {
-  let html = "<p>" + vacCell(vacChainLead(vaccine)) + "</p>";
+  let extra = htmlT``;
   if (Array.isArray(replacedIds)) {
-    html += replacedIds.length
-      ? "<p>Substitui: " + vacCell(replacedIds.join(", ")) + "</p>"
-      : "<p>Não substitui nenhuma vaccine anterior deste ataque.</p>";
+    extra = replacedIds.length
+      ? htmlT`<p>Substitui: ${vacCell(replacedIds.join(", "))}</p>`
+      : htmlT`<p>Não substitui nenhuma vaccine anterior deste ataque.</p>`;
   }
-  return html;
+  return htmlT`<p>${vacCell(vacChainLead(vaccine))}</p>${extra}`;
 }
 
 // Ids (por ordem) das vaccines da lista que esta vaccine substituiu.
@@ -395,7 +415,7 @@ function vacReplacedIds(vaccines, id) {
 // substituídas. Um erro nunca se apresenta como "não substitui nenhuma".
 async function vacLoadChain(vaccine, seq) {
   const chain = document.getElementById("vac-detail-chain");
-  chain.textContent = "A carregar a cadeia…";
+  sttShowLoading(chain, "A carregar a cadeia…");
   const params = new URLSearchParams();
   params.set("attack_id", String(vaccine.origin.attack_id));
   params.set("include_superseded", "true");
@@ -403,28 +423,28 @@ async function vacLoadChain(vaccine, seq) {
   try {
     const envelope = await vacRequest("/api/vaccines?" + params.toString());
     if (seq !== vacSelectSeq) return;
-    chain.innerHTML = vacChainHtml(vaccine, vacReplacedIds(envelope.vaccines || [], vaccine.id));
+    htmRender(chain, vacChainHtml(vaccine, vacReplacedIds(envelope.vaccines || [], vaccine.id)));
   } catch (err) {
     if (seq !== vacSelectSeq) return;
-    chain.textContent = vacChainLead(vaccine) + " Cadeia indisponível: " + vacErrorText(err.message);
+    sttShowError(chain, vacChainLead(vaccine) + " Cadeia indisponível: " + vacErrorText(err.message));
   }
 }
 
 function vacRenderDetail(vaccine) {
   document.getElementById("vaccine-detail-panel").hidden = false;
   document.getElementById("vac-detail-title").textContent = vaccine.id;
-  document.getElementById("vac-detail-origin").innerHTML = vacOriginHtml(vaccine);
-  document.getElementById("vac-detail-proposals").innerHTML = vacProposalsHtml(vaccine);
-  document.getElementById("vac-detail-chain").innerHTML = vacChainHtml(vaccine);
+  htmRender(document.getElementById("vac-detail-origin"), vacOriginHtml(vaccine));
+  htmRender(document.getElementById("vac-detail-proposals"), vacProposalsHtml(vaccine));
+  htmRender(document.getElementById("vac-detail-chain"), vacChainHtml(vaccine));
 }
 
 function vacRenderDetailError(code) {
   document.getElementById("vaccine-detail-panel").hidden = false;
   renderPanelError("#vaccine-detail-panel", vacErrorText(code));
   document.getElementById("vac-detail-title").textContent = "Vaccine";
-  document.getElementById("vac-detail-origin").innerHTML = "";
-  document.getElementById("vac-detail-proposals").innerHTML = "";
-  document.getElementById("vac-detail-chain").innerHTML = "";
+  document.getElementById("vac-detail-origin").replaceChildren();
+  document.getElementById("vac-detail-proposals").replaceChildren();
+  document.getElementById("vac-detail-chain").replaceChildren();
 }
 
 async function vacSelect(id) {

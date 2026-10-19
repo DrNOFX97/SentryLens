@@ -20,6 +20,7 @@ import os
 import secrets
 import sqlite3
 import sys
+import time
 from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -2046,19 +2047,54 @@ async def export_report(hours: int = Query(24, ge=1, le=168, description="Janela
     )
 
 
+# --- Tickets de WebSocket (S2) ---------------------------------------------
+# A API key deixou de ir no URL dos WebSockets (o uvicorn grava o query string
+# em claro no access log). O frontend pede um ticket por REST (autenticado com
+# X-API-Key) e abre o socket com ?ticket=. Ticket: opaco (token_urlsafe), uso
+# único, curta duração, só em memória (reiniciar o backend invalida-os; o
+# cliente pede outro a cada (re)ligação). Fail-closed.
+WS_TICKET_TTL_SECONDS = 30
+WS_TICKET_MAX_PENDING = 1000
+_ws_tickets: dict[str, float] = {}  # ticket -> instante de expiração (monotonic)
+
+
+def issue_ws_ticket() -> str:
+    now = time.monotonic()
+    for t in [t for t, exp in _ws_tickets.items() if exp <= now]:
+        _ws_tickets.pop(t, None)
+    if len(_ws_tickets) >= WS_TICKET_MAX_PENDING:
+        raise HTTPException(status_code=429, detail="too_many_pending_tickets")
+    ticket = secrets.token_urlsafe(32)
+    _ws_tickets[ticket] = now + WS_TICKET_TTL_SECONDS
+    return ticket
+
+
+def consume_ws_ticket(ticket: str) -> bool:
+    """Apaga o ticket sempre que existe; True só se ainda estava válido."""
+    if not ticket or not SENTRYLENS_API_KEY:
+        return False
+    expires = _ws_tickets.pop(ticket, None)
+    return expires is not None and expires > time.monotonic()
+
+
+@app.post("/api/ws-ticket", dependencies=_REQUIRE_API_KEY)
+async def create_ws_ticket() -> dict:
+    """Ticket de uso único para abrir /ws/alerts ou /ws/network (?ticket=)."""
+    return {"ticket": issue_ws_ticket(), "expires_in": WS_TICKET_TTL_SECONDS}
+
+
 @app.websocket("/ws/alerts")
 async def websocket_alerts_endpoint(websocket: WebSocket) -> None:
     """
     Push de alertas novos aos clientes ligados. Autenticação própria via
-    query param `api_key` (?api_key=...) — o handshake de WebSocket do
-    browser não permite enviar headers HTTP arbitrários como X-API-Key, e
-    dependencies=[Depends(...)] a nível de app pode não proteger
-    automaticamente rotas @app.websocket (mesma família de armadilha que já
-    mordeu /docs — ver git log). Verificação explícita e independente, com
-    a mesma comparação segura (secrets.compare_digest) da autenticação REST.
+    query param `ticket` (?ticket=...), obtido em POST /api/ws-ticket: o
+    handshake de WebSocket do browser não permite enviar headers como
+    X-API-Key, e dependencies=[Depends(...)] a nível de app não serve para
+    rotas @app.websocket (ver git log). O ticket é de uso único e curto; a
+    API key já não vai no URL (nem fica no access log) e `?api_key=` já
+    não é aceite.
     """
-    api_key = websocket.query_params.get("api_key", "")
-    if not SENTRYLENS_API_KEY or not secrets.compare_digest(api_key, SENTRYLENS_API_KEY):
+    if not consume_ws_ticket(websocket.query_params.get("ticket", "")):
         await websocket.close(code=1008)
         return
 
@@ -2074,12 +2110,9 @@ async def websocket_alerts_endpoint(websocket: WebSocket) -> None:
 async def websocket_network_endpoint(websocket: WebSocket) -> None:
     """
     Push de pacotes e deteções de rede novos (Fase 11, Onda 2). Mesma
-    autenticação de /ws/alerts: query param api_key, secrets.compare_digest
-    — ver o comentário junto a /ws/alerts para o porquê de não poder usar
-    dependencies=[Depends(...)] aqui.
+    autenticação de /ws/alerts: `?ticket=` de uso único (POST /api/ws-ticket).
     """
-    api_key = websocket.query_params.get("api_key", "")
-    if not SENTRYLENS_API_KEY or not secrets.compare_digest(api_key, SENTRYLENS_API_KEY):
+    if not consume_ws_ticket(websocket.query_params.get("ticket", "")):
         await websocket.close(code=1008)
         return
 

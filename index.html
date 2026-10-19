@@ -5,12 +5,57 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SentryLens</title>
 <link rel="icon" type="image/png" href="favicon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17v-6a6 6 0 0 1 12 0v6l2 2H4z"/><path d="M10 21h4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 5 2V4a3 3 0 0 0-2 0z"/><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-5 2V4"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V10M12 20V4M19 20v-7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
+  <symbol id="i-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1M9 11h6M9 15h6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></symbol>
+  <symbol id="i-crystal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="7"/><path d="M8 20h8M10 17l-1 3M14 17l1 3"/></symbol>
+  <symbol id="i-dna" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3c0 6 10 6 10 12s-10 6-10 6M17 3c0 6-10 6-10 12s10 6 10 6M8 7h8M8 17h8"/></symbol>
+  <symbol id="i-dot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7" fill="currentColor"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M7.5 15h9"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-8-5-8-10.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 8 2.5C20 15 12 20 12 20z"/></symbol>
+  <symbol id="i-hole" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="9" ry="5"/><ellipse cx="12" cy="12" rx="4" ry="1.8"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-puzzle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4H5z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V9a3 3 0 0 1 3-3h13l-3-3M20 13v2a3 3 0 0 1-3 3H4l3 3"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20L20 4v16z"/><path d="M16 20v-3M12 20v-2M8 20v-1"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/></symbol>
+  <symbol id="i-siren" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18v-6a5 5 0 0 1 10 0v6"/><path d="M4 18h16M12 3v2M4.5 6.5L6 8M19.5 6.5L18 8"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
+  <symbol id="i-swords" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l10 10M20 4L10 14M3 17l4 4M21 17l-4 4M7 13l-4 4M17 13l4 4"/></symbol>
+  <symbol id="i-syringe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2l4 4M20 4l-3 3M17 7l-9 9-3 1 1-3 9-9zM13 3l8 8M5 19l-3 3"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></symbol>
+  <symbol id="i-traffic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="3"/><circle cx="12" cy="7" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="17" r="1.2"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.7a3.5 3.5 0 0 1 0 6.6M18 14a6 6 0 0 1 3.5 6"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5a4 4 0 0 0 5 5L11 20a2.1 2.1 0 0 1-3-3z"/><path d="M14.5 6.5l3-3 3 3-3 3"/></symbol>
+</svg>
   <header>
     <div class="header-content">
       <img src="logo.png" alt="SentryLens" class="logo">
@@ -20,105 +65,69 @@
       </div>
     </div>
     <div class="controls">
-      <label for="window-select">Janela temporal:</label>
+      <label for="window-select">Janela:</label>
       <select id="window-select">
         <option value="1">Última hora</option>
         <option value="6">Últimas 6 horas</option>
-        <option value="24" selected>Últimas 24 horas</option>
-        <option value="168">Última semana</option>
+        <option value="24">Últimas 24 horas</option>
+        <option value="168" selected>Últimos 7 dias</option>
+        <option value="720">Últimos 30 dias</option>
+        <option value="2160">Últimos 90 dias</option>
       </select>
-      <label for="period-select">Período (novos painéis):</label>
-      <select id="period-select">
-        <option value="7">7 dias</option>
-        <option value="30" selected>30 dias</option>
-        <option value="90">90 dias</option>
-      </select>
-      <button id="refresh-btn">🔄 Atualizar</button>
-      <button id="export-report-btn">📄 Exportar relatório</button>
+      <button id="refresh-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Atualizar</button>
+      <button id="export-report-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-file"/></svg> Exportar relatório</button>
       <span id="status-indicator" class="status-indicator status-unknown">● a verificar</span>
     </div>
   </header>
 
   <div class="app-shell">
-    <button class="sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="false">☰ Menu</button>
+    <button class="sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="false"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg> Menu</button>
     <nav class="sidebar" id="sidebar" aria-label="Navegação principal">
     <details class="nav-group" open>
-      <summary>Visão Geral</summary>
-      <button class="nav-item active" aria-current="page" data-tab="overview">📊 Overview</button>
+      <summary>Visão geral</summary>
+      <button class="nav-item active" aria-current="page" data-tab="overview"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-chart"/></svg> Overview</button>
     </details>
     <details class="nav-group" open>
-      <summary>SOC</summary>
-      <button class="nav-item" data-tab="alerts">🚨 Alertas</button>
-      <button class="nav-item" data-tab="incidents">🧩 Incidentes</button>
-      <button class="nav-item" data-tab="soc-team">👥 Equipa SOC</button>
-      <button class="nav-item is-planned" data-planned="R3" data-label="Investigações">🔎 Investigações<span class="nav-badge">R3</span></button>
+      <summary>Operações SOC</summary>
+      <button class="nav-item" data-tab="live-soc" data-tabs="live-soc agents"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Live SOC</button>
+      <button class="nav-item" data-tab="alerts"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-siren"/></svg> Alertas</button>
+      <button class="nav-item" data-tab="incidents"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-puzzle"/></svg> Incidentes</button>
+      <button class="nav-item" data-tab="detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Deteções</button>
+      <button class="nav-item" data-tab="soc-team"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-users"/></svg> Equipa SOC</button>
     </details>
     <details class="nav-group" open>
-      <summary>Red Team</summary>
-      <button class="nav-item" data-tab="redblue">⚔️ Red vs Blue</button>
-      <button class="nav-item" data-tab="attack-library">📚 Attack Library</button>
-      <button class="nav-item" data-tab="attack-registry">🗂️ Attack Registry</button>
-      <button class="nav-item" data-tab="attack-timeline">🕒 Attack Timeline</button>
+      <summary>Validação</summary>
+      <button class="nav-item" data-tab="redblue"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-swords"/></svg> Red vs Blue</button>
+      <button class="nav-item" data-tab="attack-registry" data-tabs="attack-registry attack-timeline"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Ataques</button>
+      <button class="nav-item" data-tab="attack-library"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Biblioteca</button>
+      <button class="nav-item" data-tab="vaccines"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-syringe"/></svg> Vaccines</button>
     </details>
     <details class="nav-group" open>
-      <summary>Blue Team</summary>
-      <button class="nav-item" data-tab="detections">🎯 Detections</button>
-      <button class="nav-item is-planned" data-planned="R21" data-label="Response">🛠️ Response<span class="nav-badge">R21</span></button>
-      <button class="nav-item is-planned" data-planned="R21" data-label="Playbooks">📘 Playbooks<span class="nav-badge">R21</span></button>
+      <summary>Rede</summary>
+      <button class="nav-item" data-tab="live-traffic"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Tráfego</button>
+      <button class="nav-item" data-tab="network-detections"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-traffic"/></svg> Deteções de rede</button>
+      <button class="nav-item" data-tab="pcap-evidence"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-flask"/></svg> Evidência</button>
     </details>
     <details class="nav-group" open>
-      <summary>Network</summary>
-      <button class="nav-item" data-tab="live-traffic">📡 Live Traffic</button>
-      <button class="nav-item" data-tab="network-detections">🚦 Network Detections</button>
-      <button class="nav-item" data-tab="pcap-evidence">🧪 PCAP / Evidence</button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Wazuh</summary>
-      <button class="nav-item" data-tab="agents">🖥️ Agentes</button>
-      <button class="nav-item" data-tab="live-soc">📡 Live SOC</button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Identidade (IAM)</summary>
-      <button class="nav-item" data-tab="lifecycle">📋 Ciclo de Vida</button>
-      <button class="nav-item" data-tab="privileges">🔑 Privilégios</button>
-      <button class="nav-item" data-tab="admin-activity">👤 Contas Admin</button>
+      <summary>Identidade</summary>
+      <button class="nav-item" data-tab="lifecycle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clipboard"/></svg> Ciclo de Vida</button>
+      <button class="nav-item" data-tab="privileges"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-key"/></svg> Privilégios</button>
+      <button class="nav-item" data-tab="admin-activity"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-user"/></svg> Contas Admin</button>
     </details>
     <details class="nav-group" open>
       <summary>ML</summary>
-      <button class="nav-item" data-tab="ml-anomalies">🧠 Anomalias</button>
-      <button class="nav-item" data-tab="ml-models">📦 Models</button>
-      
-      <button class="nav-item" data-tab="ml-evaluation">📐 Evaluation</button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Vaccines</summary>
-      <button class="nav-item" data-tab="vaccines">💉 Candidates</button>
-      <button class="nav-item is-planned" data-planned="R12" data-label="Validation">✅ Validation<span class="nav-badge">R12</span></button>
-      <button class="nav-item is-planned" data-planned="R14" data-label="Approved">🏷️ Approved<span class="nav-badge">R14</span></button>
-      <button class="nav-item is-planned" data-planned="R14" data-label="Regression">🔁 Regression<span class="nav-badge">R14</span></button>
-    </details>
-    <details class="nav-group" open>
-      <summary>MITRE ATT&amp;CK</summary>
-      <button class="nav-item is-planned" data-planned="R16" data-label="Coverage">🗺️ Coverage<span class="nav-badge">R16</span></button>
-      <button class="nav-item is-planned" data-planned="R16" data-label="Techniques">🧬 Techniques<span class="nav-badge">R16</span></button>
-      <button class="nav-item is-planned" data-planned="R16" data-label="Gaps">🕳️ Gaps<span class="nav-badge">R16</span></button>
+      <button class="nav-item" data-tab="ml-anomalies"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-brain"/></svg> Anomalias</button>
+      <button class="nav-item" data-tab="ml-models" data-tabs="ml-models ml-evaluation"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-box"/></svg> Modelos</button>
     </details>
     <details class="nav-group" open>
       <summary>Métricas</summary>
-      <button class="nav-item" data-tab="mttd-mttr">⏱️ MTTD / MTTR</button>
-      <button class="nav-item" data-tab="detection-coverage">📈 Detection Coverage</button>
-      <button class="nav-item" data-tab="detection-rate">🎯 Detection Rate</button>
+      <button class="nav-item" data-tab="mttd-mttr" data-tabs="mttd-mttr detection-coverage detection-rate"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-timer"/></svg> Métricas de deteção</button>
     </details>
     <details class="nav-group" open>
-      <summary>Relatórios</summary>
-      <button class="nav-item" data-tab="compliance">🛡️ Conformidade</button>
-      <button class="nav-item is-planned" data-planned="R19" data-label="Security Reports">📄 Security Reports<span class="nav-badge">R19</span></button>
-      <button class="nav-item is-planned" data-planned="R20" data-label="Executive">📊 Executive<span class="nav-badge">R20</span></button>
-    </details>
-    <details class="nav-group" open>
-      <summary>Sistema</summary>
-      <button class="nav-item" data-tab="system">⚙️ Sistema</button>
-      <button class="nav-item is-planned" data-planned="R22" data-label="Settings">🔧 Settings<span class="nav-badge">R22</span></button>
+      <summary>Relatórios e sistema</summary>
+      <button class="nav-item" data-tab="compliance"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg> Conformidade</button>
+      <button class="nav-item" data-tab="system"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-gear"/></svg> Sistema</button>
+      <button class="nav-item" data-tab="roadmap"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-map"/></svg> Roadmap</button>
     </details>
   </nav>
 
@@ -157,7 +166,7 @@
       </section>
 
       <section class="panel ovw-attention" id="ovw-attention">
-        <h2>⚠️ Requer atenção <span class="ovw-attention-count" id="ovw-attention-count"></span></h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warning"/></svg> Requer atenção <span class="ovw-attention-count" id="ovw-attention-count"></span></h2>
         <ul class="ovw-attention-list" id="ovw-attention-list">
           <li class="ovw-attn-unavailable">A carregar…</li>
         </ul>
@@ -192,7 +201,7 @@
       </section>
 
       <section class="panel charts-panel">
-        <h2>📈 Análises</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trend"/></svg> Análises</h2>
         <div class="charts-grid">
           <div class="chart-card">
             <h3>Alertas ao longo do tempo</h3>
@@ -200,18 +209,18 @@
           </div>
           <div class="chart-card">
             <h3>Distribuição por severidade</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-severity-donut"></canvas></div>
+            <div class="chart-canvas-wrap"><canvas id="chart-severity-bars"></canvas></div>
           </div>
           <div class="chart-card">
-            <h3>Top Event IDs</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-top-events"></canvas></div>
+            <h3>Eventos mais frequentes</h3>
+            <div class="chart-canvas-wrap chart-tall"><canvas id="chart-top-events"></canvas></div>
           </div>
         </div>
       </section>
 
       <section class="system-summary-card" id="system-summary-card" title="Ver detalhe na aba Sistema">
         <div class="summary-header">
-          <h3>🖥️ Estado do Sistema</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-monitor"/></svg> Estado do Sistema</h3>
           <span class="health-badge" id="summary-health-badge">—</span>
         </div>
         <div class="summary-bars">
@@ -242,12 +251,13 @@
     <!-- ===== Alertas ===== -->
     <div class="tab-content" id="tab-alerts">
       <section class="panel" id="brute-force-panel" style="display:none">
-        <h2>⚠️ Possíveis Ataques de Força Bruta</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warning"/></svg> Possíveis Ataques de Força Bruta</h2>
         <div id="brute-force-list"></div>
       </section>
 
       <section class="panel" id="alerts-panel">
-        <h2>🚨 Alertas Recentes</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-siren"/></svg> Alertas Recentes</h2>
+        <p class="panel-note window-note" data-window-max="168"></p>
         <div class="filter-row">
           <select id="severity-filter">
             <option value="">Todas as severidades</option>
@@ -282,8 +292,12 @@
 
     <!-- ===== Agentes ===== -->
     <div class="tab-content" id="tab-agents">
+      <div class="subnav" role="group" aria-label="Live SOC e agentes">
+        <button type="button" class="subnav-item" data-tab="live-soc">Saúde do SIEM</button>
+        <button type="button" class="subnav-item" data-tab="agents">Agentes</button>
+      </div>
       <section class="panel">
-        <h2>🖥️ Agentes Wazuh</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-monitor"/></svg> Agentes Wazuh</h2>
         <div class="table-scroll">
           <table id="agents-table">
             <thead>
@@ -306,7 +320,7 @@
     <!-- ===== Sistema ===== -->
     <div class="tab-content" id="tab-system">
       <section class="panel system-panel" id="system-panel">
-        <h2>🖥️ Estado do Sistema</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-monitor"/></svg> Estado do Sistema</h2>
         <div class="system-grid">
           <div class="system-card">
             <div class="system-card-header">
@@ -328,7 +342,7 @@
           <div class="system-card">
             <div class="system-card-header">
               <h3>Rede</h3>
-              <button id="speedtest-btn" title="Forçar medição imediata">🔄 Medir agora</button>
+              <button id="speedtest-btn" title="Forçar medição imediata"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Medir agora</button>
               <span class="system-card-value">↓ <span id="sys-net-download">—</span> ↑ <span id="sys-net-upload">—</span> Mbps</span>
             </div>
             <div class="progress-track"><div class="progress-fill" id="sys-net-bar"></div></div>
@@ -375,7 +389,8 @@
     <!-- ===== Ciclo de Vida de Contas ===== -->
     <div class="tab-content" id="tab-lifecycle">
       <section class="panel" id="lifecycle-panel">
-        <h2>📋 Ciclo de Vida de Contas</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clipboard"/></svg> Ciclo de Vida de Contas</h2>
+        <p class="panel-note window-note" data-window-max="2160"></p>
 
         <section class="kpi-grid" id="lifecycle-kpi-grid">
           <div class="card">
@@ -444,7 +459,8 @@
     <!-- ===== Privilégios ===== -->
     <div class="tab-content" id="tab-privileges">
       <section class="panel" id="privileges-panel">
-        <h2>🔑 Privilégios</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-key"/></svg> Privilégios</h2>
+        <p class="panel-note window-note" data-window-max="2160"></p>
 
         <section class="kpi-grid" id="privileges-kpi-grid">
           <div class="card">
@@ -463,7 +479,7 @@
 
         <div class="chart-card">
           <h3>Grupos mais movimentados</h3>
-          <div class="chart-canvas-wrap"><canvas id="chart-privileges-groups"></canvas></div>
+          <div class="chart-canvas-wrap chart-tall"><canvas id="chart-privileges-groups"></canvas></div>
         </div>
 
         <h3 class="system-alerts-title" style="margin-top: 25px;">Desvios ao Baseline</h3>
@@ -495,11 +511,13 @@
     <!-- ===== Contas Admin ===== -->
     <div class="tab-content" id="tab-admin-activity">
       <section class="panel" id="admin-activity-panel">
-        <h2>👤 Contas Admin</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-user"/></svg> Contas Admin</h2>
+        <p class="panel-note window-note" data-window-max="2160"></p>
 
-        <div class="chart-card">
-          <h3>Eventos administrativos vs. normais</h3>
-          <div class="chart-canvas-wrap"><canvas id="chart-admin-event-comparison"></canvas></div>
+        <div class="chart-card" id="admin-share-card">
+          <h3>Peso das contas administrativas nos eventos</h3>
+          <p class="admin-share" id="admin-share-value">—</p>
+          <p class="panel-note" id="admin-share-detail">Sem dados nesta janela</p>
         </div>
 
         <h3 class="system-alerts-title" style="margin-top: 25px;">Contas Administrativas</h3>
@@ -544,12 +562,11 @@
     <!-- ===== ML Anomalias ===== -->
     <div class="tab-content" id="tab-ml-anomalies">
       <section class="panel" id="ml-anomalies-panel">
-        <h2>🧠 ML Anomalias</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-brain"/></svg> Anomalias de ML</h2>
+        <p class="panel-note window-note" data-window-max="168"></p>
         <p class="panel-note">
           Deteção por Isolation Forest, a correr em paralelo com a classificação por regras
-          (event_catalog.py) — nunca a substitui. A versão do modelo e a origem dos dados de treino estão na aba Models.
-          Janela de análise limitada aos últimos 7 dias, independentemente do período
-          selecionado acima.
+          (event_catalog.py) — nunca a substitui. A versão do modelo e a origem dos dados de treino estão na aba Modelos.
         </p>
 
         <section class="kpi-grid" id="ml-anomalies-kpi-grid">
@@ -599,8 +616,12 @@
 
     <!-- ===== Models ===== -->
     <div class="tab-content" id="tab-ml-models">
+      <div class="subnav" role="group" aria-label="Modelos de ML">
+        <button type="button" class="subnav-item" data-tab="ml-models">Versões</button>
+        <button type="button" class="subnav-item" data-tab="ml-evaluation">Avaliação</button>
+      </div>
       <section class="panel" id="ml-models-panel">
-        <h2>📦 Models</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-box"/></svg> Modelos</h2>
         <p class="panel-note">
           Versões do modelo de ML registadas em <code>scripts/models/vN/</code> (metadados em
           <code>metadata.json</code>); a versão ativa é a indicada por <code>scripts/models/ACTIVE</code>.
@@ -681,8 +702,12 @@
 
     <!-- ===== Evaluation ===== -->
     <div class="tab-content" id="tab-ml-evaluation">
+      <div class="subnav" role="group" aria-label="Modelos de ML">
+        <button type="button" class="subnav-item" data-tab="ml-models">Versões</button>
+        <button type="button" class="subnav-item" data-tab="ml-evaluation">Avaliação</button>
+      </div>
       <section class="panel" id="ml-evaluation-panel">
-        <h2>📐 Evaluation</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-ruler"/></svg> Avaliação</h2>
         <p class="panel-note">
           Duas metades, com origens diferentes. Em cima, a avaliação de cada versão do modelo (ML
           contra regras) lida do <code>metadata.json</code> da <strong>própria</strong> versão —
@@ -802,7 +827,8 @@
     <!-- ===== Conformidade ===== -->
     <div class="tab-content" id="tab-compliance">
       <section class="panel" id="compliance-panel">
-        <h2>🛡️ Conformidade Regulatória</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg> Conformidade Regulatória</h2>
+        <p class="panel-note window-note" data-window-max="168"></p>
         <p class="panel-note" id="compliance-org-note">
           A carregar perfil da organização...
         </p>
@@ -850,13 +876,13 @@
     <!-- ===== Red vs Blue ===== -->
     <div class="tab-content" id="tab-redblue">
       <section class="panel" id="redblue-summary-panel">
-        <h2>⚔️ Red vs Blue</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-swords"/></svg> Red vs Blue</h2>
         <p class="panel-note">
           Cruza o log de ataques lançados a partir da VM Kali com o que o Wazuh
           (regras e ML) e a captura de rede detetaram. Todos os dados vêm dos
           endpoints reais do backend. As tentativas vêm de todo o log de
           ataques, mas os alertas do Wazuh só são pesquisados nos últimos
-          7 dias (independentemente do período escolhido acima); tentativas
+          7 dias (janela fixa, independente do seletor do cabeçalho); tentativas
           mais antigas não podem ter correspondência.
         </p>
         <section class="kpi-grid" id="redblue-kpi-grid">
@@ -870,7 +896,7 @@
       </section>
 
       <section class="panel" id="redblue-red-panel">
-        <h2>🔴 Red Team — Ataques Lançados</h2>
+        <h2><svg class="icon icon-red" aria-hidden="true" focusable="false"><use href="#i-dot"/></svg> Red Team — Ataques Lançados</h2>
         <div class="table-scroll">
           <table id="redblue-attack-table">
             <thead>
@@ -884,7 +910,7 @@
       </section>
 
       <section class="panel" id="redblue-blue-panel">
-        <h2>🔵 Blue Team — Deteção por Cenário</h2>
+        <h2><svg class="icon icon-blue" aria-hidden="true" focusable="false"><use href="#i-dot"/></svg> Blue Team — Deteção por Cenário</h2>
         <p class="panel-note" id="redblue-blue-note"></p>
         <div class="table-scroll">
           <table id="redblue-blue-table">
@@ -913,12 +939,12 @@
       </section>
 
       <section class="panel" id="redblue-network-panel">
-        <h2>🌐 Rede em Tempo Real</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-globe"/></svg> Rede em Tempo Real</h2>
         <p class="panel-note" id="redblue-network-note">A carregar...</p>
         <p class="panel-note">Este painel é a vista de correlação (pacotes do buffer + deteções recomputadas,
           a mesma fonte usada por <code>/api/redblue/metrics</code>). Para resumos dedicados e para o histórico
           persistido de deteções (sobrevive a um restart do backend), ver as abas
-          <strong>Network → Live Traffic / Network Detections / PCAP Evidence</strong> na sidebar.</p>
+          <strong>Rede → Tráfego / Deteções de rede / Evidência</strong> na sidebar.</p>
         <section class="kpi-grid">
           <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="kpi-rb-packets">—</div></div>
           <div class="card"><h3>Deteções Atuais</h3><div class="value" id="kpi-rb-detections">—</div></div>
@@ -945,7 +971,7 @@
       </section>
 
       <section class="panel" id="redblue-manager-panel">
-        <h2>🧭 Manager / Auditor</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-compass"/></svg> Manager / Auditor</h2>
         <section class="kpi-grid">
           <div class="card"><h3>Backend</h3><div class="value" id="kpi-rb-backend">—</div></div>
           <div class="card"><h3>Agentes Ativos</h3><div class="value" id="kpi-rb-agents">—</div></div>
@@ -966,7 +992,8 @@
     <!-- ===== Incidentes (Roadmap v2, R3) ===== -->
     <div class="tab-content" id="tab-incidents">
       <section class="panel" id="incidents-panel">
-        <h2>🧩 Incidentes</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-puzzle"/></svg> Incidentes</h2>
+        <p class="panel-note window-note" data-window-max="720"></p>
         <p class="panel-note">
           Agrupamento automático de deteções (alertas Wazuh e rede) por ativo, com estado e timeline.
           Só dados reais: ataques sem nenhuma deteção não geram incidente (ver Red vs Blue).
@@ -1000,7 +1027,7 @@
           <select id="inc-assigned-filter">
             <option value="">Todos</option>
           </select>
-          <button id="inc-backfill-btn" type="button">📥 Importar histórico</button>
+          <button id="inc-backfill-btn" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Importar histórico</button>
         </div>
         <div id="inc-notice" class="panel-note" role="status"></div>
         <div class="table-scroll">
@@ -1025,18 +1052,18 @@
         <div class="inc-actions" id="inc-actions"></div>
         <label for="inc-note-input" class="inc-note-label">Nota (obrigatória para fechar um incidente novo):</label>
         <textarea id="inc-note-input" rows="2" maxlength="2000"></textarea>
-        <button id="inc-note-btn" type="button">➕ Adicionar nota</button>
+        <button id="inc-note-btn" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Adicionar nota</button>
         <div id="inc-assignment-section" class="inc-assignment-section">
-          <h3>👤 Atribuição</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-user"/></svg> Atribuição</h3>
           <label for="inc-assignment-input" class="inc-assignment-label">Analista responsável:</label>
           <input type="text" id="inc-assignment-input" maxlength="128" placeholder="Nome do analista (deixe vazio para desatribuir)">
-          <button id="inc-assignment-btn" type="button">✅ Atribuir</button>
+          <button id="inc-assignment-btn" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Atribuir</button>
           <span id="inc-assignment-status" class="panel-note" role="status"></span>
         </div>
         <div id="inc-triage-section" class="inc-triage-section" hidden>
-          <h3>🔮 Triagem JEV (Experimental)</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-crystal"/></svg> Triagem JEV (Experimental)</h3>
           <p class="panel-note">Consulta TypeSafe AI — consultiva, não altera o incidente. Requer <code>SENTRYLENS_JEV_ENABLED=1</code> + <code>TYPESAFE_API_KEY</code>.</p>
-          <button id="inc-triage-btn" type="button" class="btn-primary">🔮 Triar com JEV</button>
+          <button id="inc-triage-btn" type="button" class="btn-primary"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-crystal"/></svg> Triar com JEV</button>
           <span id="inc-triage-status" class="panel-note" role="status"></span>
           <div id="inc-triage-result" hidden></div>
         </div>
@@ -1055,7 +1082,7 @@
     <!-- ===== SOC Team (Tier 1/2/3) ===== -->
     <div class="tab-content" id="tab-soc-team">
       <section class="panel" id="soc-team-panel">
-        <h2>👥 Equipa SOC — Tier 1/2/3</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-users"/></svg> Equipa SOC — Tier 1/2/3</h2>
         <p class="panel-note">
           Gestão de analistas, turnos, regras de escalamento e atribuição de incidentes por tier.
           <br>Tier 1 = Triagem | Tier 2 = Investigação | Tier 3 = Caça/Especialista
@@ -1063,7 +1090,7 @@
 
         <!-- Analysts -->
         <section class="panel" id="analysts-section">
-          <h3>👤 Analistas</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-user"/></svg> Analistas</h3>
           <div class="filter-row">
             <label for="analyst-tier-filter">Tier:</label>
             <select id="analyst-tier-filter">
@@ -1078,7 +1105,7 @@
               <option value="0">Inativos</option>
               <option value="">Todos</option>
             </select>
-            <button id="analyst-create-btn" type="button">➕ Novo Analista</button>
+            <button id="analyst-create-btn" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Novo Analista</button>
           </div>
           <div id="analyst-notice" class="panel-note" role="status"></div>
           <div class="table-scroll">
@@ -1137,13 +1164,13 @@
 
         <!-- Shifts -->
         <section class="panel" id="shifts-section">
-          <h3>🕐 Turnos</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg> Turnos</h3>
           <div class="filter-row">
             <label for="shift-analyst-filter">Analista:</label>
             <select id="shift-analyst-filter">
               <option value="">Todos</option>
             </select>
-            <button id="shift-create-btn" type="button">➕ Novo Turno</button>
+            <button id="shift-create-btn" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Novo Turno</button>
           </div>
           <div id="shift-notice" class="panel-note" role="status"></div>
           <div class="table-scroll">
@@ -1195,10 +1222,10 @@
 
         <!-- Escalation Rules -->
         <section class="panel" id="escalation-section">
-          <h3>📋 Regras de Escalamento</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clipboard"/></svg> Regras de Escalamento</h3>
           <p class="panel-note">Define como incidentes escalam entre tiers por severidade.</p>
           <div class="filter-row">
-            <button id="escalation-create-btn" type="button">➕ Nova Regra</button>
+            <button id="escalation-create-btn" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Nova Regra</button>
           </div>
           <div id="escalation-notice" class="panel-note" role="status"></div>
           <div class="table-scroll">
@@ -1265,7 +1292,7 @@
 
         <!-- On-Call / Primary View -->
         <section class="panel" id="oncall-section">
-          <h3>📞 De Prevenção / Turno Atual</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-phone"/></svg> De Prevenção / Turno Atual</h3>
           <div class="filter-row">
             <label for="oncall-tier-filter">Tier:</label>
             <select id="oncall-tier-filter">
@@ -1273,16 +1300,16 @@
               <option value="2">Tier 2</option>
               <option value="3">Tier 3</option>
             </select>
-            <button id="oncall-refresh-btn" type="button">🔄 Atualizar</button>
+            <button id="oncall-refresh-btn" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Atualizar</button>
           </div>
           <div id="oncall-notice" class="panel-note" role="status"></div>
           <div class="oncall-grid">
             <div class="oncall-card">
-              <h4>🔔 De Prevenção (on-call)</h4>
+              <h4><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg> De Prevenção (on-call)</h4>
               <ul id="oncall-list" class="oncall-list"></ul>
             </div>
             <div class="oncall-card">
-              <h4>⭐ Turno Principal (primary)</h4>
+              <h4><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-star"/></svg> Turno Principal (primary)</h4>
               <ul id="primary-list" class="oncall-list"></ul>
             </div>
           </div>
@@ -1290,7 +1317,7 @@
 
         <!-- SLA Breaches -->
         <section class="panel" id="sla-breaches-section">
-          <h3>⚠️ SLA Breaches</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warning"/></svg> SLA Breaches</h3>
           <p class="panel-note">Incidentes com deadline de SLA ultrapassado e não resolvidos.</p>
           <div id="sla-breaches-notice" class="panel-note" role="status"></div>
           <div class="table-scroll">
@@ -1307,7 +1334,7 @@
 
         <!-- Summary by Tier -->
         <section class="panel" id="tier-summary-section">
-          <h3>📊 Resumo por Tier</h3>
+          <h3><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-chart"/></svg> Resumo por Tier</h3>
           <div id="tier-summary-notice" class="panel-note" role="status"></div>
           <div class="table-scroll">
             <table id="tier-summary-table">
@@ -1326,7 +1353,7 @@
     <!-- ===== Attack Library (Roadmap v2, R5) ===== -->
     <div class="tab-content" id="tab-attack-library">
       <section class="panel" id="attack-library-panel">
-        <h2>📚 Attack Library</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-book"/></svg> Biblioteca de ataques</h2>
         <p class="panel-note">
           Catálogo de referência dos cenários de ataque do laboratório (técnica/ferramenta/Event IDs,
           risco, pré-requisitos, sensores esperados e passos de limpeza). Só leitura — não lança nada;
@@ -1379,7 +1406,7 @@
     <!-- ===== Vaccines (Roadmap v2, R11) ===== -->
     <div class="tab-content" id="tab-vaccines">
       <section class="panel" id="vaccines-panel">
-        <h2>💉 Vaccines — candidatas</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-syringe"/></svg> Vaccines — candidatas</h2>
         <p class="panel-note">
           Regras de deteção PROPOSTAS a partir de ataques não detetados ou só parcialmente detetados no
           Red vs Blue, geradas pelo backend em segundo plano. Só leitura: nenhuma é aplicada no Wazuh
@@ -1393,7 +1420,7 @@
             <option value="">Todas</option>
           </select>
           <label><input type="checkbox" id="vac-superseded-filter"> Incluir substituídas</label>
-          <button type="button" id="vac-refresh-btn">🔄 Atualizar</button>
+          <button type="button" id="vac-refresh-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Atualizar</button>
         </div>
         <div id="vac-generator" class="panel-note" role="status"></div>
         <div id="vac-notice" class="panel-note" role="status"></div>
@@ -1426,8 +1453,13 @@
 
     <!-- ===== Attack Registry / Attack Timeline (Roadmap v2, R4) ===== -->
     <div class="tab-content" id="tab-attack-registry">
+      <div class="subnav" role="group" aria-label="Ataques">
+        <button type="button" class="subnav-item" data-tab="attack-registry">Registo</button>
+        <button type="button" class="subnav-item" data-tab="attack-timeline">Linha temporal</button>
+      </div>
       <section class="panel" id="attack-registry-panel">
-        <h2>🗂️ Attack Registry</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg> Registo de ataques</h2>
+        <p class="panel-note window-note" data-window-max="720"></p>
         <p class="panel-note">
           Ataques lançados (log da Kali), o que se esperava detetar e o que foi realmente detetado
           (regra, ML, rede), com os incidentes ligados. Só dados reais; sem correlação disponível
@@ -1484,12 +1516,22 @@
     </div>
 
     <div class="tab-content" id="tab-attack-timeline">
+      <div class="subnav" role="group" aria-label="Ataques">
+        <button type="button" class="subnav-item" data-tab="attack-registry">Registo</button>
+        <button type="button" class="subnav-item" data-tab="attack-timeline">Linha temporal</button>
+      </div>
       <section class="panel" id="attack-timeline-panel">
-        <h2>🕒 Attack Timeline</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg> Linha temporal de ataques</h2>
+        <p class="panel-note window-note" data-window-max="720"></p>
         <p class="panel-note">
           Linha temporal dos ataques lançados (mais antigo primeiro), com o veredito esperado vs real.
-          Usa os filtros do Attack Registry e a janela do seletor de período.
+          Usa os filtros do Registo de ataques e a janela do cabeçalho.
         </p>
+        <div class="atk-strip" id="atk-strip" role="img" aria-label="Faixa ataque → deteção: a carregar">A carregar...</div>
+        <details class="chart-data" id="atk-strip-details" hidden>
+          <summary>Ver dados</summary>
+          <div class="chart-data-body" id="atk-strip-data"></div>
+        </details>
         <ol class="atk-timeline" id="atk-timeline">
           <li class="empty-state">A carregar...</li>
         </ol>
@@ -1498,8 +1540,12 @@
 
     <!-- ===== Live SOC (Roadmap v2, R2): feed ao vivo + saude do SIEM ===== -->
     <div class="tab-content" id="tab-live-soc">
+      <div class="subnav" role="group" aria-label="Live SOC e agentes">
+        <button type="button" class="subnav-item" data-tab="live-soc">Saúde do SIEM</button>
+        <button type="button" class="subnav-item" data-tab="agents">Agentes</button>
+      </div>
       <section class="panel">
-        <h2>❤️ Saúde do SIEM</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-heart"/></svg> Saúde do SIEM</h2>
         <div class="ls-banner ls-banner-wait" id="ls-status" role="status">Estado do SIEM: a verificar...</div>
         <p class="panel-note" id="ls-health-note">A carregar...</p>
         <section class="kpi-grid">
@@ -1512,7 +1558,7 @@
         </section>
       </section>
       <section class="panel">
-        <h2>📡 Alertas ao vivo</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Alertas ao vivo</h2>
         <div class="ls-toolbar">
           <span class="ls-conn ls-conn-wait" id="ls-conn">● A ligar...</span>
           <button id="ls-pause-btn" type="button">⏸ Pausar</button>
@@ -1530,7 +1576,7 @@
     <!-- ===== Network SOC: Live Traffic / Network Detections / PCAP Evidence (Roadmap v2, R6) ===== -->
     <div class="tab-content" id="tab-live-traffic">
       <section class="panel" id="live-traffic-panel">
-        <h2>📡 Live Traffic</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-antenna"/></svg> Tráfego em direto</h2>
         <p class="panel-note" id="nst-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Pacotes no Buffer</h3><div class="value" id="nst-total">—</div></div>
@@ -1563,7 +1609,7 @@
 
     <div class="tab-content" id="tab-network-detections">
       <section class="panel" id="network-detections-panel">
-        <h2>🚦 Network Detections</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-traffic"/></svg> Deteções de rede</h2>
         <p class="panel-note" id="nsd-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Deteções Agora</h3><div class="value" id="nsd-live-count">—</div></div>
@@ -1589,7 +1635,7 @@
     <!-- ===== Detections: vista unificada regra/ML/rede (Roadmap v2, R7) ===== -->
     <div class="tab-content" id="tab-detections">
       <section class="panel" id="detections-panel">
-        <h2>🎯 Detections</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Deteções</h2>
         <p class="panel-note" id="det-note">A carregar...</p>
         <div class="filter-row">
           <label for="det-hours-filter">Janela:</label>
@@ -1623,8 +1669,13 @@
 
     <!-- ===== Métricas SOC (Roadmap v2, R8) ===== -->
     <div class="tab-content" id="tab-mttd-mttr">
+      <div class="subnav" role="group" aria-label="Métricas de deteção">
+        <button type="button" class="subnav-item" data-tab="mttd-mttr">MTTD / MTTR</button>
+        <button type="button" class="subnav-item" data-tab="detection-coverage">Cobertura</button>
+        <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
+      </div>
       <section class="panel" id="mttd-mttr-panel">
-        <h2>⏱️ MTTD / MTTR</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-timer"/></svg> MTTD / MTTR</h2>
         <p class="panel-note" id="met-mttd-note">A carregar...</p>
         <p class="panel-note" id="met-mttr-note"></p>
         <section class="kpi-grid">
@@ -1646,13 +1697,28 @@
     </div>
 
     <div class="tab-content" id="tab-detection-coverage">
+      <div class="subnav" role="group" aria-label="Métricas de deteção">
+        <button type="button" class="subnav-item" data-tab="mttd-mttr">MTTD / MTTR</button>
+        <button type="button" class="subnav-item" data-tab="detection-coverage">Cobertura</button>
+        <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
+      </div>
       <section class="panel" id="detection-coverage-panel">
-        <h2>📈 Detection Coverage</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trend"/></svg> Cobertura de deteção</h2>
         <p class="panel-note" id="met-cov-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Cenários cobertos</h3><div class="value" id="met-cov-scenarios">—</div></div>
           <div class="card"><h3>Técnicas MITRE cobertas</h3><div class="value" id="met-cov-techniques">—</div></div>
         </section>
+        <h3>Matriz cenário × sensor</h3>
+        <p class="panel-note" id="met-matrix-note">A carregar...</p>
+        <div class="table-scroll">
+          <table id="met-matrix" class="matrix-table" hidden>
+            <caption class="visually-hidden">Cobertura por cenário e sensor: esperado e alcançado</caption>
+            <thead><tr><th scope="col">Cenário</th><th scope="col">Tentativas</th><th scope="col">Regra</th><th scope="col">ML</th><th scope="col">Rede</th></tr></thead>
+            <tbody id="met-matrix-body"></tbody>
+          </table>
+        </div>
+        <p class="panel-note matrix-legend">✔ esperado e alcançado · ◐ alcançado em parte · ✘ esperado e falhado · ＋ alcançado sem ser esperado · — não esperado</p>
         <h3>Lacunas — cenários sem deteção</h3>
         <ul id="met-gaps-scenarios"><li class="empty-state">A carregar...</li></ul>
         <h3>Lacunas — técnicas sem deteção</h3>
@@ -1662,8 +1728,13 @@
     </div>
 
     <div class="tab-content" id="tab-detection-rate">
+      <div class="subnav" role="group" aria-label="Métricas de deteção">
+        <button type="button" class="subnav-item" data-tab="mttd-mttr">MTTD / MTTR</button>
+        <button type="button" class="subnav-item" data-tab="detection-coverage">Cobertura</button>
+        <button type="button" class="subnav-item" data-tab="detection-rate">Taxa de deteção</button>
+      </div>
       <section class="panel" id="detection-rate-panel">
-        <h2>🎯 Detection Rate</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-target"/></svg> Taxa de deteção</h2>
         <p class="panel-note" id="met-rate-note">A carregar...</p>
         <section class="kpi-grid">
           <div class="card"><h3>Ataques lançados</h3><div class="value" id="met-rate-launched">—</div></div>
@@ -1685,7 +1756,7 @@
 
     <div class="tab-content" id="tab-pcap-evidence">
       <section class="panel" id="pcap-evidence-panel">
-        <h2>🧪 PCAP / Evidence</h2>
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-flask"/></svg> Evidência de rede</h2>
         <p class="panel-note" id="nse-disclaimer">A carregar...</p>
         <div class="filter-row">
           <label for="nse-date-filter">Dia (AAAA-MM-DD):</label>
@@ -1709,12 +1780,38 @@
       </section>
     </div>
 
-    <!-- ===== Secção planeada (sem dados reais ainda) ===== -->
-    <div class="tab-content" id="tab-planned">
-      <section class="panel planned-panel">
-        <h2 id="planned-title">Secção planeada</h2>
-        <p class="empty-state">Sem dados — ainda não implementado.</p>
-        <p class="planned-note">Prevista na fase <strong id="planned-phase">R?</strong> do Roadmap v2. Esta secção só mostrará dados reais quando existir a fonte de dados correspondente (ver <code>docs/ROADMAP_STATUS.md</code>).</p>
+    <!-- ===== Roadmap (funcionalidades ainda não implementadas) ===== -->
+    <div class="tab-content" id="tab-roadmap">
+      <section class="panel" id="roadmap-panel">
+        <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-map"/></svg> Roadmap</h2>
+        <p class="panel-note">
+          Funcionalidades previstas no Roadmap v2 que ainda não existem no dashboard. Nenhuma tem dados
+          nem página própria: o estado de cada uma é o que consta de <code>docs/ROADMAP_STATUS.md</code>.
+        </p>
+        <h3 class="roadmap-group">Deteção e resposta</h3>
+        <ul class="roadmap-list">
+          <li><strong>Investigações</strong> <span class="roadmap-status">Planeado (R3)</span></li>
+          <li><strong>Response</strong> <span class="roadmap-status">Planeado (R21)</span></li>
+          <li><strong>Playbooks</strong> <span class="roadmap-status">Planeado (R21)</span></li>
+        </ul>
+        <h3 class="roadmap-group">Vaccines</h3>
+        <ul class="roadmap-list">
+          <li><strong>Validation</strong> <span class="roadmap-status">Planeado (R12)</span></li>
+          <li><strong>Approved</strong> <span class="roadmap-status">Planeado (R14)</span></li>
+          <li><strong>Regression</strong> <span class="roadmap-status">Planeado (R14)</span></li>
+        </ul>
+        <h3 class="roadmap-group">MITRE ATT&amp;CK</h3>
+        <ul class="roadmap-list">
+          <li><strong>Coverage</strong> <span class="roadmap-status">Planeado (R16)</span></li>
+          <li><strong>Techniques</strong> <span class="roadmap-status">Planeado (R16)</span></li>
+          <li><strong>Gaps</strong> <span class="roadmap-status">Planeado (R16)</span></li>
+        </ul>
+        <h3 class="roadmap-group">Relatórios e sistema</h3>
+        <ul class="roadmap-list">
+          <li><strong>Security Reports</strong> <span class="roadmap-status">Planeado (R19)</span></li>
+          <li><strong>Executive</strong> <span class="roadmap-status">Planeado (R20)</span></li>
+          <li><strong>Settings</strong> <span class="roadmap-status">Planeado (R22)</span></li>
+        </ul>
       </section>
     </div>
 
@@ -1725,12 +1822,24 @@
     <p>SentryLens — Fase 2 do projeto CET.</p>
   </footer>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"
-    integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
-    crossorigin="anonymous"></script>
+  <script src="vendor/chart.umd.min.js"></script>
   <script src="config.js"></script>
   <script src="ui_helpers.js"></script>
+  <script src="router.js"></script>
+  <script src="api.js"></script>
+  <script src="state.js"></script>
+  <script src="fmt.js"></script>
+  <script src="html.js"></script>
+  <script src="table.js"></script>
+  <script src="kpi.js"></script>
   <script src="app.js"></script>
+  <script src="overview-alerts.js"></script>
+  <script src="system.js"></script>
+  <script src="iam.js"></script>
+  <script src="ml-anomalies.js"></script>
+  <script src="compliance.js"></script>
+  <script src="realtime.js"></script>
+  <script src="shell.js"></script>
   <script src="overview.js"></script>
   <script src="redblue.js"></script>
   <script src="incidents.js"></script>
