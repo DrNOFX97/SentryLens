@@ -103,7 +103,8 @@ source "virtualbox-iso" "wazuh_manager" {
   iso_urls = [
     "https://releases.ubuntu.com/jammy/ubuntu-${var.ubuntu_version}-live-server-amd64.iso"
   ]
-  iso_checksum = "sha256:ae5a8e5c5ae0c7b5f5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c5e0c"
+  # Verificado contra releases.ubuntu.com/jammy/SHA256SUMS em 2026-10-19.
+  iso_checksum = "sha256:9bc6028870aef3f74f4e16b900008179e78b130e6b0b9a140635434a46aa98b0"
 
   http_content = {
     "/user-data" = templatefile("${path.root}/http/user-data.pkrtpl.hcl", {

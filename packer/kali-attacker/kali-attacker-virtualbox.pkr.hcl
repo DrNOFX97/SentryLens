@@ -39,7 +39,9 @@ variable "disk_size" {
 
 variable "kali_version" {
   type    = string
-  default = "2024.3"
+  # A 2024.3 já não existe em cdimage.kali.org (só guardam as releases
+  # recentes); atualizada para a mais recente disponível em 2026-10-19.
+  default = "2026.2"
 }
 
 variable "ssh_username" {
@@ -68,6 +70,9 @@ source "virtualbox-iso" "kali_attacker" {
   disk_variant   = "Standard"
   headless       = true
   boot_wait      = "10s"
+  # Sequência de teclas nunca verificada contra o menu de arranque da
+  # 2026.2 (foi escrita para a 2024.3, já indisponível); o checksum do ISO
+  # está correto, mas um build real pode precisar de ajustar isto.
   boot_command   = [
     "<enter><wait>",
     "<enter><wait>",
@@ -85,7 +90,9 @@ source "virtualbox-iso" "kali_attacker" {
   iso_urls = [
     "https://cdimage.kali.org/kali-${var.kali_version}/kali-linux-${var.kali_version}-installer-amd64.iso"
   ]
-  iso_checksum = "sha256:TODO_UPDATE_WITH_ACTUAL_CHECKSUM"
+  # Verificado contra cdimage.kali.org/kali-2026.2/SHA256SUMS em 2026-10-19;
+  # muda sempre que var.kali_version mudar.
+  iso_checksum = "sha256:6dbefacc95e3b556c19c48e8bae39b8b505e2d3a1aba0bfb7ab62b036c3d2ba3"
 
   http_content = {
     "/user-data" = templatefile("${path.root}/http/user-data.pkrtpl.hcl", {
