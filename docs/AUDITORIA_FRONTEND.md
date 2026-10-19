@@ -664,7 +664,7 @@ Um avaliador técnico numa demo de 3 minutos quer ver três coisas: que entendes
 
 Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtarefas com dono único (uma tarefa = um ficheiro ou uma função) e revisão independente. Os testes seguem o padrão do repositório: scripts standalone sem framework, que imprimem `[OK]`/`[FALHOU]` e terminam com `sys.exit(1)`. Os testes de lógica JS usam o padrão `node:vm` já usado em `test_ml_models_ui.cjs` e chamado a partir de Python; os testes de contrato estático seguem `test_vaccines_frontend.py`.
 
-### Onda 0: higiene de segurança (antes de qualquer outra coisa)
+### Onda 0: higiene de segurança (antes de qualquer outra coisa) — ✅ feita (PR #3)
 
 - **W0.1** Rodar a `SENTRYLENS_API_KEY`. Acrescentar `scripts/backend.log*` ao `.gitignore`. Apagar `scripts/backend.log-PC-Vicente.err`, os `.err` antigos e os 8 logs de `.playwright-mcp/` com a chave.
 - **W0.2** Remover os `onclick` de `soc_team.js` e substituí-los por delegação de eventos (R3).
@@ -674,7 +674,7 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - `grep -rc "api_key=" scripts/*.log*` dá 0 depois de um arranque e de uma ligação WS. Isto só é verdade depois da W5.4; até lá, o critério é a chave rodada;
 - novo `test_frontend_no_inline_handlers.py`: falha se `onclick=`, `onchange=` ou `on[a-z]+=` aparecer em `*.js` ou `index.html`.
 
-### Onda 1: honestidade e bloqueios (quick wins, todos S)
+### Onda 1: honestidade e bloqueios (quick wins, todos S) — ✅ feita (PR #3)
 
 - **W1.1** R2: modais. **W1.2** R1: barras. **W1.3** R5: indicador do cabeçalho via `/api/siem/health`. **W1.4** R7: Sistema com `try/catch`.
 - **W1.5** R8: concordância e `ml_score`. **W1.6** R9 e R10: botões e filtro falsos. **W1.7** R11 e R12: filtro «Todos» e 422 do tier.
@@ -686,7 +686,7 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - teste estático: `index.html` não contém `data-planned` dentro da área de demo, ou contém só a página Roadmap;
 - verificação manual com o guião da secção 0 (Playwright com rotas intercetadas), anexando as capturas à revisão.
 
-### Onda 2: um só cliente HTTP e um só componente de estado
+### Onda 2: um só cliente HTTP e um só componente de estado — ✅ feita (PR #4)
 
 - **W2.1** `api.js` (E1) com testes de mapeamento (rede, timeout, 401, 422 com array, 502, `detail` não seguro).
 - **W2.2** `state.js`: `showLoading`, `showEmpty`, `showError` e `role="alert"` nos erros.
@@ -697,7 +697,7 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - nenhum texto «Failed to fetch» chega ao DOM (teste `node:vm`);
 - todas as mensagens de erro em PT, com uma ação sugerida.
 
-### Onda 3: desempenho e ciclo de vida
+### Onda 3: desempenho e ciclo de vida — ✅ feita (PR #4)
 
 - **W3.1** `router.js` (E2). **W3.2** Aplicar o padrão aba ativa e visível a `app.js`, `redblue.js` e `incidents.js`.
 - **W3.3** `/ws/network`: lote com `requestAnimationFrame`, teto nos arrays, desenho só com a aba visível. **W3.4** Throttle no refresh dos incidentes por alerta.
@@ -708,7 +708,7 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - `test_serve_frontend.py` cobre os ficheiros novos;
 - o dashboard abre sem internet (verificação manual com a rede cortada).
 
-### Onda 4: sistema de design
+### Onda 4: sistema de design — ✅ feita (PR #4)
 
 - **W4.1** Tokens semânticos e tema escuro. **W4.2** Rampa de severidade validada (D1). **W4.3** Escala tipográfica e rótulos sem maiúsculas.
 - **W4.4** `.badge` e `.btn` unificados. **W4.5** Ícones SVG locais com `aria-hidden`. **W4.6** `prefers-reduced-motion`. **W4.7** Modais acessíveis.
@@ -719,7 +719,7 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - `grep -cE "#[0-9a-fA-F]{6}" style.css` ≤ 30, todos dentro de `:root` ou do bloco do tema escuro;
 - nenhuma cor literal em `*.js`.
 
-### Onda 5: arquitetura de informação e coerência
+### Onda 5: arquitetura de informação e coerência — ✅ feita (PR #4)
 
 - **W5.1** Novo menu (U1) e página Roadmap. **W5.2** Regra de língua (U2). **W5.3** Seletor de janela único (U3).
 - **W5.4** WS com ticket ou subprotocolo (S2), mais CSP no `serve_frontend.py` (S3). **W5.5** Um MTTD só (U5).
@@ -730,7 +730,7 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - o access log de uma sessão com WS não contém `api_key=`;
 - o MTTD do Overview, dos Incidentes, do Red vs Blue e das Métricas é o mesmo número para a mesma janela (teste de API mais teste `node:vm`).
 
-### Onda 6: dataviz
+### Onda 6: dataviz — ✅ feita (PR #4); matriz e faixa só verificadas com dados injetados, por falta de ataques reais no laboratório
 
 - **W6.1** D2 e D3. **W6.2** D4. **W6.3** D7 e D8. **W6.4** D6: matriz de cobertura. **W6.5** D5: faixa ataque → deteção.
 
@@ -738,7 +738,7 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - cada gráfico tem estado vazio, `aria-label` e tabela alternativa (teste estático sobre `renderChart`);
 - verificação visual com captura em 1440 px e 390 px, nos temas claro e escuro.
 
-### Onda 7: refatoração de `app.js` e componentes
+### Onda 7: refatoração de `app.js` e componentes — ✅ feita (PR #4); `app.js` com 120 linhas
 
 - **W7.1** E4: `html\`\``. **W7.2** E5: `table.js`. **W7.3** E6 e E7.
 - **W7.4** a **W7.8**: partir `app.js` (E3), um domínio por tarefa.
@@ -748,10 +748,23 @@ Cada onda é pequena, fecha com critérios verificáveis e parte-se em microtare
 - `run_all_tests.py` verde;
 - o teste estático de `innerHTML` sem `html\`\`` dá 0 ocorrências.
 
-### Onda 8: portefólio
+### Onda 8: portefólio — parcial (PR #4): W8.1 e W8.3 feitas; W8.2 e W8.4 por fazer
 
 - **W8.1** P1: `docs/DEMO.md`. **W8.2** P2: gravação da sessão real. **W8.3** P5: secção de segurança no README. **W8.4** Ensaio da demo cronometrado (3 min) por outra pessoa.
 
 **Critério de saída:** uma pessoa que não conhece o projeto percorre o guião sem ajuda e sem encontrar um ecrã vazio, preso ou «não implementado».
 
 **Ordem recomendada:** 0 → 1 → 2 → 3 juntas formam o «mínimo para mostrar a alguém» (cerca de 3 a 4 dias de microtarefas). As ondas 4 a 6 dão o salto visual. A 7 pode correr em paralelo a partir da 3, porque reduz o custo de tudo o que vem a seguir.
+
+---
+
+## 9. Estado em 2026-10-19
+
+Todas as ondas do plano estão feitas, exceto duas tarefas da Onda 8 que dependem de dados reais do laboratório:
+
+- **Ondas 0 e 1** — PR #3.
+- **Ondas 2 a 7 e Onda 8 parcial (W8.1, W8.3)** — PR #4, depois de #3 e #5 (R7-R11 do roadmap) irem para `main`.
+- **Correção adicional ao PR #4** (fora do plano original, encontrada na validação): os gráficos não seguiam o tema em runtime (o Chart.js gravava as cores resolvidas em `config.options`), a grelha tinha 3 px de overflow a 390 px e as listas vazias tinham marcador.
+- **Decisão de U5 (um MTTD só):** os KPIs da Overview ficam fixos a 7 dias de propósito, com fonte única (`SL_MTTD_WINDOW_HOURS`), para coincidir entre Overview, Red vs Blue e Incidentes.
+- **Por fazer:** W8.2 (gravação da sessão real) e W8.4 (ensaio cronometrado por outra pessoa) — pausados, à espera de um ataque de teste lançado no laboratório para a matriz de cobertura e a faixa ataque → deteção (Onda 6) terem dados reais para mostrar na demo.
+- **Não validado:** a matriz cenário × sensor e a faixa ataque → deteção só foram vistas com dados injetados; o menu em ecrã estreito (390 px) não foi aberto.
