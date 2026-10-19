@@ -1,0 +1,19 @@
+# Packer build outputs
+output-*/
+*.ova
+*.vhdx
+*.box
+*.vmdk
+*.qcow2
+*.raw
+
+# Release packages
+releases/
+
+# Temporary files
+*.tmp
+*.log
+packer_cache/
+
+# Vagrant
+.vagrant/
