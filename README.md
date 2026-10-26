@@ -337,6 +337,9 @@ python test_network_detections.py
 python test_frontend_static.py  # frontend: contratos estáticos (gitignore, handlers inline, modais, CSS)
 python test_ui_helpers.py       # frontend: helpers puros de ui_helpers.js (node:vm)
 python test_vaccines_api.py     # vaccines: rotas, ciclo e garantias negativas
+python test_defender_catalog.py # catálogo de eventos do Defender (por canal, separado de CRITICAL_EVENTS)
+python test_defender_alerts.py  # alertas do Defender em _enrich_alert e from_rule_alert
+python test_install_agent_defender.py  # install-wazuh-agent.ps1 -ConfigureDefenderOnly (corre PowerShell sobre um ossec.conf de fixture)
 # ... e os restantes test_*.py
 ```
 

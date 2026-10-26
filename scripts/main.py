@@ -60,7 +60,7 @@ from attack_registry import build_attack_registry, summarize as summarize_attack
 from attack_scenarios import SCENARIOS
 from compliance_evaluator import evaluate_alert_compliance, load_compliance_rules
 from detection_event import from_ml_anomaly, from_network_detection, from_rule_alert
-from event_catalog import classify_alert
+from event_catalog import classify_wazuh_alert
 from feature_extractor import load_attack_log
 from history_index import index_alert, query_history_index, read_jsonl_at_offset
 from history_store import (
@@ -264,7 +264,7 @@ def _extract_windows_event_id(alert: dict) -> int | None:
 def _enrich_alert(alert: dict) -> dict:
     """Junta a um alerta cru do Wazuh a nossa camada de classificação (Fase 1)."""
     win_event_id = _extract_windows_event_id(alert)
-    classification = classify_alert(win_event_id)
+    classification = classify_wazuh_alert(alert)
 
     return {
         "timestamp": alert.get("@timestamp"),
@@ -471,7 +471,7 @@ async def get_alerts(
     severity: str | None = Query(None, description="Filtrar por severidade classificada (critical/high/medium/low)"),
     category: str | None = Query(
         None,
-        description="Filtrar por categoria classificada (ciclo_de_vida/gestao_de_grupos/autenticacao/atividade_privilegiada/tarefas_agendadas/politica_seguranca/acesso_rede/geral)",
+        description="Filtrar por categoria classificada (ciclo_de_vida/gestao_de_grupos/autenticacao/atividade_privilegiada/tarefas_agendadas/politica_seguranca/acesso_rede/protecao_endpoint/geral)",
     ),
 ):
     """

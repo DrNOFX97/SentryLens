@@ -16,7 +16,7 @@ um novo contrato externo que os substitua.
 
 from typing import Literal, TypedDict
 
-from event_catalog import classify_alert
+from event_catalog import classify_wazuh_alert
 from redblue_correlator import _parse_timestamp
 
 Source = Literal["rule", "ml", "network"]
@@ -53,14 +53,6 @@ def _make(
     }
 
 
-def _windows_event_id(raw: dict) -> int | None:
-    try:
-        value = raw.get("data", {}).get("win", {}).get("system", {}).get("eventID")
-        return int(value) if value is not None else None
-    except (ValueError, TypeError, AttributeError):
-        return None
-
-
 def from_rule_alert(raw: dict) -> DetectionEvent | None:
     """Alerta bruto do Wazuh Indexer (`_source`) -> DetectionEvent. None se
     faltar timestamp válido ou `agent.ip` — mesmo critério de validade que
@@ -73,7 +65,7 @@ def from_rule_alert(raw: dict) -> DetectionEvent | None:
     asset = agent.get("ip") if isinstance(agent, dict) else None
     if ts is None or not asset:
         return None
-    classification = classify_alert(_windows_event_id(raw))
+    classification = classify_wazuh_alert(raw)
     return _make(
         "rule", classification["severity"], asset, ts.isoformat(),
         classification["friendly_name"],
