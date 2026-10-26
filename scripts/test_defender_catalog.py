@@ -89,6 +89,17 @@ def run_5007() -> None:
           sev({"newValue": r"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection\DisableScriptScanning = 0x1"}) == "high")
     check("5007 Disable* a 0 -> info",
           sev({"newValue": r"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection\DisableScriptScanning = 0x0"}) == "info")
+    # Revisão final: valores com mais de um token e separador "/".
+    check("5007 Disable... = 0x0 0x1 -> high", sev({"newValue": base + " = 0x0 0x1"}) == "high")
+    check("5007 Disable... = 0x0 -> 0x1 -> high", sev({"newValue": base + " = 0x0 -> 0x1"}) == "high")
+    check("5007 Disable... = DWORD (0x00000001) -> high", sev({"newValue": base + " = DWORD (0x00000001)"}) == "high")
+    check("5007 Disable... = DWORD (0x00000000) -> info", sev({"newValue": base + " = DWORD (0x00000000)"}) == "info")
+    check("5007 Disable... = 01 (zero à esquerda) -> high, sem exceção", sev({"newValue": base + " = 01"}) == "high")
+    check("5007 Disable... = 00 -> info", sev({"newValue": base + " = 00"}) == "info")
+    check("5007 Exclusions com separador / -> high",
+          sev({"newValue": "HKLM/SOFTWARE/Microsoft/Windows Defender/Exclusions/Paths/C:/temp = 0x0"}) == "high")
+    check("5007 Disable... com separador / = 0x1 -> high",
+          sev({"newValue": "HKLM/SOFTWARE/Microsoft/Windows Defender/Real-Time Protection/DisableRealtimeMonitoring = 0x1"}) == "high")
     for valor in (None, {}, {"newValue": None}, "x", 42):
         check(f"5007 com eventdata={valor!r} -> info, sem exceção", sev(valor) == "info")
 

@@ -109,8 +109,9 @@ DEFENDER_RECOMMENDATIONS: dict[int, str] = {
 # pôr a um valor não nulo uma chave "Disable*" (DisableRealtimeMonitoring,
 # DisableAntiSpyware, DisableScriptScanning...). Em vez de uma lista fixa de
 # chaves, o prefixo "Disable" apanha as que a lista deixaria escapar.
-_DEFENDER_EXCLUSIONS = re.compile(r"\\exclusions(\\|\s*=|\s*$)", re.IGNORECASE)
-_DEFENDER_KEY_VALUE = re.compile(r"\\([^\\=]+?)\s*=\s*(.*?)\s*$")
+_DEFENDER_EXCLUSIONS = re.compile(r"[\\/]exclusions([\\/]|\s*=|\s*$)", re.IGNORECASE)
+_DEFENDER_KEY_VALUE = re.compile(r"[\\/]([^\\/=]+?)\s*=\s*(.*?)\s*$")
+_DEFENDER_NUMBER = re.compile(r"0[xX][0-9a-fA-F]+|\d+")
 
 
 def _defender_5007_is_tampering(eventdata: object) -> bool:
@@ -127,11 +128,12 @@ def _defender_5007_is_tampering(eventdata: object) -> bool:
     match = _DEFENDER_KEY_VALUE.search(new_value)
     if match is None or not match.group(1).casefold().startswith("disable"):
         return False
-    tokens = match.group(2).split()
-    try:
-        return int(tokens[0], 0) != 0
-    except (IndexError, ValueError):
+    # Qualquer número não nulo no valor conta ("0x1", "DWORD (0x1)", "0x0 -> 0x1");
+    # sem nenhum número, o valor é ilegível e conta como adulteração.
+    numbers = _DEFENDER_NUMBER.findall(match.group(2))
+    if not numbers:
         return True
+    return any(int(n, 16 if n[:2].lower() == "0x" else 10) != 0 for n in numbers)
 
 
 def classify_alert(
