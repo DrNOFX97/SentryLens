@@ -18,12 +18,25 @@
     .\install-wazuh-agent.ps1 -WazuhManagerIP 192.168.1.150 -AgentVersion 4.14.7-1
 #>
 
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = "Install")]
 param(
     # IP do Wazuh manager (a VM Ubuntu criada com setup-hyperv-lab.ps1
-    # e configurada com install-wazuh.sh). Obrigatório.
-    [Parameter(Mandatory = $true)]
+    # e configurada com install-wazuh.sh). Obrigatório ao instalar.
+    [Parameter(Mandatory = $true, ParameterSetName = "Install")]
     [string]$WazuhManagerIP,
+
+    # Só acrescenta ao ossec.conf de um agente JÁ instalado a recolha do canal
+    # do Microsoft Defender (e reinicia o WazuhSvc). Não descarrega nem
+    # instala nada, por isso não pede o IP do manager.
+    [Parameter(Mandatory = $true, ParameterSetName = "DefenderOnly")]
+    [switch]$ConfigureDefenderOnly,
+
+    # ossec.conf do agente a alterar.
+    [string]$ConfPath = "C:\Program Files (x86)\ossec-agent\ossec.conf",
+
+    # Com -ConfigureDefenderOnly: altera o ficheiro mas não reinicia o
+    # serviço (e dispensa o PowerShell como Administrador). Usado nos testes.
+    [switch]$NoRestart,
 
     # Versão do pacote do agente Windows (ver
     # https://packages.wazuh.com/4.x/windows/ para versões disponíveis).
@@ -43,13 +56,83 @@ function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor C
 function Write-Ok   { param([string]$m) Write-Host "OK  $m" -ForegroundColor Green }
 function Write-Warn2 { param([string]$m) Write-Host "!!  $m" -ForegroundColor Yellow }
 
+# Recolha do canal Microsoft-Windows-Windows Defender/Operational: acrescenta
+# um <localfile> ao ossec.conf. Só os IDs que o SentryLens classifica
+# (event_catalog.DEFENDER_EVENTS); o 5007 é ruidoso, mas o dashboard trata-o.
+# Idempotente (comentário-marcador, ou a entrada já existir à mão) e guarda uma
+# cópia do original em <ConfPath>.bak-sentrylens na primeira vez.
+function Add-DefenderCollection {
+    param([Parameter(Mandatory = $true)][string]$ConfPath)
+
+    $channel = "Microsoft-Windows-Windows Defender/Operational"
+    $marker = "<!-- SentryLens: Defender -->"
+    $closeTag = "</ossec_config>"
+
+    if (-not (Test-Path -LiteralPath $ConfPath)) {
+        Write-Host "ossec.conf nao encontrado em '$ConfPath'." -ForegroundColor Red
+        exit 1
+    }
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $text = [System.IO.File]::ReadAllText($ConfPath, $utf8)
+
+    if ($text.Contains($marker) -or $text.Contains($channel)) {
+        Write-Ok "A recolha do canal do Defender ja esta configurada em '$ConfPath'."
+        return
+    }
+
+    $closeIndex = $text.LastIndexOf($closeTag)
+    if ($closeIndex -lt 0) {
+        Write-Host "'$ConfPath' nao tem '$closeTag'; nao parece um ossec.conf valido." -ForegroundColor Red
+        exit 1
+    }
+
+    $backup = "$ConfPath.bak-sentrylens"
+    if (-not (Test-Path -LiteralPath $backup)) {
+        Copy-Item -LiteralPath $ConfPath -Destination $backup
+    }
+
+    $nl = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $ids = 1116, 1117, 1118, 1119, 5001, 5007, 5008
+    $query = ($ids | ForEach-Object { "EventID=$_" }) -join " or "
+    $block = @(
+        "  $marker",
+        "  <localfile>",
+        "    <location>$channel</location>",
+        "    <log_format>eventchannel</log_format>",
+        "    <query>Event/System[$query]</query>",
+        "  </localfile>",
+        ""
+    ) -join $nl
+
+    [System.IO.File]::WriteAllText($ConfPath, $text.Insert($closeIndex, $block), $utf8)
+    Write-Ok "Recolha do canal do Defender acrescentada a '$ConfPath' (copia em '$backup')."
+}
+
 # --- Verificar que corre como Administrador ---
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal(
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-)
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "Este script tem de correr num PowerShell como Administrador." -ForegroundColor Red
-    exit 1
+# (o modo de teste -ConfigureDefenderOnly -NoRestart só escreve num ficheiro)
+if (-not ($ConfigureDefenderOnly -and $NoRestart)) {
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal(
+        [Security.Principal.WindowsIdentity]::GetCurrent()
+    )
+    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Host "Este script tem de correr num PowerShell como Administrador." -ForegroundColor Red
+        exit 1
+    }
+}
+
+# --- Modo -ConfigureDefenderOnly: agente ja instalado, so a configuracao ---
+if ($ConfigureDefenderOnly) {
+    Write-Step "A configurar a recolha do canal do Defender..."
+    Add-DefenderCollection -ConfPath $ConfPath
+    if ($NoRestart) {
+        Write-Warn2 "-NoRestart: o WazuhSvc nao foi reiniciado; reinicia-o para a recolha comecar."
+    } else {
+        Write-Step "A reiniciar o servico WazuhSvc..."
+        Restart-Service -Name "WazuhSvc"
+        Write-Ok "WazuhSvc reiniciado."
+    }
+    exit 0
 }
 
 # --- Validar IP ---
@@ -115,6 +198,9 @@ if ($process.ExitCode -ne 0) {
     exit 1
 }
 Write-Ok "Instalacao concluida (exit code 0)."
+
+Write-Step "A configurar a recolha do canal do Defender..."
+Add-DefenderCollection -ConfPath $ConfPath
 
 # ---------------------------------------------------------------------
 # Arrancar o serviço

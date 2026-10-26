@@ -37,6 +37,8 @@ Estes passos ficam de propósito fora dos scripts, por serem interativos, depend
 
 7. **Regras de firewall entre a VM e o host**, se o Windows Defender Firewall bloquear as portas 1514/1515 — o `install-wazuh-agent.ps1` testa a conectividade e avisa, mas não altera regras de firewall automaticamente (é uma alteração de segurança do sistema que deve ser deliberada, não silenciosa).
 
+8. **Recolha do canal do Microsoft Defender.** O `install-wazuh-agent.ps1` acrescenta ao `ossec.conf` uma entrada `<localfile>` para `Microsoft-Windows-Windows Defender/Operational` (só os Event IDs 1116, 1117, 1118, 1119, 5001, 5007 e 5008), com cópia do original em `ossec.conf.bak-sentrylens`. Num agente **já instalado** não se volta a correr o MSI: num PowerShell como Administrador, `.\install-wazuh-agent.ps1 -ConfigureDefenderOnly` (altera o ficheiro e reinicia o `WazuhSvc`; com `-NoRestart` só altera o ficheiro). É idempotente. O que o script não faz: escrever regras no manager (o Wazuh já traz as 62107–62161 para este canal) nem tocar no `ossec.conf` sem ser chamado.
+
 ## Pré-requisitos gerais
 
 - Windows 10/11 Pro, Enterprise ou Education (Hyper-V não existe na edição Home).
