@@ -14,6 +14,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
+from datetime import timedelta
 
 from incident_engine import OPEN_STATUSES, can_transition, max_severity, parse_timestamp
 
@@ -602,7 +603,29 @@ class IncidentStore:
             return dict(row) if row else None
 
     # --- Team-based Incident Operations ---
-    def assign_to_tier(self, incident_id: str, tier: int, analyst_id: str | None, now_iso: str) -> None:
+    def auto_triage(self, incident_id: str, now_iso: str) -> dict:
+        """Triagem automática de um incidente novo: Tier 1, com o analista
+        principal do turno atual (o de menor id, se houver mais de um; nenhum
+        se ninguém estiver de turno) e o SLA da regra de escalamento Tier 1 /
+        severidade (sem regra, não inventa prazo). Não muda o estado: passar a
+        INVESTIGATING é uma ação humana. Eventos com actor "system"."""
+        with self.lock:
+            with self._tx() as conn:
+                row = conn.execute("SELECT severity FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is None:
+                raise IncidentNotFound(incident_id)
+            primaries = sorted(self.get_current_primary(1, now_iso), key=lambda a: a["id"])
+            analyst = primaries[0]["name"] if primaries else None
+            self.assign_to_tier(incident_id, 1, analyst, now_iso, actor="system")
+            rule = self.get_escalation_rule(1, row["severity"])
+            deadline = None
+            if rule and rule["sla_minutes"]:
+                deadline = (parse_timestamp(now_iso) + timedelta(minutes=rule["sla_minutes"])).isoformat()
+                self.set_sla_deadline(incident_id, deadline, now_iso)
+        return {"tier": 1, "analyst": analyst, "sla_deadline": deadline}
+
+    def assign_to_tier(self, incident_id: str, tier: int, analyst_id: str | None, now_iso: str,
+                       actor: str = "analyst") -> None:
         """Assign incident to a team tier (and optionally an analyst)."""
         if tier not in (1, 2, 3):
             raise ValueError("tier must be 1, 2, or 3")
@@ -616,7 +639,7 @@ class IncidentStore:
                 "UPDATE incidents SET assigned_team_tier = ?, assigned_to = ?, updated_at = ? WHERE id = ?",
                 (tier, analyst_id, now_iso, incident_id),
             )
-            self._add_event(conn, incident_id, now_iso, "team_assigned", "analyst",
+            self._add_event(conn, incident_id, now_iso, "team_assigned", actor,
                             {"from_tier": old_tier, "to_tier": tier, "from_analyst": old_analyst, "to_analyst": analyst_id})
 
     def escalate_incident(self, incident_id: str, to_tier: int, analyst_id: str | None, now_iso: str) -> None:

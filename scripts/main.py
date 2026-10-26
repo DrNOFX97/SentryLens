@@ -363,7 +363,7 @@ def _persist_new_alerts(alerts: list[dict]) -> None:
 
 def _ingest_incident_alerts(raw_alerts: list[dict]) -> None:
     """Callback de alert_poll_loop (R3): agrupa alertas brutos novos em incidentes."""
-    counts = incident_ingest.ingest_raw_alerts(incident_store, raw_alerts, ATTACK_LOG_PATH, SCENARIOS)
+    counts = incident_ingest.ingest_raw_alerts(incident_store, raw_alerts, ATTACK_LOG_PATH, SCENARIOS, auto_triage=True)
     if counts["opened"] or counts["attached"]:
         logger.info("Incidentes (alertas): %s", counts)
 
@@ -377,7 +377,7 @@ def _ingest_incident_detections(detections: list[dict]) -> None:
     segundo poller: reaproveita o mesmo callback que já corre a cada
     deteção nova.
     """
-    counts = incident_ingest.ingest_network_detections(incident_store, detections, ATTACK_LOG_PATH, SCENARIOS)
+    counts = incident_ingest.ingest_network_detections(incident_store, detections, ATTACK_LOG_PATH, SCENARIOS, auto_triage=True)
     if counts["opened"] or counts["attached"]:
         logger.info("Incidentes (rede): %s", counts)
     append_network_detections_history(detections, SENTRYLENS_HISTORY_DIR)

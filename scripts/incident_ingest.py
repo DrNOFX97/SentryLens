@@ -32,9 +32,12 @@ def _now_iso() -> str:
 
 
 def ingest_evidences(store, evidences: list[dict], attack_log: list[dict], scenarios: dict,
-                     now_iso: str | None = None) -> dict:
+                     now_iso: str | None = None, auto_triage: bool = False) -> dict:
     """Processa evidências já normalizadas, por ordem de tempo (o resultado não
-    depende da ordem de chegada). Devolve contagens opened/attached/duplicate/ignored."""
+    depende da ordem de chegada). Devolve contagens opened/attached/duplicate/ignored.
+    Com auto_triage=True (só o ingest ao vivo, nunca o backfill) cada incidente
+    NOVO passa logo para o Tier 1 com o analista de turno e o SLA; uma falha
+    nessa triagem fica no log e nunca impede o incidente de abrir."""
     now = now_iso or _now_iso()
     windows = compute_windows(attack_log, scenarios)
     counts = {"opened": 0, "attached": 0, "duplicate": 0, "ignored": 0}
@@ -56,6 +59,11 @@ def ingest_evidences(store, evidences: list[dict], attack_log: list[dict], scena
             if action == "open":
                 incident_id = store.create_incident(evidence, now)
                 counts["opened"] += 1
+                if auto_triage:
+                    try:
+                        store.auto_triage(incident_id, now)
+                    except Exception:
+                        logger.exception("Falha na triagem automática do incidente %s", incident_id)
             else:
                 incident_id = decision["incident_id"]
                 store.attach_evidence(incident_id, evidence, now)
@@ -66,14 +74,14 @@ def ingest_evidences(store, evidences: list[dict], attack_log: list[dict], scena
 
 
 def _ingest(store, evidences: list[dict], invalid: int, attack_log_path: str, scenarios: dict,
-            now_iso: str | None) -> dict:
-    counts = ingest_evidences(store, evidences, load_attack_log(attack_log_path), scenarios, now_iso)
+            now_iso: str | None, auto_triage: bool = False) -> dict:
+    counts = ingest_evidences(store, evidences, load_attack_log(attack_log_path), scenarios, now_iso, auto_triage)
     counts["invalid"] = invalid
     return counts
 
 
 def ingest_raw_alerts(store, raw_alerts: list, attack_log_path: str, scenarios: dict,
-                      now_iso: str | None = None) -> dict:
+                      now_iso: str | None = None, auto_triage: bool = False) -> dict:
     """Alertas brutos do Indexer (com _id). Alertas malformados contam em
     "invalid" e nunca lançam."""
     evidences, invalid = [], 0
@@ -83,11 +91,11 @@ def ingest_raw_alerts(store, raw_alerts: list, attack_log_path: str, scenarios: 
             invalid += 1
         else:
             evidences.append(evidence)
-    return _ingest(store, evidences, invalid, attack_log_path, scenarios, now_iso)
+    return _ingest(store, evidences, invalid, attack_log_path, scenarios, now_iso, auto_triage)
 
 
 def ingest_network_detections(store, detections: list, attack_log_path: str, scenarios: dict,
-                              now_iso: str | None = None) -> dict:
+                              now_iso: str | None = None, auto_triage: bool = False) -> dict:
     evidences, invalid = [], 0
     for det in detections or []:
         evidence = evidence_from_network_detection(det)
@@ -95,7 +103,7 @@ def ingest_network_detections(store, detections: list, attack_log_path: str, sce
             invalid += 1
         else:
             evidences.append(evidence)
-    return _ingest(store, evidences, invalid, attack_log_path, scenarios, now_iso)
+    return _ingest(store, evidences, invalid, attack_log_path, scenarios, now_iso, auto_triage)
 
 
 def ml_summary(raw_alerts: list[dict], model_dir: str) -> dict | None:
