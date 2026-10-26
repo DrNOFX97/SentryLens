@@ -70,6 +70,25 @@ def run_5007() -> None:
           sev({"newValue": r"HKLM\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths\C:\temp = 0x0"}) == "high")
     check("5007 DisableRealtimeMonitoring = 0x1 -> high", sev({"newValue": base + " = 0x1"}) == "high")
     check("5007 DisableRealtimeMonitoring = 0x0 -> info", sev({"newValue": base + " = 0x0"}) == "info")
+    # Revisão de segurança: o matcher não pode falhar em aberto por maiúsculas,
+    # formato do valor ou chaves fora da lista.
+    exc = r"HKLM\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths\C:\temp = 0x0"
+    check("5007 Exclusions em minúsculas -> high", sev({"newValue": exc.lower()}) == "high")
+    check("5007 Exclusions em maiúsculas -> high", sev({"newValue": exc.upper()}) == "high")
+    check("5007 a própria chave Exclusions -> high",
+          sev({"newValue": r"HKLM\SOFTWARE\Microsoft\Windows Defender\Exclusions = 0x0"}) == "high")
+    check("5007 chave só parecida (ExclusionsLogging) -> info",
+          sev({"newValue": r"HKLM\SOFTWARE\Microsoft\Windows Defender\ExclusionsLogging = 0x1"}) == "info")
+    check("5007 chave em maiúsculas DISABLEREALTIMEMONITORING = 0x1 -> high", sev({"newValue": base.upper() + " = 0x1"}) == "high")
+    for formato in ("1", "0x1", "0x00000001", "0X1"):
+        check(f"5007 Disable... = {formato} -> high", sev({"newValue": f"{base} = {formato}"}) == "high")
+    for formato in ("0", "0x0", "0x00000000"):
+        check(f"5007 Disable... = {formato} -> info", sev({"newValue": f"{base} = {formato}"}) == "info")
+    check("5007 Disable... com valor ilegível -> high (falha fechada)", sev({"newValue": base + " = abc"}) == "high")
+    check("5007 outra chave Disable* (DisableScriptScanning = 0x1) -> high",
+          sev({"newValue": r"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection\DisableScriptScanning = 0x1"}) == "high")
+    check("5007 Disable* a 0 -> info",
+          sev({"newValue": r"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection\DisableScriptScanning = 0x0"}) == "info")
     for valor in (None, {}, {"newValue": None}, "x", 42):
         check(f"5007 com eventdata={valor!r} -> info, sem exceção", sev(valor) == "info")
 

@@ -8,6 +8,8 @@ a stack: análise de ficheiro estático (Fase 1) e análise ao vivo via Wazuh
 agora também uma categoria, para permitir agrupar e filtrar alertas por tipo.
 """
 
+import re
+
 CRITICAL_EVENTS: dict[int, dict[str, str]] = {
     4625: {"name": "Failed Logon", "severity": "high", "category": "autenticacao"},
     4672: {"name": "Special Privileges Assigned", "severity": "high", "category": "atividade_privilegiada"},
@@ -102,31 +104,34 @@ DEFENDER_RECOMMENDATIONS: dict[int, str] = {
     5008: "O motor do Defender parou. Verificar o serviço e se foi forçado por um processo malicioso.",
 }
 
-# Chaves de configuração que, postas a 1, desligam uma proteção do Defender.
-_DEFENDER_DISABLE_KEYS = (
-    "DisableRealtimeMonitoring",
-    "DisableAntiSpyware",
-    "DisableAntiVirus",
-    "DisableBehaviorMonitoring",
-    "DisableIOAVProtection",
-)
+# `newValue` de um 5007 vem como "<chave de registo> = <valor>". Duas formas de
+# adulteração: tocar na árvore Exclusions (a própria chave ou qualquer filha) e
+# pôr a um valor não nulo uma chave "Disable*" (DisableRealtimeMonitoring,
+# DisableAntiSpyware, DisableScriptScanning...). Em vez de uma lista fixa de
+# chaves, o prefixo "Disable" apanha as que a lista deixaria escapar.
+_DEFENDER_EXCLUSIONS = re.compile(r"\\exclusions(\\|\s*=|\s*$)", re.IGNORECASE)
+_DEFENDER_KEY_VALUE = re.compile(r"\\([^\\=]+?)\s*=\s*(.*?)\s*$")
 
 
 def _defender_5007_is_tampering(eventdata: object) -> bool:
     """True se um 5007 (configuração alterada) mexe em exclusões ou desliga uma
-    proteção. `newValue` vem como "<chave de registo> = <valor>"; qualquer
-    entrada que não seja um dict com texto conta como rotina."""
+    proteção. Tudo o que não seja um dict com texto conta como rotina; mas uma
+    chave Disable* com valor ilegível conta como adulteração (falha fechada)."""
     if not isinstance(eventdata, dict):
         return False
     new_value = eventdata.get("newValue")
     if not isinstance(new_value, str):
         return False
-    if "\\Exclusions\\" in new_value:
+    if _DEFENDER_EXCLUSIONS.search(new_value):
         return True
-    return any(
-        key in new_value and new_value.rstrip().lower().endswith("= 0x1")
-        for key in _DEFENDER_DISABLE_KEYS
-    )
+    match = _DEFENDER_KEY_VALUE.search(new_value)
+    if match is None or not match.group(1).casefold().startswith("disable"):
+        return False
+    tokens = match.group(2).split()
+    try:
+        return int(tokens[0], 0) != 0
+    except (IndexError, ValueError):
+        return True
 
 
 def classify_alert(
