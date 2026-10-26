@@ -27,7 +27,7 @@ pedidos com Host que não seja loopback são recusados (DNS rebinding).
 import json
 import os
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -199,5 +199,8 @@ class FrontendHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5500
-    server = HTTPServer(("127.0.0.1", port), FrontendHandler)
+    # Threading: o browser pede ~30 scripts em paralelo; com HTTPServer (um
+    # pedido de cada vez, backlog 5) os últimos eram recusados e o separador
+    # ficava em "A carregar..." porque o JS da aba nunca chegava a correr.
+    server = ThreadingHTTPServer(("127.0.0.1", port), FrontendHandler)
     server.serve_forever()
