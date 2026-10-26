@@ -167,3 +167,18 @@ def classify_alert(
         "category": info.get("category", "geral"),
         "recommendation": RECOMMENDATIONS.get(win_event_id, "Investigar e tomar ação apropriada."),
     }
+
+
+def classify_wazuh_alert(raw: dict) -> dict[str, str]:
+    """classify_alert para um alerta bruto do Wazuh: lê data.win.system.eventID,
+    data.win.system.channel e data.win.eventdata. Alerta malformado ou de
+    origem não Windows devolve o mesmo que um Event ID desconhecido, nunca
+    levanta exceção."""
+    try:
+        win = raw.get("data", {}).get("win", {})
+        system = win.get("system", {})
+        raw_id = system.get("eventID")
+        win_event_id = int(raw_id) if raw_id is not None else None
+        return classify_alert(win_event_id, system.get("channel"), win.get("eventdata"))
+    except (AttributeError, ValueError, TypeError):
+        return classify_alert(None)
