@@ -74,8 +74,84 @@ RECOMMENDATIONS: dict[int, str] = {
 }
 
 
-def classify_alert(win_event_id: int | None) -> dict[str, str]:
-    """Devolve nome amigável, severidade, categoria e recomendação para um Event ID."""
+# Microsoft Defender Antivirus. Catálogo à parte, de propósito: acrescentar IDs
+# a CRITICAL_EVENTS desloca o event_id_encoded do ML (e muda o
+# model_registry.catalog_sha256), e o 1000/1001 colide com o canal Application.
+# Só é consultado quando o alerta vem deste canal.
+DEFENDER_CHANNEL = "Microsoft-Windows-Windows Defender/Operational"
+
+DEFENDER_EVENTS: dict[int, dict[str, str]] = {
+    1116: {"name": "Defender: Malware Detected", "severity": "high", "category": "protecao_endpoint"},
+    1117: {"name": "Defender: Malware Action Taken", "severity": "low", "category": "protecao_endpoint"},
+    1118: {"name": "Defender: Malware Action Failed", "severity": "high", "category": "protecao_endpoint"},
+    1119: {"name": "Defender: Malware Action Critical Error", "severity": "high", "category": "protecao_endpoint"},
+    5001: {"name": "Defender: Real-Time Protection Disabled", "severity": "high", "category": "protecao_endpoint"},
+    # 5007 é, quase sempre, registo de rotina (WdConfigHash, ServiceStartStates...):
+    # info por omissão, high só se mexer em exclusões ou desligar a proteção.
+    5007: {"name": "Defender: Configuration Changed", "severity": "info", "category": "protecao_endpoint"},
+    5008: {"name": "Defender: Engine Failure", "severity": "high", "category": "protecao_endpoint"},
+}
+
+DEFENDER_RECOMMENDATIONS: dict[int, str] = {
+    1116: "Identificar o ficheiro e a origem. Confirmar a quarentena e investigar como chegou à máquina.",
+    1117: "Confirmar que a ameaça foi removida ou posta em quarentena. Correlacionar com o alerta 1116.",
+    1118: "A ação do Defender falhou: a ameaça pode continuar ativa. Remover manualmente e analisar a máquina.",
+    1119: "Erro crítico ao tratar a ameaça. Tratar a máquina como possivelmente comprometida.",
+    5001: "CRÍTICO: proteção em tempo real desligada. Validar se foi autorizado; desativar o Defender é um passo comum de atacantes.",
+    5007: "Revisar a alteração. Só é preocupante se mexer em exclusões ou desativar a proteção.",
+    5008: "O motor do Defender parou. Verificar o serviço e se foi forçado por um processo malicioso.",
+}
+
+# Chaves de configuração que, postas a 1, desligam uma proteção do Defender.
+_DEFENDER_DISABLE_KEYS = (
+    "DisableRealtimeMonitoring",
+    "DisableAntiSpyware",
+    "DisableAntiVirus",
+    "DisableBehaviorMonitoring",
+    "DisableIOAVProtection",
+)
+
+
+def _defender_5007_is_tampering(eventdata: object) -> bool:
+    """True se um 5007 (configuração alterada) mexe em exclusões ou desliga uma
+    proteção. `newValue` vem como "<chave de registo> = <valor>"; qualquer
+    entrada que não seja um dict com texto conta como rotina."""
+    if not isinstance(eventdata, dict):
+        return False
+    new_value = eventdata.get("newValue")
+    if not isinstance(new_value, str):
+        return False
+    if "\\Exclusions\\" in new_value:
+        return True
+    return any(
+        key in new_value and new_value.rstrip().lower().endswith("= 0x1")
+        for key in _DEFENDER_DISABLE_KEYS
+    )
+
+
+def classify_alert(
+    win_event_id: int | None,
+    channel: str | None = None,
+    eventdata: dict | None = None,
+) -> dict[str, str]:
+    """Devolve nome amigável, severidade, categoria e recomendação para um Event ID.
+
+    Com `channel` igual ao do Defender só consulta DEFENDER_EVENTS (o `eventdata`
+    refina o 5007); senão, o fluxo de sempre com CRITICAL_EVENTS."""
+    if isinstance(channel, str) and channel.casefold() == DEFENDER_CHANNEL.casefold():
+        info = DEFENDER_EVENTS.get(win_event_id) if win_event_id is not None else None
+        if info is not None:
+            severity = info["severity"]
+            if win_event_id == 5007 and _defender_5007_is_tampering(eventdata):
+                severity = "high"
+            return {
+                "friendly_name": info["name"],
+                "severity": severity,
+                "category": info["category"],
+                "recommendation": DEFENDER_RECOMMENDATIONS.get(win_event_id, "Investigar e tomar ação apropriada."),
+            }
+        win_event_id = None  # canal do Defender, ID fora do catálogo: nunca cai em CRITICAL_EVENTS
+
     if win_event_id is None or win_event_id not in CRITICAL_EVENTS:
         return {
             "friendly_name": "Evento não catalogado",
