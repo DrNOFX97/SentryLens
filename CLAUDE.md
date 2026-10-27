@@ -80,7 +80,7 @@ mas isso deixou de funcionar depois do CORS ficar restrito a `localhost`/`127.0.
 
 ## Testes do backend
 
-48 ficheiros standalone (`run_all_tests.py` corre-os todos), todos sem precisar do laboratório Wazuh ligado (tudo mockado).
+80 ficheiros `test_*.py` standalone (`run_all_tests.py` corre-os todos), todos sem precisar do laboratório Wazuh ligado (tudo mockado).
 Correm todos a partir de `scripts/`:
 
 ```bash
@@ -273,6 +273,8 @@ com mocks sem o laboratório ligado.
 
 Sem build step: scripts clássicos carregados por `index.html`, servidos por `scripts/serve_frontend.py` (whitelist fixa — **um ficheiro novo tem de entrar em `ALLOWED_FILES`** e em `test_serve_frontend.py`).
 
+Além de `app.js` e do `*.js` por aba, a raiz tem módulos transversais (`api.js`, `state.js`, `router.js`, `shell.js`, `realtime.js`, `fmt.js`, `html.js`, `table.js`, `kpi.js`) que vieram da divisão do `app.js`; antes de criar um helper novo, procurar aqui. Os contratos estáticos (sem `innerHTML` cru, sem cores literais, contraste, ícones acessíveis) são testes de texto sobre estes ficheiros (`test_no_raw_innerhtml.py`, `test_no_literal_colors.py`, `test_contrast.py`, `test_icons_a11y.py`) e falham ao primeiro desvio.
+
 - **Escopo global partilhado.** Todos os `*.js` partilham um só escopo; um identificador repetido rebenta o script inteiro. Cada ficheiro usa o seu prefixo (`ovw`, `rb`, `inc`, `st`, `ls`, `atk`, `alib`, `det`, `ns`, `met`, `mlm`, `mle`, `vac` e `sl` para `ui_helpers.js`). `app.js` define os globais que os outros reutilizam (`escapeHtml`, `fetchJSON`, `renderPanelError`, `formatTimestamp`, `API_BASE`, `API_KEY`).
 - **`ui_helpers.js`** (carregado antes de `app.js`): só funções puras `sl*`, sem DOM no topo, é o que se consegue testar em `node:vm`. Lógica nova com decisões (formatar, escolher estado, filtrar) vai para aqui, não para `app.js`.
 - **Nenhum handler inline** (`onclick=` etc.), nunca: `escapeHtml` não protege dentro de um atributo `on*`, porque o browser decodifica `&#39;` antes de correr o JS (XSS confirmada na Equipa SOC com um nome de analista). Usar `data-action`/`data-id` e um listener delegado que vai buscar o objeto à cache pelo id.
@@ -300,6 +302,7 @@ Sem build step: scripts clássicos carregados por `index.html`, servidos por `sc
   autenticação REST teve de sair do construtor do `FastAPI(...)` e passar a
   ser por rota. `/ws/alerts` autentica-se à parte, por query param
   (`?api_key=...`), verificado manualmente dentro do próprio endpoint.
+- **CORS tem de listar os métodos usados pelo frontend**: `PATCH` foi omitido uma vez e a atribuição de analista/tier e o SLA dos incidentes falhavam só no browser (o `TestClient` não faz preflight). Uma rota nova com um método novo exige atualizar `allow_methods` em `main.py` e `test_cors.py`.
 - **CORS está deliberadamente restrito** a `localhost`/`127.0.0.1` (qualquer
   porta) via `allow_origin_regex` em `main.py` — não voltar a abrir para
   `["*"]`; foi uma correção de segurança (auditoria 2026-08-31) porque não
