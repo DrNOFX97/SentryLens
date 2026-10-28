@@ -22,6 +22,14 @@ from typing import Any
 
 import httpx
 
+# Ruído que o próprio SentryLens provoca: o network_poll_loop abre uma sessão SSH
+# à VM Wazuh a cada 5s, e o agente local (id 000) regista cada uma como PAM
+# abrir/fechar sessão (5501/5502) + sshd autenticação com sucesso (5715).
+# Medido a 2026-10-28: ~5600 de 8955 alertas em 14h, o suficiente para empurrar
+# um ataque para fora dos 1000 alertas do Attack Registry (veredito "unknown").
+INFRA_NOISE_AGENT_ID = "000"
+INFRA_NOISE_RULE_IDS = ("5501", "5502", "5715")
+
 
 class WazuhManagerClient:
     """Cliente para a Manager API (agentes, estado do sistema)."""
@@ -106,6 +114,7 @@ class WazuhIndexerClient:
         min_level: int = 0,
         size: int = 200,
         agent_name: str | None = None,
+        exclude_infra_noise: bool = False,
     ) -> list[dict]:
         """
         Vai buscar alertas recentes ao índice wazuh-alerts-*.
@@ -113,6 +122,8 @@ class WazuhIndexerClient:
         hours: janela temporal a considerar
         min_level: filtra por nível mínimo de severidade do Wazuh (0-16)
         agent_name: opcional, filtra por um agente específico
+        exclude_infra_noise: tira os alertas gerados pela própria infraestrutura
+            do SentryLens (ver INFRA_NOISE_*); sem isto enchem o teto de `size`
         """
         since = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -123,10 +134,17 @@ class WazuhIndexerClient:
         if agent_name:
             must_clauses.append({"match": {"agent.name": agent_name}})
 
+        bool_query: dict[str, Any] = {"must": must_clauses}
+        if exclude_infra_noise:
+            bool_query["must_not"] = [{"bool": {"must": [
+                {"term": {"agent.id": INFRA_NOISE_AGENT_ID}},
+                {"terms": {"rule.id": list(INFRA_NOISE_RULE_IDS)}},
+            ]}}]
+
         query = {
             "size": size,
             "sort": [{"@timestamp": {"order": "desc"}}],
-            "query": {"bool": {"must": must_clauses}},
+            "query": {"bool": bool_query},
         }
 
         result = await self._search("wazuh-alerts-*", query)

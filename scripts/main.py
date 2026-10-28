@@ -1740,7 +1740,8 @@ async def _build_attack_registry(attack_log: list, hours: int | None) -> tuple[d
         correlation["error_code"] = "ml_model_unavailable"
     else:
         try:
-            raw_alerts = await indexer_client.get_recent_alerts(hours=hours, size=ATTACK_ALERTS_SIZE)
+            raw_alerts = await indexer_client.get_recent_alerts(
+                hours=hours, size=ATTACK_ALERTS_SIZE, exclude_infra_noise=True)
         except Exception:
             logger.exception("Attack Registry: Wazuh Indexer indisponível")
             correlation["error_code"] = "indexer_unavailable"
