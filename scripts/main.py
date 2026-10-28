@@ -1712,7 +1712,17 @@ async def get_summary_by_tier(hours: int = Query(168, ge=1, le=720)):
 # ---------------------------------------------------------------------------
 
 AttackVerdict = Literal["detected", "partial", "not_detected", "unknown"]
-ATTACK_ALERTS_SIZE = 1000
+# 1000 truncava sempre dentro da janela de 168h usada pelo loop das vaccines
+# (VACCINE_WINDOW_HOURS): medido a 2026-10-28, 7488 alertas em 168h mesmo já
+# sem o ruído SSH/PAM (exclude_infra_noise). Qualquer truncagem força TODOS os
+# veredictos do lote para "unknown" (verdict() em attack_registry.py), nunca
+# "not_detected"/"partial" — por isso nenhuma vaccine conseguia nascer. 8000
+# dá margem sobre o volume atual sem chegar ao index.max_result_window do
+# OpenSearch (10000, confirmado nas settings do índice wazuh-alerts-*) — é um
+# paliativo: o ruído cresce ~1000/dia, por isso volta a truncar dentro de
+# dias/semanas. A correção estrutural (truncagem por ataque, não por lote)
+# ficou por decidir — ver STATE.md.
+ATTACK_ALERTS_SIZE = 8000
 ATTACK_MAX_HOURS = 720
 
 
