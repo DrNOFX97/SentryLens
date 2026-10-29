@@ -107,6 +107,9 @@ _INSERT_DECISION = (
 # nunca construídos a partir de dados do pedido.
 _FROM_WITH_DECISIONS = " FROM vaccines v LEFT JOIN vaccine_decisions d ON d.vaccine_id = v.id"
 _FROM_WITHOUT_DECISIONS = " FROM vaccines v"
+# Expressão do estado derivado (D-11): a decisão registada, ou proposed.
+_STATE_WITH_DECISIONS = "COALESCE(d.decision, 'proposed')"
+_STATE_WITHOUT_DECISIONS = "'proposed'"
 _COLUMNS_WITH_DECISIONS = (
     "SELECT v.*, d.decision AS d_decision, d.decided_by AS d_decided_by, d.decided_by_name AS d_decided_by_name, "
     "d.decided_at AS d_decided_at, d.reason AS d_reason"
@@ -260,13 +263,17 @@ class VaccineStore:
     # --- leitura (só-leitura, nunca cria o ficheiro) ---
 
     def list_vaccines(self, *, attack_id: int | None = None, technique: str | None = None,
-                      include_superseded: bool = False, limit: int = 200,
+                      include_superseded: bool = False, state: str | None = None, limit: int = 200,
                       offset: int = 0) -> tuple[list[dict], int, int]:
         """(linhas da página, total com os mesmos filtros, total de linhas do
         store sem filtros; este decide o `no_data` da rota). Parâmetros só por
         nome, de propósito: o bug de list_incidents foi um desalinhamento
         posicional. As cláusulas WHERE são fixas, escolhidas pelo código; os
-        valores vão sempre por `?`, nunca interpolados."""
+        valores vão sempre por `?`, nunca interpolados. `state` filtra pelo
+        estado derivado (proposed/approved/rejected; num ficheiro sem decisões
+        tudo conta como proposed, D-10/D-11); o store não valida o valor: um
+        valor desconhecido ou hostil vai por `?` e não casa com nada (a
+        validação do parâmetro HTTP é da rota)."""
         clauses: list[str] = []
         params: list = []
         if attack_id is not None:
@@ -277,11 +284,14 @@ class VaccineStore:
             params.append(technique)
         if not include_superseded:
             clauses.append("v.superseded_by IS NULL")
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         with self._read() as conn:
             if conn is None:
                 return [], 0, 0
-            columns, source = self._read_fragments(conn)
+            columns, source, state_expression = self._read_fragments(conn)
+            if state is not None:
+                clauses.append(state_expression + " = ?")
+                params.append(state)
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
             store_total = conn.execute("SELECT COUNT(*) FROM vaccines").fetchone()[0]
             total = conn.execute("SELECT COUNT(*)" + source + where, params).fetchone()[0]
             rows = conn.execute(
@@ -293,13 +303,15 @@ class VaccineStore:
         with self._read() as conn:
             if conn is None:
                 return None
-            columns, source = self._read_fragments(conn)
+            columns, source, _ = self._read_fragments(conn)
             row = conn.execute(columns + source + " WHERE v.id = ?", (vaccine_id,)).fetchone()
             return self._to_vaccine(row) if row is not None else None
 
-    def _read_fragments(self, conn: sqlite3.Connection) -> tuple[str, str]:
-        """(colunas, FROM) fixos: com LEFT JOIN a vaccine_decisions se a tabela
-        existir; senão colunas NULL (ficheiro do R11 = "sem decisões", D-10)."""
+    def _read_fragments(self, conn: sqlite3.Connection) -> tuple[str, str, str]:
+        """(colunas, FROM, expressão de estado) fixos, escolhidos juntos pela mesma
+        verificação para não se desencontrarem: com LEFT JOIN a vaccine_decisions
+        se a tabela existir; senão colunas NULL e estado literal 'proposed'
+        (ficheiro do R11 = "sem decisões", D-10)."""
         if self._has_decisions_table(conn):
-            return _COLUMNS_WITH_DECISIONS, _FROM_WITH_DECISIONS
-        return _COLUMNS_WITHOUT_DECISIONS, _FROM_WITHOUT_DECISIONS
+            return _COLUMNS_WITH_DECISIONS, _FROM_WITH_DECISIONS, _STATE_WITH_DECISIONS
+        return _COLUMNS_WITHOUT_DECISIONS, _FROM_WITHOUT_DECISIONS, _STATE_WITHOUT_DECISIONS

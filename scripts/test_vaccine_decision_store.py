@@ -573,11 +573,89 @@ def run_concurrency() -> None:
     run_generator_race(commit=False)
 
 
+def ids_of(rows: list[dict]) -> list[str]:
+    return [v["id"] for v in rows]
+
+
+def run_state_filter() -> None:
+    """D-10/D-11/D-13: list_vaccines(state=...) filtra pelo estado derivado, com e sem a tabela de decisões."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA, vC], NOW_ISO)
+        store.decide_vaccine(**request(vaccine_id=ID_C))
+        store.decide_vaccine(**request(vaccine_id=ID_A, decision="rejected", decided_by="analyst-soc2",
+                                       decided_by_name="Jeremy", reason="Regra ruidosa"))
+        store.upsert_batch([vB], NOW_ISO)  # A substituída por B; A continua rejeitada
+
+        rows, total, store_total = store.list_vaccines()
+        check("sem state: comportamento de antes (C e B, total 2, store_total 3)",
+              ids_of(rows) == [ID_C, ID_B] and total == 2 and store_total == 3)
+
+        rows, total, store_total = store.list_vaccines(state="approved")
+        check("state=approved -> ([C], 1, 3)", ids_of(rows) == [ID_C] and total == 1 and store_total == 3)
+        rows, total, store_total = store.list_vaccines(state="proposed")
+        check("state=proposed -> ([B], 1, 3)", ids_of(rows) == [ID_B] and total == 1 and store_total == 3)
+        rows, total, store_total = store.list_vaccines(state="rejected")
+        check("state=rejected por omissão (A está substituída) -> ([], 0, 3)",
+              rows == [] and total == 0 and store_total == 3)
+        rows, total, store_total = store.list_vaccines(state="rejected", include_superseded=True)
+        check("state=rejected com include_superseded -> [A]", ids_of(rows) == [ID_A] and total == 1)
+        rows, total, _ = store.list_vaccines(attack_id=2, state="rejected", include_superseded=True)
+        check("attack_id=2 + rejected + include_superseded -> [A]", ids_of(rows) == [ID_A] and total == 1)
+        rows, total, store_total = store.list_vaccines(attack_id=3, state="proposed")
+        check("attack_id=3 + proposed -> ([], 0, 3)", rows == [] and total == 0 and store_total == 3)
+        rows, total, _ = store.list_vaccines(state="approved", limit=1, offset=0)
+        check("limit=1 com state=approved: uma linha e total 1", len(rows) == 1 and total == 1)
+
+        for wanted in ("proposed", "approved", "rejected"):
+            rows, _, _ = store.list_vaccines(state=wanted, include_superseded=True)
+            check(f"cada linha com state={wanted} tem v['state'] == {wanted}",
+                  bool(rows) and all(v["state"] == wanted for v in rows))
+
+        before_vaccines, before_decisions = rows_of(path), decision_rows(path)
+        for hostile in ("approved' OR '1'='1", "", "APPROVED", "proposed; DROP TABLE vaccines", "applied"):
+            try:
+                rows, total, store_total = store.list_vaccines(state=hostile, include_superseded=True)
+                ok = rows == [] and total == 0 and store_total == 3
+            except Exception as exc:  # noqa: BLE001
+                print(f"       exceção: {type(exc).__name__}: {exc}")
+                ok = False
+            check(f"state hostil/desconhecido {hostile!r}: vazio, sem exceção", ok)
+        check("depois dos filtros hostis as duas tabelas ficaram iguais",
+              rows_of(path) == before_vaccines and decision_rows(path) == before_decisions)
+
+    # --- ficheiro antigo (R11), sem vaccine_decisions ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "old.sqlite3")
+        make_r11_file(path, [vA, vC])
+        with open(path, "rb") as handle:
+            original = handle.read()
+        store = VaccineStore(path)
+        rows, total, store_total = store.list_vaccines(state="proposed")
+        check("ficheiro antigo: state=proposed -> [C, A], total 2",
+              ids_of(rows) == [ID_C, ID_A] and total == 2 and store_total == 2)
+        for wanted in ("approved", "rejected"):
+            rows, total, store_total = store.list_vaccines(state=wanted)
+            check(f"ficheiro antigo: state={wanted} -> ([], 0, 2)", rows == [] and total == 0 and store_total == 2)
+        rows, total, store_total = store.list_vaccines(state="approved' OR '1'='1")
+        check("ficheiro antigo: state hostil -> ([], 0, 2)", rows == [] and total == 0 and store_total == 2)
+        rows, total, _ = store.list_vaccines()
+        check("ficheiro antigo: list_vaccines() sem filtro funciona", ids_of(rows) == [ID_C, ID_A] and total == 2)
+        vaccine = store.get_vaccine(ID_A)
+        check("ficheiro antigo: get_vaccine funciona, proposed e sem decisão",
+              vaccine is not None and vaccine["state"] == "proposed" and vaccine["decision"] is None)
+        check("ficheiro antigo: sem tabela vaccine_decisions no fim", has_decisions_table(path) is False)
+        with open(path, "rb") as handle:
+            check("ficheiro antigo: bytes exatamente iguais depois das leituras", handle.read() == original)
+
+
 def main() -> None:
     run_tracer()
     run_validation_before_io()
     run_refusals()
     run_concurrency()
+    run_state_filter()
 
 
 if __name__ == "__main__":
