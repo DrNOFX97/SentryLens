@@ -71,7 +71,7 @@ Plans:
 
 **Goal:** O analista decide por HTTP e lê o resultado, com as garantias de segurança do R11 mantidas.
 **Depends on:** Phase 15
-**Requirements:** VLB-01, VLB-04, VLB-05
+**Requirements:** VLB-01, VLB-02, VLB-04, VLB-05
 **Success Criteria** (what must be TRUE):
   1. `POST /api/vaccines/{id}/decision` exige API key (sem ela, 401), valida o corpo de contrato fechado e devolve 404/409/422/503 com códigos estáveis; o `GET` continua sem efeitos secundários.
   2. `GET /api/vaccines[/{id}]` traz `state` e `decision`, filtra por estado, e sem amostra devolve "Sem dados", nunca 0.

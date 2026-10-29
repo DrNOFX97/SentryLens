@@ -44,7 +44,7 @@ Reconhecidos, fora deste marco.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VLB-02 | Phase 15 | Pending |
+| VLB-02 | Phase 15, 16 | Pending |
 | VLB-03 | Phase 15 | Pending |
 | VLB-01 | Phase 16 | Pending |
 | VLB-04 | Phase 16 | Pending |
