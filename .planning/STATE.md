@@ -5,11 +5,11 @@ milestone_name: R12 Vaccine Lab
 current_phase: 16
 current_phase_name: API de decisão
 status: planning
-stopped_at: Phase 15 complete, ready to plan Phase 16
-last_updated: "2026-10-29T15:43:12.457Z"
+stopped_at: Phase 16 context gathered
+last_updated: "2026-10-29T16:12:56.047Z"
 last_activity: 2026-10-29
 last_activity_desc: Phase 15 complete, transitioned to Phase 16
-state_head: 34d5da836885a2233858acf2127c61f67e4f7995
+state_head: 78a07ff73d3f0da070554b45deef3d3c4b5e68cb
 progress:
   total_phases: 3
   completed_phases: 1
@@ -86,9 +86,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-29T12:50:30.617Z
-Stopped at: Phase 15 complete, ready to plan Phase 16
-Resume file: None
+Last session: 2026-10-29T16:12:55.932Z
+Stopped at: Phase 16 context gathered
+Resume file: .planning/phases/16-api-de-decisao/16-CONTEXT.md
 
 ## Operator Next Steps
 
