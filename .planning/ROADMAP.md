@@ -57,6 +57,16 @@ Detalhe completo: `.planning/milestones/v1.1-ROADMAP.md`
   3. Decidir duas vezes a mesma vaccine, ou uma vaccine substituída, ou um id que não existe, falha com um código estável distinto, e nada é gravado.
   4. O estado derivado de uma vaccine é a última decisão, ou `proposed` quando não há nenhuma.
 
+**Plans:** 3 plans
+
+Plans:
+**Wave 1**
+- [ ] 15-01-PLAN.md — Checkpoint do DDL (one-way) + tracer: regra pura `vaccine_decision.py` -> `vaccine_decisions` -> `decide_vaccine` (BEGIN IMMEDIATE) -> leitura com estado derivado; validação completa da entrada com códigos estáveis (VLB-02, VLB-03)
+**Wave 2**
+- [ ] 15-02-PLAN.md — Decisão final: recusas sem gravar (`already_decided`, `vaccine_superseded`, `entry_not_found`, `reason_required`), aprovada e substituída continua aprovada, corrida com o gerador e decisões simultâneas (VLB-02, VLB-03)
+**Wave 3**
+- [ ] 15-03-PLAN.md — Filtro por estado derivado no store e provas no ficheiro: triggers/UNIQUE/CHECK/FK, `vaccines` do R11 intacta byte a byte, ficheiro antigo lido sem ser tocado, suite 83/83 (VLB-02, VLB-03)
+
 ### Phase 16: API de decisão
 
 **Goal:** O analista decide por HTTP e lê o resultado, com as garantias de segurança do R11 mantidas.
@@ -85,4 +95,4 @@ Detalhe completo: `.planning/milestones/v1.1-ROADMAP.md`
 |-----------|--------|-------|--------|---------|
 | v1.0 ML Registry & Learning Loop | 1-3, 10-11 | 17/17 | Complete | 2026-10-11 |
 | v1.1 R11 Vaccine Engine | 12-14 | 10/10 | Complete | 2026-10-29 |
-| v1.2 R12 Vaccine Lab | 15-17 | 0/0 | Em curso | — |
+| v1.2 R12 Vaccine Lab | 15-17 | 0/3 | Em curso | — |
