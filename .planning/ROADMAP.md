@@ -46,7 +46,7 @@ Detalhe completo: `.planning/milestones/v1.0-ROADMAP.md`
 
 - [x] **Phase 12: Motor de vaccines** - Motor puro: que ataques geram vaccine, regra proposta, origem rastreável, id determinístico e "Sem dados" honesto (completed 2026-10-12)
 - [x] **Phase 13: Store e API de leitura** - Vaccines persistidas com estado fixo `proposed`, `GET /api/vaccines[/{id}]` com API key e códigos de erro estáveis (completed 2026-10-12)
-- [ ] **Phase 14: Aba Vaccines, testes e documentação** - `vaccines.js` com filtros e detalhe, suite completa verde e docs a refletir o R11
+- [x] **Phase 14: Aba Vaccines, testes e documentação** - `vaccines.js` com filtros e detalhe, suite completa verde e docs a refletir o R11 (completed 2026-10-29)
 
 ## Phase Details
 
@@ -116,7 +116,7 @@ Plans:
   3. `python run_all_tests.py` termina verde sem o Wazuh ligado, com testes standalone novos para motor, store e rotas, incluindo as garantias negativas (sem rota de escrita, sem comando executável, sem texto de exceção, sem duplicados após reprocessar ou reiniciar).
   4. `docs/DATA_MODEL.md` define a entidade Vaccine, `docs/ROADMAP_STATUS.md` marca o R11 como concluído (✅) e `README.md` e `CLAUDE.md` descrevem o motor, o store e a rota.
 
-**Plans:** 4/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -144,4 +144,4 @@ Phases execute in numeric order: 12 → 13 → 14
 |-------|-----------|----------------|--------|-----------|
 | 12. Motor de vaccines | v1.1 | 3/3 | Complete    | 2026-10-12 |
 | 13. Store e API de leitura | v1.1 | 3/3 | Complete    | 2026-10-12 |
-| 14. Aba Vaccines, testes e documentação | v1.1 | 4/4 | In Progress|  |
+| 14. Aba Vaccines, testes e documentação | v1.1 | 4/4 | Complete    | 2026-10-29 |

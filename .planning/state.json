@@ -16,13 +16,13 @@
     {
       "number": "14",
       "name": "Aba Vaccines, testes e documentação",
-      "status": "in_progress"
+      "status": "complete"
     }
   ],
   "next": {
-    "command": "/gsd:progress --next",
-    "label": "Advance to the next step (verify)",
-    "reason": "Phase 14 of 3 · 67% · ready to verify"
+    "command": "/gsd:new-milestone",
+    "label": "Start a new milestone",
+    "reason": "All phases complete — start a new milestone"
   },
-  "updated_at": "2026-10-12T10:12:59.399Z"
+  "updated_at": "2026-10-29T11:00:57.039Z"
 }
