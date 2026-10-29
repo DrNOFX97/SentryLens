@@ -15,6 +15,8 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import vaccine_decision
@@ -414,10 +416,168 @@ def run_refusals() -> None:
     check("entry_not_found em NOT_FOUND_CODES", "entry_not_found" in vaccine_decision.NOT_FOUND_CODES)
 
 
+class TracingStore(VaccineStore):
+    """VaccineStore que regista as instruções SQL de cada ligação de escrita. O
+    executescript do esquema corre dentro do _connect original, antes do traço."""
+
+    def __init__(self, db_path: str) -> None:
+        super().__init__(db_path)
+        self.statements: list[str] = []
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = super()._connect()
+        conn.set_trace_callback(self.statements.append)
+        return conn
+
+
+def run_threads(targets: list) -> bool:
+    """Arranca as funções em threads, junta-as com timeout de 15 s; True se todas terminaram."""
+    threads = [threading.Thread(target=target) for target in targets]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+    return not any(thread.is_alive() for thread in threads)
+
+
+def race_eight_threads(stores: list[VaccineStore]) -> tuple[list, list, bool]:
+    """8 threads a decidir C ao mesmo tempo; devolve (sucessos, outros resultados, todas terminaram)."""
+    barrier = threading.Barrier(8)
+    guard = threading.Lock()
+    successes: list[dict] = []
+    others: list[str] = []
+
+    def worker(n: int) -> None:
+        barrier.wait(timeout=10)
+        try:
+            result = stores[n].decide_vaccine(**request(decided_by=f"analyst-t{n + 1}", decided_by_name=f"T{n + 1}"))
+        except VaccineDecisionError as exc:
+            with guard:
+                others.append(exc.code)
+        except Exception as exc:  # noqa: BLE001 - qualquer outra exceção é falha do teste
+            with guard:
+                others.append(type(exc).__name__)
+        else:
+            with guard:
+                successes.append(result)
+
+    finished = run_threads([lambda n=n: worker(n) for n in range(8)])
+    return successes, others, finished
+
+
+def run_generator_race(commit: bool) -> None:
+    """Outra ligação (o gerador) segura o lock de escrita; decide_vaccine tem de esperar."""
+    word = "COMMIT" if commit else "ROLLBACK"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA, vC], NOW_ISO)
+        outcome: list = []
+
+        def worker() -> None:
+            try:
+                outcome.append(store.decide_vaccine(**request(vaccine_id=ID_A)))
+            except VaccineDecisionError as exc:
+                outcome.append(exc.code)
+            except Exception as exc:  # noqa: BLE001
+                outcome.append(type(exc).__name__)
+
+        other = sqlite3.connect(path, timeout=10, isolation_level=None)
+        thread = threading.Thread(target=worker)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            if commit:
+                other.execute("UPDATE vaccines SET superseded_by = 'vac-5fe3861aa2a3' WHERE id = 'vac-ed793c0b3437'")
+            thread.start()
+            time.sleep(0.3)
+            check(f"corrida ({word}): decide_vaccine está à espera do lock de escrita", thread.is_alive())
+            other.execute(word)
+        finally:
+            other.close()
+        thread.join(timeout=15)
+        check(f"corrida ({word}): a thread terminou", not thread.is_alive())
+        if commit:
+            check("corrida (COMMIT): vaccine_superseded, sem gravar",
+                  outcome == ["vaccine_superseded"] and decision_rows(path) == [])
+        else:
+            check("corrida (ROLLBACK): a decisão passa e há 1 linha",
+                  len(outcome) == 1 and isinstance(outcome[0], dict) and len(decision_rows(path)) == 1)
+
+
+def run_concurrency() -> None:
+    """D-06/D-07: BEGIN IMMEDIATE antes das leituras (ordem das instruções) e sob concorrência real."""
+    # --- ordem das instruções ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = TracingStore(path)
+        store.upsert_batch([vC], NOW_ISO)
+        store.statements.clear()
+        store.decide_vaccine(**request())
+        stmts = list(store.statements)
+        print(f"       traço (aceite): {stmts}")
+        heads = ["PRAGMA foreign_keys = ON", "BEGIN IMMEDIATE", "SELECT superseded_by FROM vaccines",
+                 "SELECT decision FROM vaccine_decisions", "INSERT INTO vaccine_decisions (", "COMMIT"]
+        positions = [next((i for i, s in enumerate(stmts) if s.startswith(head)), -1) for head in heads]
+        check("aceite: as 6 instruções existem e pela ordem pedida",
+              -1 not in positions and positions == sorted(positions) and len(set(positions)) == 6)
+        check("aceite: um único INSERT em vaccine_decisions",
+              sum(s.startswith("INSERT INTO vaccine_decisions (") for s in stmts) == 1)
+        check("aceite: nenhum UPDATE", not any(s.lstrip().upper().startswith("UPDATE") for s in stmts))
+        check("aceite: BEGIN IMMEDIATE logo a seguir ao PRAGMA, antes de qualquer leitura",
+              positions[1] == positions[0] + 1)
+
+        store.statements.clear()
+        code = decide_error(store, **request())
+        stmts = list(store.statements)
+        print(f"       traço (recusa): {stmts}")
+        check("recusa no ficheiro: already_decided", code == "already_decided")
+        check("recusa no ficheiro: BEGIN IMMEDIATE e ROLLBACK, sem INSERT nem COMMIT",
+              "BEGIN IMMEDIATE" in stmts and "ROLLBACK" in stmts
+              and not any(s.startswith("INSERT INTO vaccine_decisions") for s in stmts) and "COMMIT" not in stmts)
+
+        store.statements.clear()
+        code = decide_error(store, **request(decision="applied"))
+        check("recusa na validação: invalid_decision e traço vazio (nenhuma ligação aberta)",
+              code == "invalid_decision" and store.statements == [])
+
+        store.statements.clear()
+        store.upsert_batch([vA], NOW_ISO)
+        check("o gerador não mudou: upsert_batch sem BEGIN IMMEDIATE nem PRAGMA foreign_keys",
+              bool(store.statements) and not any(s.startswith("BEGIN IMMEDIATE") or s == "PRAGMA foreign_keys = ON"
+                                                 for s in store.statements))
+
+    # --- 8 threads ---
+    for label, shared in (("instâncias separadas", False), ("mesma instância", True)):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "v.sqlite3")
+            VaccineStore(path).upsert_batch([vC], NOW_ISO)
+            if shared:
+                stores = [VaccineStore(path)] * 8
+            else:
+                stores = [VaccineStore(path) for _ in range(8)]
+            started = time.monotonic()
+            successes, others, finished = race_eight_threads(stores)
+            print(f"       8 threads ({label}): {len(successes)} sucesso, {others.count('already_decided')} "
+                  f"already_decided, outros={[o for o in others if o != 'already_decided']}, "
+                  f"{time.monotonic() - started:.2f}s")
+            check(f"8 threads ({label}): todas terminaram", finished)
+            check(f"8 threads ({label}): exatamente 1 sucesso", len(successes) == 1)
+            check(f"8 threads ({label}): 7 already_decided e nenhuma outra exceção",
+                  others == ["already_decided"] * 7)
+            rows = decision_rows(path)
+            check(f"8 threads ({label}): 1 linha, do vencedor",
+                  len(rows) == 1 and len(successes) == 1 and rows[0][2] == successes[0]["decided_by"])
+
+    # --- corrida com o gerador ---
+    run_generator_race(commit=True)
+    run_generator_race(commit=False)
+
+
 def main() -> None:
     run_tracer()
     run_validation_before_io()
     run_refusals()
+    run_concurrency()
 
 
 if __name__ == "__main__":
