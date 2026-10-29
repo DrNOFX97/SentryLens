@@ -1,8 +1,12 @@
 ---
 phase: 01-registo-de-modelos-ponta-a-ponta
 verified: 2026-10-10
-status: complete-with-open-human-checks
+status: human_needed
 plans: 4/4
+audit_acknowledged:
+  milestone: v1.1
+  at: 2026-10-29
+  status: human_needed
 ---
 
 # Verificação — Fase 1: Registo de modelos ponta a ponta

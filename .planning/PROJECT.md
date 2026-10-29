@@ -4,16 +4,6 @@
 
 SentryLens é um laboratório SOC de aprendizagem do CET (curso de cibersegurança): ingere alertas do Wazuh (Manager API 55000, Indexer API 9200), classifica-os, correlaciona ataques lançados (Red vs Blue) com deteções de regra, ML e rede, gere incidentes e expõe tudo num dashboard estático. Backend FastAPI em `scripts/`, frontend estático na raiz, mais um analisador de logs offline (`log_analyzer.py`, Fase 1) que partilha a classificação de Event IDs.
 
-## Current Milestone: v1.1 R11 Vaccine Engine
-
-**Goal:** Um ataque não detetado ou só parcialmente detetado passa a gerar uma *vaccine*: uma regra de deteção proposta, rastreável até ao ataque que a originou, guardada e visível mas nunca aplicada.
-
-**Target features:**
-- Motor puro que propõe a vaccine a partir dos gaps do Red vs Blue e dos incidentes (event_ids, janela, condição, origem rastreável)
-- Store persistente, escrito só pelo backend, com estado fixo `proposed`
-- `GET /api/vaccines[/{id}]` só leitura, API key por rota, códigos de erro estáveis
-- Aba de leitura `vaccines.js` ("Sem dados" sem amostra), testes sem Wazuh e documentação
-
 ## Core Value
 
 Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
@@ -33,10 +23,10 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 
 - ✓ R9 ML Intelligence: registo versionado (`scripts/models/vN/` + `metadata.json` + `ACTIVE`), avaliação ligada à versão, SHA-256 antes de `joblib.load`, `GET /api/ml/models`, abas Models e Evaluation — v1.0
 - ✓ R10 ML Learning Loop: treino e ativação por HTTP (`POST /api/ml/train`, `/activate`) com as quatro protecções de D-01, compare-and-set no `ACTIVE`, comparação vN vs vN-1 e feature stats no dashboard — v1.0
+- ✓ R11 Vaccine Engine: uma vaccine proposta por ataque `not_detected`/`partial` (`vaccine_engine.py`, store SQLite com estado fixo `proposed`, loop de geração no backend), `GET /api/vaccines[/{id}]` só de leitura com API key, aba Vaccines (`vaccines.js`); nunca aplicada no Wazuh e sem comandos executáveis — v1.1
 
 ### Active
 
-- [ ] R11 Vaccine Engine (ver Current Milestone; requisitos em REQUIREMENTS.md)
 - [ ] Primeiro ciclo de treino real: lançar ataques, exportar alertas na mesma janela, treinar `v1` e avaliar com dataset rotulável
 - [ ] Verificação humana pendente do R9/R10 no dashboard (badges, aviso de reinício após `adopt`, avaliação rotulada)
 
@@ -48,7 +38,7 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 
 ## Current State
 
-v1.0 (R9 + R10) entregue a 2026-10-11: 5 fases, 17 planos, suite `run_all_tests.py` 39/39. `scripts/models/` ainda só tem os dois `.pkl` legados (sem `vN/` nem `ACTIVE`); o treino por HTTP está testado mas nunca correu sobre dados reais. O dataset de 2026-09-14 não é rotulável com o `attack_log.jsonl` actual.
+v1.1 (R11) entregue a 2026-10-29: 3 fases, 10 planos, suite `run_all_tests.py` 81/81. Ciclo real validado de ponta a ponta: o ataque 14 (`blank_password_check`, T1110) gerou a vaccine `vac-a09c1541972a`. `scripts/models/` tem `v1` adotado (`ACTIVE -> v1`) e uma avaliação inconclusiva (8 eventos, `small_sample`); falta treinar `v2` com mais ataques rotulados. Pendentes: verificações humanas do R9/R10 e o caso de vaccine substituída na aba Vaccines.
 
 ## Context
 
@@ -77,6 +67,9 @@ v1.0 (R9 + R10) entregue a 2026-10-11: 5 fases, 17 planos, suite `run_all_tests.
 | Modelo atual copiado (não movido) para `v1` por um comando `adopt` | Não-destrutivo; o modelo legado continua a carregar até ser adotado | ✓ Good (v1.0) |
 | Avaliação guardada dentro da versão do modelo | O relatório avulso atual não é rastreável até um modelo | ✓ Good (v1.0) |
 | Sem mapeamento de codebase GSD na inicialização | O `CLAUDE.md` e o `README.md` já documentam a arquitetura em detalhe | ✓ Good (v1.0) |
+| Uma vaccine só propõe: nunca aplicada no Wazuh, sem comandos executáveis, estado fixo `proposed` imposto pelo próprio SQLite | A escrita por HTTP (aprovar/rejeitar) é o R12; o R11 só prova a lacuna e a proposta | ✓ Good (v1.1) |
+| Id da vaccine = `vac-` + 12 hex de sha256 de `<attack_id>:<sensores em falta>` | Deteta troca/duplicação e dá ids estáveis; não autentica | ✓ Good (v1.1) |
+| Tetos de alertas truncados forçam o veredito `unknown`, nunca `not_detected` | Nunca propor uma regra sobre amostra incompleta; `ATTACK_ALERTS_SIZE` subiu para 8000 (paliativo) | ⚠️ Revisit — truncagem por ataque, não por lote |
 
 ## Evolution
 
@@ -96,4 +89,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-11 after starting v1.1 milestone*
+*Last updated: 2026-10-29 after v1.1 milestone*
