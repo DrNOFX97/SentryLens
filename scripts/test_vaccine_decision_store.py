@@ -12,6 +12,7 @@ Correr (a partir de scripts/):
 import ast
 import json
 import os
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -650,12 +651,218 @@ def run_state_filter() -> None:
             check("ficheiro antigo: bytes exatamente iguais depois das leituras", handle.read() == original)
 
 
+def raises_integrity(path: str, sql: str, params=(), foreign_keys: bool = False) -> bool:
+    """True se o SQL direto levanta sqlite3.IntegrityError (ligação nova por tentativa; o PRAGMA das
+    chaves estrangeiras só se liga a pedido, como no store). Sem erro, a escrita fica confirmada."""
+    conn = sqlite3.connect(path)
+    try:
+        if foreign_keys:
+            conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(sql, params)
+        conn.commit()
+        return False
+    except sqlite3.IntegrityError:
+        return True
+    finally:
+        conn.close()
+
+
+def master_entries(conn: sqlite3.Connection) -> list[tuple]:
+    """Entradas de sqlite_master da tabela vaccines (tabela, autoindex, índices, triggers), sql incluído."""
+    return conn.execute("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE tbl_name = 'vaccines' "
+                        "ORDER BY type, name").fetchall()
+
+
+def master_of(path: str) -> list[tuple]:
+    conn = sqlite3.connect(path)
+    try:
+        return master_entries(conn)
+    finally:
+        conn.close()
+
+
+INSERT_DECISION_SQL = ("INSERT INTO vaccine_decisions (vaccine_id, decision, decided_by, decided_by_name, "
+                       "decided_at, reason, previous_state) VALUES (?, ?, ?, ?, ?, ?, ?)")
+# Linha válida para A (que nestes testes fica por decidir): vaccine_id, decision, decided_by,
+# decided_by_name, decided_at, reason, previous_state.
+VALID_DECISION_ROW = [ID_A, "approved", "analyst-soc1", "Eddie", DECIDED_AT, None, "proposed"]
+
+
+def row_with(index: int, value) -> list:
+    row = list(VALID_DECISION_ROW)
+    row[index] = value
+    return row
+
+
+def run_file_triggers_and_checks(tmp: str, path: str) -> None:
+    """Tentativas por SQL direto contra o ficheiro montado em run_file_guarantees."""
+    snap_vaccines, snap_decisions = rows_of(path), decision_rows(path)
+
+    for column, value in (("decision", "rejected"), ("decided_by", "analyst-x"), ("decided_by_name", "Outro"),
+                          ("decided_at", "2030-01-01T00:00:00+00:00"), ("reason", "novo motivo"),
+                          ("previous_state", "proposed"), ("vaccine_id", ID_A)):
+        check(f"trigger: UPDATE vaccine_decisions SET {column} -> IntegrityError",
+              raises_integrity(path, f"UPDATE vaccine_decisions SET {column} = ? WHERE vaccine_id = ?",
+                               (value, ID_C)))
+    check("trigger: DELETE com WHERE vaccine_id -> IntegrityError",
+          raises_integrity(path, "DELETE FROM vaccine_decisions WHERE vaccine_id = ?", (ID_C,)))
+    check("trigger: DELETE sem WHERE -> IntegrityError", raises_integrity(path, "DELETE FROM vaccine_decisions"))
+    check("UNIQUE: segundo INSERT simples para C -> IntegrityError",
+          raises_integrity(path, INSERT_DECISION_SQL, row_with(0, ID_C)))
+
+    # Controlos em cópias: as linhas válidas seriam aceites, por isso cada recusa abaixo
+    # deve-se à única coisa errada que a linha tem.
+    rejected_ok = row_with(1, "rejected")
+    rejected_ok[5] = "Regra ruidosa"
+    for name, row in (("approved", VALID_DECISION_ROW), ("rejected com motivo", rejected_ok)):
+        copy_path = os.path.join(tmp, f"controlo-{name[:3]}.sqlite3")
+        shutil.copyfile(path, copy_path)
+        check(f"controlo: o INSERT válido ({name}) para A seria aceite (numa cópia)",
+              not raises_integrity(copy_path, INSERT_DECISION_SQL, row))
+
+    for label, row in (
+        ("decision 'applied'", row_with(1, "applied")),
+        ("previous_state 'approved'", row_with(6, "approved")),
+        ("rejected sem motivo (NULL)", row_with(1, "rejected")),
+        ("motivo vazio", row_with(5, "")),
+        ("motivo só espaços", row_with(5, "   ")),
+        ("motivo com 501 caracteres", row_with(5, "x" * 501)),
+        ("decided_by 'Eddie'", row_with(2, "Eddie")),
+        ("decided_by 'analyst-A'", row_with(2, "analyst-A")),
+        ("decided_by 'analyst-'", row_with(2, "analyst-")),
+        ("decided_by_name vazio", row_with(3, "")),
+        ("decided_by_name com 129 caracteres", row_with(3, "n" * 129)),
+        ("vaccine_id malformado 'abc'", row_with(0, "abc")),
+    ):
+        check(f"CHECK: {label} -> IntegrityError", raises_integrity(path, INSERT_DECISION_SQL, row))
+
+    check("FK (PRAGMA foreign_keys = ON): vaccine_id inexistente -> IntegrityError",
+          raises_integrity(path, INSERT_DECISION_SQL, row_with(0, "vac-999999999999"), foreign_keys=True))
+    check("depois de todas as tentativas as duas tabelas ficaram iguais",
+          rows_of(path) == snap_vaccines and decision_rows(path) == snap_decisions)
+
+    # Contraste: a variante que ignora erros engoliria uma violação de CHECK (razão do INSERT simples).
+    mem = sqlite3.connect(":memory:")
+    mem.executescript(vaccine_store.SCHEMA)
+    origin = vA["origin"]
+    mem.execute("INSERT INTO vaccines (id, attack_id, scenario, mitre_technique, verdict, payload, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)", (ID_A, origin["attack_id"], origin["scenario"],
+                                                 origin["mitre_technique"], vA["verdict"], "{}", NOW_ISO))
+    cur = mem.execute(INSERT_DECISION_SQL.replace("INSERT INTO", "INSERT OR IGNORE INTO"), row_with(1, "applied"))
+    check("contraste: INSERT OR IGNORE engole o CHECK (rowcount 0, sem erro): razão do INSERT simples",
+          cur.rowcount == 0)
+    mem.close()
+
+
+def run_file_r11_intact(tmp: str, path: str) -> None:
+    """vaccines do R11 igual no código e em sqlite_master (ficheiro novo e antigo), e continua imutável."""
+    check("VACCINES_SCHEMA == R11_VACCINES_DDL (byte a byte)", vaccine_store.VACCINES_SCHEMA == R11_VACCINES_DDL)
+    check("SCHEMA == VACCINES_SCHEMA + DECISIONS_SCHEMA",
+          vaccine_store.SCHEMA == vaccine_store.VACCINES_SCHEMA + vaccine_store.DECISIONS_SCHEMA)
+    check("'vaccine_decisions' não aparece em VACCINES_SCHEMA", "vaccine_decisions" not in vaccine_store.VACCINES_SCHEMA)
+
+    base = sqlite3.connect(":memory:")
+    base.executescript(R11_VACCINES_DDL)
+    expected = master_entries(base)
+    base.close()
+    check("sqlite_master do R11: 6 entradas (tabela, autoindex com sql NULL, 2 índices, 2 triggers)",
+          len(expected) == 6 and sum(1 for e in expected if e[3] is None) == 1)
+    check("sqlite_master de vaccines: ficheiro novo (depois de upsert_batch e decide_vaccine) == só R11",
+          master_of(path) == expected)
+    old_path = os.path.join(tmp, "old.sqlite3")
+    make_r11_file(old_path, [vA, vC])
+    check("sqlite_master do ficheiro antigo antes de decidir == só R11", master_of(old_path) == expected)
+    VaccineStore(old_path).decide_vaccine(**request())
+    check("ficheiro antigo: a primeira decisão criou vaccine_decisions", has_decisions_table(old_path) is True)
+    check("sqlite_master de vaccines: ficheiro antigo depois da primeira decisão == só R11",
+          master_of(old_path) == expected)
+
+    snap_vaccines, snap_decisions = rows_of(path), decision_rows(path)
+    check("imutável: UPDATE vaccines SET state='approved' numa vaccine aprovada -> IntegrityError",
+          raises_integrity(path, "UPDATE vaccines SET state = 'approved' WHERE id = ?", (ID_C,)))
+    check("imutável: DELETE FROM vaccines numa vaccine aprovada -> IntegrityError",
+          raises_integrity(path, "DELETE FROM vaccines WHERE id = ?", (ID_C,)))
+    conn = sqlite3.connect(path)
+    try:
+        states = {row[0] for row in conn.execute("SELECT state FROM vaccines")}
+    finally:
+        conn.close()
+    check("a coluna state de vaccines é 'proposed' em todas as linhas", states == {"proposed"})
+    check("vaccines e vaccine_decisions inalteradas depois de tudo",
+          rows_of(path) == snap_vaccines and decision_rows(path) == snap_decisions)
+
+
+def run_closed_api_and_trace() -> None:
+    """D-03: API pública fechada e nenhum caminho do store atualiza ou apaga uma decisão."""
+    public = sorted(name for name in vars(VaccineStore) if not name.startswith("_"))
+    check(f"API pública exatamente decide_vaccine, get_vaccine, list_vaccines, upsert_batch ({public})",
+          public == ["decide_vaccine", "get_vaccine", "list_vaccines", "upsert_batch"])
+    with open(vaccine_store.__file__, encoding="utf-8") as handle:
+        source = handle.read()
+    check("o código do store não tem UPDATE nem DELETE FROM sobre vaccine_decisions",
+          "UPDATE vaccine_decisions" not in source and "DELETE FROM vaccine_decisions" not in source)
+    insert_sql = vaccine_store._INSERT_DECISION.upper()
+    check("_INSERT_DECISION é simples (sem OR IGNORE, OR REPLACE nem ON CONFLICT)",
+          insert_sql.startswith("INSERT INTO VACCINE_DECISIONS (")
+          and not any(word in insert_sql for word in ("OR IGNORE", "OR REPLACE", "ON CONFLICT")))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = TracingStore(path)
+        store.upsert_batch([vA, vC], NOW_ISO)
+        store.upsert_batch([vB], NOW_ISO)
+        upsert_trace = list(store.statements)
+        traces: dict[str, list[str]] = {}
+        for label, kwargs, expected_code in (
+            ("aceite", request(), None),
+            ("recusada", request(), "already_decided"),
+            ("inválida", request(decision="applied"), "invalid_decision"),
+            ("de id inexistente", request(vaccine_id="vac-999999999999"), "entry_not_found"),
+        ):
+            store.statements.clear()
+            code = decide_error(store, **kwargs)
+            traces[label] = list(store.statements)
+            check(f"traço: decide {label} -> {expected_code}", code == expected_code)
+        everything = upsert_trace + [s for trace in traces.values() for s in trace]
+        check("traço: nenhuma instrução começa por UPDATE vaccine_decisions nem por DELETE",
+              not any(s.lstrip().upper().startswith(("UPDATE VACCINE_DECISIONS", "DELETE")) for s in everything))
+        check("traço: as instruções UPDATE vêm só de upsert_batch (nenhuma nas decisões)",
+              any(s.lstrip().upper().startswith("UPDATE") for s in upsert_trace)
+              and not any(s.lstrip().upper().startswith("UPDATE") for trace in traces.values() for s in trace))
+        inserts = [s for s in traces["aceite"] if s.startswith("INSERT INTO vaccine_decisions (")]
+        check("traço: a decisão aceite tem exatamente um INSERT INTO vaccine_decisions (", len(inserts) == 1)
+        check("traço: esse INSERT não contém OR IGNORE nem ON CONFLICT",
+              len(inserts) == 1 and "OR IGNORE" not in inserts[0].upper() and "ON CONFLICT" not in inserts[0].upper())
+        check("traço: recusada, inválida e de id inexistente não têm INSERT",
+              not any(s.startswith("INSERT INTO vaccine_decisions") for label in
+                      ("recusada", "inválida", "de id inexistente") for s in traces[label]))
+        check("a decisão aceite ficou como única linha gravada", len(decision_rows(path)) == 1)
+
+
+def run_file_guarantees() -> None:
+    """Critério 1 e D-01/D-02/D-03/D-07/D-12: as garantias valem no próprio ficheiro (SQL direto,
+    sqlite_master, traço das instruções), não só no código do store."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA, vC], NOW_ISO)
+        store.upsert_batch([vB], NOW_ISO)  # A substituída por B
+        store.decide_vaccine(**request(vaccine_id=ID_C))
+        store.decide_vaccine(**request(vaccine_id=ID_B, decision="rejected", decided_by="analyst-soc2",
+                                       decided_by_name="Jeremy", reason="Regra ruidosa"))
+        check("montagem: 3 vaccines e 2 decisões", len(rows_of(path)) == 3 and len(decision_rows(path)) == 2)
+        run_file_triggers_and_checks(tmp, path)
+        run_file_r11_intact(tmp, path)
+    run_closed_api_and_trace()
+
+
 def main() -> None:
     run_tracer()
     run_validation_before_io()
     run_refusals()
     run_concurrency()
     run_state_filter()
+    run_file_guarantees()
 
 
 if __name__ == "__main__":
