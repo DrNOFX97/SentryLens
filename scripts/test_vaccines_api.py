@@ -156,10 +156,10 @@ def run_tracer() -> None:
         check("lista: total 2, available true, reason None, limit 200, offset 0",
               body["total"] == 2 and body["available"] is True and body["reason"] is None
               and body["limit"] == 200 and body["offset"] == 0)
-        extra = vaccine_engine.VACCINE_KEYS | {"state", "superseded_by", "created_at"}
-        check("lista: cada vaccine tem as chaves do motor + state/superseded_by/created_at, proposed",
+        extra = vaccine_engine.VACCINE_KEYS | {"state", "superseded_by", "created_at", "decision"}
+        check("lista: cada vaccine tem as chaves do motor + state/superseded_by/created_at/decision, proposed, sem decisão",
               all(set(v) == extra and v["state"] == "proposed" and v["superseded_by"] is None
-                  and isinstance(v["created_at"], str) for v in vaccines))
+                  and isinstance(v["created_at"], str) and v["decision"] is None for v in vaccines))
         v3, v2 = vaccines
         check("vaccine do ataque 3: T1053, falta só ml",
               v3["origin"]["attack_id"] == 3 and v3["origin"]["mitre_technique"] == "T1053"
@@ -169,7 +169,7 @@ def run_tracer() -> None:
               and all(re.fullmatch(r"INC-\d{8}-\d+", i) for i in v3["origin"]["incident_ids"]))
         check("vaccine do ataque 2: regra com event_ids [5140, 5145]",
               v2["proposals"][0]["rule"]["event_ids"] == [5140, 5145])
-        stored_engine_form = {k: v for k, v in v2.items() if k not in ("state", "superseded_by", "created_at")}
+        stored_engine_form = {k: v for k, v in v2.items() if k not in ("state", "superseded_by", "created_at", "decision")}
         check("o que se grava é o dict do motor: passa validate_vaccine",
               vaccine_engine.validate_vaccine(stored_engine_form) == [])
 

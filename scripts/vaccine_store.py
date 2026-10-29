@@ -19,6 +19,14 @@ sqlite3.IntegrityError.
 O id da vaccine é determinístico e deteta troca/duplicação, mas NÃO autentica
 (mesmo aviso de vaccine_engine.py): quem consegue escrever no ficheiro também
 consegue forjar linhas coerentes. Só stdlib; não importa a app.
+
+R12 (Phase 15): as decisões dos analistas vivem numa segunda tabela, só de
+acréscimo, no mesmo ficheiro (`vaccine_decisions`). UNIQUE(vaccine_id) torna a
+decisão final no próprio ficheiro e dois triggers recusam UPDATE e DELETE. O
+estado lido é derivado (a decisão registada, ou `proposed`); a coluna `state` de
+`vaccines` continua fixa em `proposed` e a tabela `vaccines` não muda. Um ficheiro
+sem a tabela conta como "sem decisões" (a leitura nunca a cria; nasce na primeira
+escrita). Aprovar não aplica nada no Wazuh: é só o registo da decisão.
 """
 
 import json
@@ -28,12 +36,17 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 
+from vaccine_decision import (DECISION_FIELDS, DECISION_RECORD_KEYS, VaccineDecisionError, check_transition,
+                              derive_state, validate_request)
+
 DB_PATH_ENV = "SENTRYLENS_VACCINES_DB_PATH"
 DEFAULT_DB_FILENAME = "vaccines.sqlite3"
 # Campos que o store acrescenta à vaccine do motor ao ler (fora do contrato do motor).
-STORE_FIELDS = ("state", "superseded_by", "created_at")
+# `state` é derivado (a decisão registada, ou proposed); `decision` é o bloco da
+# decisão (ou None).
+STORE_FIELDS = ("state", "superseded_by", "created_at", "decision")
 
-SCHEMA = """
+VACCINES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS vaccines (
     id TEXT PRIMARY KEY CHECK (id GLOB 'vac-*' AND length(id) = 16),
     state TEXT NOT NULL DEFAULT 'proposed' CHECK (state = 'proposed'),
@@ -54,9 +67,53 @@ BEFORE UPDATE OF id, state, attack_id, scenario, mitre_technique, verdict, paylo
 BEGIN SELECT RAISE(ABORT, 'vaccines so aceita alterar superseded_by'); END;
 """
 
+# R12 (Phase 15): registo de decisões, só de acréscimo, no mesmo ficheiro. A tabela
+# vaccines acima não muda um byte. UNIQUE(vaccine_id) torna a decisão final no
+# próprio ficheiro; os triggers recusam UPDATE e DELETE.
+DECISIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS vaccine_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vaccine_id TEXT NOT NULL UNIQUE REFERENCES vaccines(id) CHECK (vaccine_id GLOB 'vac-*' AND length(vaccine_id) = 16),
+    decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+    decided_by TEXT NOT NULL CHECK (decided_by GLOB 'analyst-?*' AND decided_by NOT GLOB '*[^a-z0-9-]*' AND length(decided_by) <= 72),
+    decided_by_name TEXT NOT NULL CHECK (length(decided_by_name) BETWEEN 1 AND 128),
+    decided_at TEXT NOT NULL,
+    reason TEXT CHECK (reason IS NULL OR (length(reason) BETWEEN 1 AND 500 AND length(trim(reason, char(32, 9, 10, 13))) > 0)),
+    previous_state TEXT NOT NULL CHECK (previous_state = 'proposed'),
+    CHECK (decision <> 'rejected' OR reason IS NOT NULL)
+);
+CREATE TRIGGER IF NOT EXISTS vaccine_decisions_no_update BEFORE UPDATE ON vaccine_decisions
+BEGIN SELECT RAISE(ABORT, 'vaccine_decisions e append-only'); END;
+CREATE TRIGGER IF NOT EXISTS vaccine_decisions_no_delete BEFORE DELETE ON vaccine_decisions
+BEGIN SELECT RAISE(ABORT, 'vaccine_decisions e append-only'); END;
+"""
+
+SCHEMA = VACCINES_SCHEMA + DECISIONS_SCHEMA
+
 _INSERT = (
     "INSERT INTO vaccines (id, attack_id, scenario, mitre_technique, verdict, payload, created_at) "
     "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING"
+)
+
+# INSERT simples, sem cláusula de conflito nem variante que ignore erros: uma
+# decisão duplicada tem de falhar alto pela UNIQUE, nunca ser engolida (mesmo
+# motivo da emenda A1 acima).
+_INSERT_DECISION = (
+    "INSERT INTO vaccine_decisions (vaccine_id, decision, decided_by, decided_by_name, decided_at, reason, "
+    "previous_state) VALUES (?, ?, ?, ?, ?, ?, ?)"
+)
+
+# Fragmentos de leitura fixos, escolhidos pelo código conforme a tabela exista (D-10);
+# nunca construídos a partir de dados do pedido.
+_FROM_WITH_DECISIONS = " FROM vaccines v LEFT JOIN vaccine_decisions d ON d.vaccine_id = v.id"
+_FROM_WITHOUT_DECISIONS = " FROM vaccines v"
+_COLUMNS_WITH_DECISIONS = (
+    "SELECT v.*, d.decision AS d_decision, d.decided_by AS d_decided_by, d.decided_by_name AS d_decided_by_name, "
+    "d.decided_at AS d_decided_at, d.reason AS d_reason"
+)
+_COLUMNS_WITHOUT_DECISIONS = (
+    "SELECT v.*, NULL AS d_decision, NULL AS d_decided_by, NULL AS d_decided_by_name, "
+    "NULL AS d_decided_at, NULL AS d_reason"
 )
 
 
@@ -96,6 +153,27 @@ class VaccineStore:
             conn.close()
 
     @contextmanager
+    def _tx_immediate(self):
+        """Transação de escrita com BEGIN IMMEDIATE (D-06): tira o lock de escrita
+        antes das leituras, por isso o gerador (upsert_batch, outra ligação) não
+        consegue marcar superseded_by entre a verificação e o INSERT. O PRAGMA
+        das chaves estrangeiras tem de correr antes do BEGIN (dentro de uma
+        transação é ignorado); só é ligado nesta ligação (D-07)."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            with conn:  # commit no sucesso, rollback na exceção
+                conn.execute("BEGIN IMMEDIATE")
+                yield conn
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _has_decisions_table(conn: sqlite3.Connection) -> bool:
+        return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vaccine_decisions'"
+                            ).fetchone() is not None
+
+    @contextmanager
     def _read(self):
         """Ligação só-leitura; devolve None se o ficheiro ainda não existe (o
         método de leitura responde vazio sem criar nada)."""
@@ -111,13 +189,18 @@ class VaccineStore:
 
     @staticmethod
     def _to_vaccine(row: sqlite3.Row) -> dict:
-        """Payload do motor + campos do store. Erros (JSON corrompido, não-dict)
-        propagam como ValueError; a rota mapeia-os para 503."""
+        """Payload do motor + campos do store. Erros (JSON corrompido, não-dict,
+        decisão registada inválida) propagam como ValueError; a rota mapeia-os
+        para 503. `state` é derivado da decisão (D-09/D-11); a coluna `state` da
+        tabela vaccines não é lida."""
         vaccine = json.loads(row["payload"])
         if not isinstance(vaccine, dict):
             raise ValueError("payload da vaccine nao e um objeto")
-        for field in STORE_FIELDS:
-            vaccine[field] = row[field]
+        vaccine["state"] = derive_state(row["d_decision"])
+        vaccine["superseded_by"] = row["superseded_by"]
+        vaccine["created_at"] = row["created_at"]
+        vaccine["decision"] = (None if row["d_decision"] is None
+                               else {field: row["d_" + field] for field in DECISION_FIELDS})
         return vaccine
 
     # --- escrita (só o ciclo do backend) ---
@@ -146,6 +229,34 @@ class VaccineStore:
                              (v["id"],))
         return counts
 
+    def decide_vaccine(self, *, vaccine_id: str, decision: str, decided_by: str, decided_by_name: str,
+                       reason: str | None, now_iso: str) -> dict:
+        """Regista a decisão de um analista sobre uma vaccine (R12). Parâmetros só
+        por nome (D-13); `now_iso` (UTC) vem do chamador. Verificação e escrita na
+        mesma transação BEGIN IMMEDIATE (D-06): a vaccine existe, ainda não tem
+        decisão e não foi substituída. Recusas e erros de SQLite fazem rollback
+        (nada gravado) e propagam; nunca se converte uma exceção em texto. Só faz
+        SELECT na tabela vaccines."""
+        request = validate_request(vaccine_id=vaccine_id, decision=decision, decided_by=decided_by,
+                                   decided_by_name=decided_by_name, reason=reason, now_iso=now_iso)
+        if not os.path.exists(self.db_path):
+            raise VaccineDecisionError("entry_not_found")
+        with self.lock, self._tx_immediate() as conn:
+            vaccine = conn.execute("SELECT superseded_by FROM vaccines WHERE id = ?",
+                                   (request["vaccine_id"],)).fetchone()
+            if vaccine is None:
+                raise VaccineDecisionError("entry_not_found")
+            decided = conn.execute("SELECT decision FROM vaccine_decisions WHERE vaccine_id = ?",
+                                   (request["vaccine_id"],)).fetchone()
+            current = derive_state(None if decided is None else decided["decision"])
+            check_transition(current_state=current, decision=request["decision"],
+                             superseded=vaccine["superseded_by"] is not None)
+            conn.execute(_INSERT_DECISION, (
+                request["vaccine_id"], request["decision"], request["decided_by"], request["decided_by_name"],
+                request["decided_at"], request["reason"], current))
+        record = {**request, "previous_state": current}
+        return {key: record[key] for key in DECISION_RECORD_KEYS}
+
     # --- leitura (só-leitura, nunca cria o ficheiro) ---
 
     def list_vaccines(self, *, attack_id: int | None = None, technique: str | None = None,
@@ -159,21 +270,22 @@ class VaccineStore:
         clauses: list[str] = []
         params: list = []
         if attack_id is not None:
-            clauses.append("attack_id = ?")
+            clauses.append("v.attack_id = ?")
             params.append(attack_id)
         if technique is not None:
-            clauses.append("mitre_technique = ?")
+            clauses.append("v.mitre_technique = ?")
             params.append(technique)
         if not include_superseded:
-            clauses.append("superseded_by IS NULL")
+            clauses.append("v.superseded_by IS NULL")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         with self._read() as conn:
             if conn is None:
                 return [], 0, 0
+            columns, source = self._read_fragments(conn)
             store_total = conn.execute("SELECT COUNT(*) FROM vaccines").fetchone()[0]
-            total = conn.execute("SELECT COUNT(*) FROM vaccines" + where, params).fetchone()[0]
+            total = conn.execute("SELECT COUNT(*)" + source + where, params).fetchone()[0]
             rows = conn.execute(
-                "SELECT * FROM vaccines" + where + " ORDER BY attack_id DESC, created_at DESC, id ASC LIMIT ? OFFSET ?",
+                columns + source + where + " ORDER BY v.attack_id DESC, v.created_at DESC, v.id ASC LIMIT ? OFFSET ?",
                 [*params, limit, offset]).fetchall()
             return [self._to_vaccine(r) for r in rows], total, store_total
 
@@ -181,5 +293,13 @@ class VaccineStore:
         with self._read() as conn:
             if conn is None:
                 return None
-            row = conn.execute("SELECT * FROM vaccines WHERE id = ?", (vaccine_id,)).fetchone()
+            columns, source = self._read_fragments(conn)
+            row = conn.execute(columns + source + " WHERE v.id = ?", (vaccine_id,)).fetchone()
             return self._to_vaccine(row) if row is not None else None
+
+    def _read_fragments(self, conn: sqlite3.Connection) -> tuple[str, str]:
+        """(colunas, FROM) fixos: com LEFT JOIN a vaccine_decisions se a tabela
+        existir; senão colunas NULL (ficheiro do R11 = "sem decisões", D-10)."""
+        if self._has_decisions_table(conn):
+            return _COLUMNS_WITH_DECISIONS, _FROM_WITH_DECISIONS
+        return _COLUMNS_WITHOUT_DECISIONS, _FROM_WITHOUT_DECISIONS

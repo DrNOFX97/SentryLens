@@ -1,0 +1,279 @@
+"""
+Testes do store de decisões do R12 (Phase 15): vaccine_store.decide_vaccine e a
+leitura com estado derivado, sem a app FastAPI e sem Wazuh. Cobre o tracer
+(aprovar e rejeitar ponta a ponta, o DDL do R11 intacto, ficheiro antigo sem a
+tabela vaccine_decisions) e a validação da entrada antes de tocar no disco. As
+vaccines vêm do motor verdadeiro (vaccine_engine) sobre ataques montados à mão.
+
+Correr (a partir de scripts/):
+    python test_vaccine_decision_store.py
+"""
+
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+
+import vaccine_decision
+import vaccine_engine
+import vaccine_store
+from vaccine_decision import DECISION_RECORD_KEYS, VaccineDecisionError
+from vaccine_store import STORE_FIELDS, VaccineStore
+
+NOW = datetime.now(timezone.utc)
+NOW_ISO = NOW.isoformat()
+DECIDED_AT = "2026-10-29T12:00:00+00:00"
+
+failures: list[str] = []
+
+
+def check(label: str, condition: bool) -> None:
+    print(f"[{'OK   ' if condition else 'FALHOU'}] {label}")
+    if not condition:
+        failures.append(label)
+
+
+def ts(seconds_ago: int) -> str:
+    return (NOW - timedelta(seconds=seconds_ago)).isoformat()
+
+
+def make_attack(attack_id, verdict, expected, achieved, scenario="smb_enum", event_ids=(5140, 5145),
+                duplicate_id=False, expected_source="scenario_default", correlation_reason=None,
+                technique="T1135") -> dict:
+    """Dict com a mesma forma de um ataque de build_attack_registry."""
+    return {
+        "id": attack_id,
+        "duplicate_id": duplicate_id,
+        "timestamp": ts(100),
+        "scenario": scenario,
+        "mitre_tactic": "Discovery",
+        "mitre_technique": technique,
+        "expected": {"detection": list(expected), "source": expected_source, "event_ids": list(event_ids)},
+        "actual": {"verdict": verdict, "correlation_reason": correlation_reason, "achieved": list(achieved)},
+        "evidence": {"matched_event_ids": [], "matched_alert_count": 0, "network_detection_types": [],
+                     "incident_count": 0},
+        "incidents": [],
+    }
+
+
+def engine_vaccine(attack: dict) -> dict:
+    return vaccine_engine.build_vaccine_candidates({"attacks": [attack]})["vaccines"][0]
+
+
+vA = engine_vaccine(make_attack(2, "partial", ["rule", "ml"], ["rule"]))
+vB = engine_vaccine(make_attack(2, "not_detected", ["rule", "ml"], []))
+vC = engine_vaccine(make_attack(3, "partial", ["rule", "ml"], ["rule"], scenario="lateral_movement_schtasks",
+                                event_ids=(4672, 4698), technique="T1053"))
+ID_A, ID_B, ID_C = "vac-ed793c0b3437", "vac-5fe3861aa2a3", "vac-bd617cce8054"
+
+# DDL do R11 congelado (cópia exata do literal SCHEMA de scripts/vaccine_store.py no
+# commit 7b7fd25): serve para provar que a tabela vaccines não muda e para criar
+# ficheiros "antigos" sem vaccine_decisions.
+R11_VACCINES_DDL = """
+CREATE TABLE IF NOT EXISTS vaccines (
+    id TEXT PRIMARY KEY CHECK (id GLOB 'vac-*' AND length(id) = 16),
+    state TEXT NOT NULL DEFAULT 'proposed' CHECK (state = 'proposed'),
+    attack_id INTEGER NOT NULL CHECK (attack_id BETWEEN 1 AND 999999999),
+    scenario TEXT NOT NULL,
+    mitre_technique TEXT,
+    verdict TEXT NOT NULL CHECK (verdict IN ('not_detected', 'partial')),
+    payload TEXT NOT NULL CHECK (json_valid(payload)),
+    created_at TEXT NOT NULL,
+    superseded_by TEXT CHECK (superseded_by IS NULL OR (superseded_by GLOB 'vac-*' AND length(superseded_by) = 16))
+);
+CREATE INDEX IF NOT EXISTS idx_vaccines_attack ON vaccines(attack_id);
+CREATE INDEX IF NOT EXISTS idx_vaccines_technique ON vaccines(mitre_technique);
+CREATE TRIGGER IF NOT EXISTS vaccines_no_delete BEFORE DELETE ON vaccines
+BEGIN SELECT RAISE(ABORT, 'vaccines e append-only'); END;
+CREATE TRIGGER IF NOT EXISTS vaccines_immutable
+BEFORE UPDATE OF id, state, attack_id, scenario, mitre_technique, verdict, payload, created_at ON vaccines
+BEGIN SELECT RAISE(ABORT, 'vaccines so aceita alterar superseded_by'); END;
+"""
+
+
+def rows_of(path: str) -> list[tuple]:
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute("SELECT * FROM vaccines ORDER BY id").fetchall()
+    finally:
+        conn.close()
+
+
+def has_decisions_table(path: str) -> bool:
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vaccine_decisions'"
+                            ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def decision_rows(path: str) -> list[tuple]:
+    """As 7 colunas de vaccine_decisions (sem `id`) pela ordem de inserção; [] se a tabela não existir."""
+    if not has_decisions_table(path):
+        return []
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute("SELECT vaccine_id, decision, decided_by, decided_by_name, decided_at, reason, "
+                            "previous_state FROM vaccine_decisions ORDER BY id").fetchall()
+    finally:
+        conn.close()
+
+
+def make_r11_file(path: str, vaccines: list[dict]) -> None:
+    """Ficheiro como o do R11: só o DDL congelado, sem vaccine_decisions."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(R11_VACCINES_DDL)
+        for v in vaccines:
+            origin = v["origin"]
+            conn.execute(
+                "INSERT INTO vaccines (id, attack_id, scenario, mitre_technique, verdict, payload, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (v["id"], origin["attack_id"], origin["scenario"], origin["mitre_technique"], v["verdict"],
+                 json.dumps(v, ensure_ascii=False, sort_keys=True), NOW_ISO))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def decide_error(store: VaccineStore, **kwargs) -> str | None:
+    """Código da VaccineDecisionError levantada, ou None se não levantou nenhuma."""
+    try:
+        store.decide_vaccine(**kwargs)
+    except VaccineDecisionError as exc:
+        return exc.code
+    return None
+
+
+def request(**overrides) -> dict:
+    base = {"vaccine_id": ID_C, "decision": "approved", "decided_by": "analyst-soc1", "decided_by_name": "Eddie",
+            "reason": None, "now_iso": DECIDED_AT}
+    base.update(overrides)
+    return base
+
+
+def run_tracer() -> None:
+    check("fixtures: ids literais do motor", (vA["id"], vB["id"], vC["id"]) == (ID_A, ID_B, ID_C))
+    check("VACCINE_ID_RE do módulo puro igual ao do motor",
+          vaccine_decision.VACCINE_ID_RE == vaccine_engine.VACCINE_ID_RE)
+    check("STORE_FIELDS inclui decision", STORE_FIELDS == ("state", "superseded_by", "created_at", "decision"))
+    check("R11_VACCINES_DDL congelado == VACCINES_SCHEMA do store", R11_VACCINES_DDL == vaccine_store.VACCINES_SCHEMA)
+    check("SCHEMA == VACCINES_SCHEMA + DECISIONS_SCHEMA",
+          vaccine_store.SCHEMA == vaccine_store.VACCINES_SCHEMA + vaccine_store.DECISIONS_SCHEMA)
+
+    # --- aprovar ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vC], NOW_ISO)
+        before = store.get_vaccine(ID_C)
+        check("antes de decidir: state proposed e decision None", before["state"] == "proposed" and before["decision"] is None)
+        check("chaves da vaccine lida == chaves do motor + STORE_FIELDS",
+              set(before) == vaccine_engine.VACCINE_KEYS | set(STORE_FIELDS))
+        rows_before = rows_of(path)
+
+        result = store.decide_vaccine(**request())
+        expected_record = {"vaccine_id": ID_C, "decision": "approved", "decided_by": "analyst-soc1",
+                           "decided_by_name": "Eddie", "decided_at": DECIDED_AT, "reason": None,
+                           "previous_state": "proposed"}
+        check("decide_vaccine devolve exatamente o registo", result == expected_record)
+        check("chaves do registo pela ordem de DECISION_RECORD_KEYS", tuple(result) == DECISION_RECORD_KEYS)
+
+        after = store.get_vaccine(ID_C)
+        check("depois: state approved", after["state"] == "approved")
+        check("depois: bloco decision",
+              after["decision"] == {"decided_by": "analyst-soc1", "decided_by_name": "Eddie",
+                                    "decided_at": DECIDED_AT, "reason": None})
+        check("depois: superseded_by None e created_at igual", after["superseded_by"] is None
+              and after["created_at"] == before["created_at"])
+        check("a vaccine sem STORE_FIELDS continua igual a vC",
+              {k: v for k, v in after.items() if k not in STORE_FIELDS} == vC)
+        listed, total, store_total = store.list_vaccines()
+        check("list_vaccines devolve a mesma entrada que get_vaccine",
+              listed == [after] and total == 1 and store_total == 1)
+        check("SQL direto: uma linha em vaccine_decisions",
+              decision_rows(path) == [(ID_C, "approved", "analyst-soc1", "Eddie", DECIDED_AT, None, "proposed")])
+        check("tabela vaccines igual antes e depois da decisão", rows_of(path) == rows_before)
+        check("coluna state de vaccines continua proposed", all(r[1] == "proposed" for r in rows_of(path)))
+
+    # --- rejeitar com motivo ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vC, vB], NOW_ISO)
+        rows_before = rows_of(path)
+        store.decide_vaccine(**request(vaccine_id=ID_C))
+        result = store.decide_vaccine(**request(vaccine_id=ID_B, decision="rejected", decided_by="analyst-soc2",
+                                                decided_by_name="Jeremy", reason="  Falso positivo no laboratório  "))
+        check("rejeitar: motivo gravado sem espaços nas pontas", result["reason"] == "Falso positivo no laboratório")
+        b = store.get_vaccine(ID_B)
+        check("rejeitar: state rejected", b["state"] == "rejected")
+        check("rejeitar: bloco decision com o autor e o motivo",
+              b["decision"] == {"decided_by": "analyst-soc2", "decided_by_name": "Jeremy", "decided_at": DECIDED_AT,
+                                "reason": "Falso positivo no laboratório"})
+        check("SQL direto: duas linhas pela ordem de inserção",
+              decision_rows(path) == [(ID_C, "approved", "analyst-soc1", "Eddie", DECIDED_AT, None, "proposed"),
+                                      (ID_B, "rejected", "analyst-soc2", "Jeremy", DECIDED_AT,
+                                       "Falso positivo no laboratório", "proposed")])
+        check("tabela vaccines igual antes e depois das duas decisões", rows_of(path) == rows_before)
+        check("todas as linhas de vaccines continuam proposed", all(r[1] == "proposed" for r in rows_of(path)))
+
+    # --- rejeitar sem motivo ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA], NOW_ISO)
+        for label, reason in (("None", None), ("vazio", ""), ("só espaços", "   ")):
+            code = None
+            text = None
+            try:
+                store.decide_vaccine(**request(vaccine_id=ID_A, decision="rejected", reason=reason))
+            except VaccineDecisionError as exc:
+                code, text = exc.code, str(exc)
+            check(f"rejeitar sem motivo ({label}) -> reason_required", code == "reason_required" and text == "reason_required")
+        check("rejeitar sem motivo: nenhuma linha em vaccine_decisions", decision_rows(path) == [])
+        check("rejeitar sem motivo: a vaccine continua proposed", store.get_vaccine(ID_A)["state"] == "proposed")
+
+    # --- id inexistente / ficheiro inexistente ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA], NOW_ISO)
+        check("id inexistente num ficheiro existente -> entry_not_found",
+              decide_error(store, **request(vaccine_id="vac-000000000000")) == "entry_not_found")
+        check("id inexistente: nada gravado", decision_rows(path) == [])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        check("ficheiro inexistente -> entry_not_found", decide_error(store, **request()) == "entry_not_found")
+        check("ficheiro inexistente: continua a não existir", not os.path.exists(path))
+
+    # --- ficheiro antigo, sem vaccine_decisions ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        make_r11_file(path, [vC])
+        store = VaccineStore(path)
+        old = store.get_vaccine(ID_C)
+        check("ficheiro antigo: get_vaccine com state proposed e decision None",
+              old is not None and old["state"] == "proposed" and old["decision"] is None)
+        check("ficheiro antigo: list_vaccines == ([entrada], 1, 1)", store.list_vaccines() == ([old], 1, 1))
+        check("ficheiro antigo: as leituras não criaram vaccine_decisions", has_decisions_table(path) is False)
+
+
+def main() -> None:
+    run_tracer()
+
+
+if __name__ == "__main__":
+    main()
+    print()
+    if failures:
+        print(f"{len(failures)} verificação(ões) falharam:")
+        for label in failures:
+            print(f"  - {label}")
+        sys.exit(1)
+    print("Todas as verificações passaram.")
