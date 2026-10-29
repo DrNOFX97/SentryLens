@@ -95,15 +95,42 @@ def check_transition(*, current_state: str, decision: str, superseded: bool) -> 
 
 def validate_request(*, vaccine_id, decision, decided_by, decided_by_name, reason, now_iso) -> dict:
     """Valida o pedido de decisão e devolve um dict com exatamente REQUEST_KEYS.
-    Tracer: valida a decisão e o motivo; as restantes validações, por ordem fixa,
-    entram a seguir."""
+    Ordem fixa, parando no primeiro erro: vaccine_id, decisão, autor (só o
+    formato; D-05), instante UTC, motivo. Usa sempre fullmatch (um `$` com
+    match aceitaria uma quebra de linha final). O motivo é guardado tal como vem
+    depois do strip: é dado do analista, nunca HTML nem instrução."""
+    if not isinstance(vaccine_id, str) or _VACCINE_ID.fullmatch(vaccine_id) is None:
+        raise VaccineDecisionError("invalid_vaccine_id")
     if not isinstance(decision, str) or decision not in DECISIONS:
         raise VaccineDecisionError("invalid_decision")
+    if (not isinstance(decided_by, str) or _ANALYST_ID.fullmatch(decided_by) is None
+            or not isinstance(decided_by_name, str)
+            or not 1 <= len(decided_by_name) <= ANALYST_NAME_MAX_LENGTH
+            or decided_by_name != decided_by_name.strip()
+            or _ANALYST_NAME.fullmatch(decided_by_name) is None):
+        raise VaccineDecisionError("invalid_author")
+    if not _is_utc_instant(now_iso):
+        raise VaccineDecisionError("invalid_decided_at")
     if reason is not None:
         if not isinstance(reason, str):
             raise VaccineDecisionError("invalid_reason")
         reason = reason.strip() or None
-    if reason is None and decision == "rejected":
-        raise VaccineDecisionError("reason_required")
+    if reason is None:
+        if decision == "rejected":
+            raise VaccineDecisionError("reason_required")
+    elif (len(reason) > REASON_MAX_LENGTH
+          or any(unicodedata.category(ch) in FORBIDDEN_REASON_CATEGORIES for ch in reason)):
+        raise VaccineDecisionError("invalid_reason")
     return {"vaccine_id": vaccine_id, "decision": decision, "decided_by": decided_by,
             "decided_by_name": decided_by_name, "decided_at": now_iso, "reason": reason}
+
+
+def _is_utc_instant(value) -> bool:
+    """ISO 8601 com fuso e offset 0 (o instante é guardado tal como veio)."""
+    if not isinstance(value, str) or not 0 < len(value) <= DECIDED_AT_MAX_LENGTH:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0)

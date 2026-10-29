@@ -9,6 +9,7 @@ Correr (a partir de scripts/):
     python test_vaccine_decision_store.py
 """
 
+import ast
 import json
 import os
 import sqlite3
@@ -264,8 +265,61 @@ def run_tracer() -> None:
         check("ficheiro antigo: as leituras não criaram vaccine_decisions", has_decisions_table(path) is False)
 
 
+def imported_modules(path: str) -> set[str]:
+    """Primeiro componente dos módulos importados por um ficheiro (por AST)."""
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found.add(node.module.split(".")[0])
+    return found
+
+
+def run_validation_before_io() -> None:
+    """Toda a entrada inválida falha antes de tocar no disco (D-08)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        check("ficheiro inexistente + vaccine_id inválido -> invalid_vaccine_id",
+              decide_error(store, **request(vaccine_id="abc")) == "invalid_vaccine_id")
+        check("ficheiro inexistente + vaccine_id inválido: o ficheiro não foi criado", not os.path.exists(path))
+        for label, overrides, code in (
+            ("decisão", {"decision": "applied"}, "invalid_decision"),
+            ("autor (id)", {"decided_by": "soc1"}, "invalid_author"),
+            ("autor (nome)", {"decided_by_name": "<b>x</b>"}, "invalid_author"),
+            ("decided_at", {"now_iso": "ontem"}, "invalid_decided_at"),
+            ("motivo em falta", {"decision": "rejected", "reason": None}, "reason_required"),
+            ("motivo inválido", {"reason": "a\nb"}, "invalid_reason"),
+        ):
+            check(f"ficheiro inexistente + {label} inválido -> {code}", decide_error(store, **request(**overrides)) == code)
+        check("nenhuma recusa de entrada criou o ficheiro", not os.path.exists(path))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        make_r11_file(path, [vC])
+        store = VaccineStore(path)
+        check("ficheiro antigo + decisão 'applied' -> invalid_decision",
+              decide_error(store, **request(decision="applied")) == "invalid_decision")
+        check("ficheiro antigo: a tabela vaccine_decisions continua sem existir", has_decisions_table(path) is False)
+        check("ficheiro antigo: motivo inválido também não cria a tabela",
+              decide_error(store, **request(reason="x" * 501)) == "invalid_reason" and has_decisions_table(path) is False)
+        store.decide_vaccine(**request())
+        check("ficheiro antigo: a primeira decisão válida cria a tabela e grava",
+              has_decisions_table(path) and len(decision_rows(path)) == 1)
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    forbidden = {"incident_store", "incident_engine", "incident_ingest"}
+    for name in ("vaccine_store.py", "vaccine_decision.py"):
+        found = imported_modules(os.path.join(here, name))
+        check(f"D-05: {name} não importa o store/motor de incidentes (importa {sorted(found)})",
+              not (found & forbidden))
+
+
 def main() -> None:
     run_tracer()
+    run_validation_before_io()
 
 
 if __name__ == "__main__":
