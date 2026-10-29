@@ -293,7 +293,7 @@ avaliado segundos depois de lançado sai `not_detected` só porque os alertas
 ainda não chegaram, e essa vaccine falsa ficaria para sempre. Um valor inválido
 volta à omissão com aviso. Na prática, uma vaccine só aparece cerca de 10 min
 depois do ataque, mais até 5 min do intervalo. Com a base de incidentes
-indisponível nada é gravado. Com alertas truncados (teto de 1000 do Indexer)
+indisponível nada é gravado. Com alertas truncados (teto de 8000 do Indexer, `ATTACK_ALERTS_SIZE` em `main.py`; paliativo, volta a truncar quando o ruído crescer)
 grava na mesma e sinaliza em `alerts_truncated`.
 
 Contagens por ciclo (`COUNT_KEYS`): `inserted` (novas), `existing` (já existiam),

@@ -421,7 +421,7 @@ Limitações conhecidas (ainda por fazer, Ondas 2 a 8 da auditoria ao frontend):
 │   ├── detection_event.py, network_soc.py, siem_health.py   deteções unificadas, painéis de rede, saúde do SIEM
 │   ├── history_store.py / history_index.py      histórico JSONL e índice SQLite
 │   ├── deploy/                                  serviço tshark e logrotate da VM
-│   └── test_*.py                                48 testes standalone
+│   └── test_*.py                                81 testes standalone
 └── docs/                                        API, ML e guia do laboratório
 ```
 

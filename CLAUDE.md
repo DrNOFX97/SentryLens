@@ -80,7 +80,7 @@ mas isso deixou de funcionar depois do CORS ficar restrito a `localhost`/`127.0.
 
 ## Testes do backend
 
-80 ficheiros `test_*.py` standalone (`run_all_tests.py` corre-os todos), todos sem precisar do laboratório Wazuh ligado (tudo mockado).
+81 ficheiros `test_*.py` standalone (`run_all_tests.py` corre-os todos), todos sem precisar do laboratório Wazuh ligado (tudo mockado).
 Correm todos a partir de `scripts/`:
 
 ```bash
