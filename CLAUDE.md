@@ -347,7 +347,7 @@ Além de `app.js` e do `*.js` por aba, a raiz tem módulos transversais (`api.js
 
 ## GSD (a partir do R9)
 
-- `.planning/` (PROJECT, REQUIREMENTS, ROADMAP, STATE, config) acompanha o marco **v1.1 — R11 Vaccine Engine** (Phases 12-14). O v1.0 (R9 + R10) está arquivado em `.planning/milestones/`. O Roadmap v2 completo continua em `docs/ROADMAP_STATUS.md`; o passo seguinte lê-se no `STATE.md`.
+- `.planning/` (PROJECT, REQUIREMENTS, ROADMAP, STATE, config) acompanha o marco **v1.2 — R12 Vaccine Lab** (Phases 15-17). O v1.0 (R9 + R10) e o v1.1 (R11) estão arquivados em `.planning/milestones/`. O Roadmap v2 completo continua em `docs/ROADMAP_STATUS.md`; o passo seguinte lê-se no `STATE.md`.
 - **Nunca** correr `gsd-tools query generate-claude-md --output CLAUDE.md` (o workflow `new-project` sugere-o): sobrescreveria este ficheiro. O `config.json` do GSD aponta para `./.claude/CLAUDE.md`, mas o real está na raiz.
 - Depois de um reboot: `.\scripts\start-backend.ps1` e `.\scripts\start-frontend.ps1`; confirmar as 3 VMs e o Wazuh (502 costuma ser disco cheio dentro da VM, não RAM).
 

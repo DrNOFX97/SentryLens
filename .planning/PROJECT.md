@@ -4,6 +4,15 @@
 
 SentryLens é um laboratório SOC de aprendizagem do CET (curso de cibersegurança): ingere alertas do Wazuh (Manager API 55000, Indexer API 9200), classifica-os, correlaciona ataques lançados (Red vs Blue) com deteções de regra, ML e rede, gere incidentes e expõe tudo num dashboard estático. Backend FastAPI em `scripts/`, frontend estático na raiz, mais um analisador de logs offline (`log_analyzer.py`, Fase 1) que partilha a classificação de Event IDs.
 
+## Current Milestone: v1.2 R12 Vaccine Lab
+
+**Goal:** Um analista aprova ou rejeita uma vaccine proposta, com autor, motivo e auditoria só de acréscimo; aprovar nunca aplica nada no Wazuh.
+
+**Target features:**
+- Registo de decisões só de acréscimo (`vaccine_decisions`), sem alterar a tabela `vaccines` do R11
+- `POST /api/vaccines/{id}/decision` e estado/decisão no `GET`, com códigos de erro estáveis
+- Botões Aprovar/Rejeitar no detalhe da aba Vaccines, testes sem Wazuh e documentação
+
 ## Core Value
 
 Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
@@ -27,13 +36,14 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 
 ### Active
 
+- [ ] R12 Vaccine Lab (ver Current Milestone; requisitos em REQUIREMENTS.md)
 - [ ] Primeiro ciclo de treino real: lançar ataques, exportar alertas na mesma janela, treinar `v1` e avaliar com dataset rotulável
 - [ ] Verificação humana pendente do R9/R10 no dashboard (badges, aviso de reinício após `adopt`, avaliação rotulada)
 
 ### Out of Scope
 
 - Calibrar o `confidence` das deteções (R7) — dívida conhecida, não é pré-requisito do R9
-- Criar/aprovar/rejeitar vaccines por HTTP, aplicá-las no Wazuh, replay e regressão — R12–R14
+- Aplicar vaccines no Wazuh (R21), replay (R13) e regressão (R14); aprovar/rejeitar por HTTP é o R12 (v1.2)
 - Recolher métricas ML novas além das já existentes (`/api/ml-anomalies`) — o R9 só liga a avaliação à versão e mostra-a
 
 ## Current State
@@ -89,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-29 after v1.1 milestone*
+*Last updated: 2026-10-29 after starting v1.2 milestone*
