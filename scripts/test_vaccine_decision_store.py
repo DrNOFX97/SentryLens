@@ -317,9 +317,107 @@ def run_validation_before_io() -> None:
               not (found & forbidden))
 
 
+def run_refusals() -> None:
+    """Recusas ponta a ponta (critério 3) e decisão que sobrevive à substituição (D-09)."""
+    observed: set[str] = set()
+
+    def refused(store: VaccineStore, path: str, label: str, expected: str, **overrides) -> None:
+        """Tenta decidir, exige o código esperado e que nada tenha sido gravado (D-08)."""
+        vaccines_before = rows_of(path) if os.path.exists(path) else None
+        decisions_before = decision_rows(path) if os.path.exists(path) else None
+        code = decide_error(store, **request(**overrides))
+        if code is not None:
+            observed.add(code)
+        check(f"{label} -> {expected}", code == expected)
+        if vaccines_before is not None:
+            check(f"{label}: vaccines e vaccine_decisions ficam iguais",
+                  rows_of(path) == vaccines_before and decision_rows(path) == decisions_before)
+
+    # --- já decidida (mesma decisão ou outra) ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA], NOW_ISO)
+        store.decide_vaccine(**request(vaccine_id=ID_A))
+        rows_decided = decision_rows(path)
+        refused(store, path, "decidir A rejected por outro analista", "already_decided", vaccine_id=ID_A,
+                decision="rejected", decided_by="analyst-soc2", decided_by_name="Jeremy", reason="Mudei de ideias")
+        refused(store, path, "decidir A approved outra vez", "already_decided", vaccine_id=ID_A)
+        check("já decidida: continua uma só linha, a original", decision_rows(path) == rows_decided
+              and len(rows_decided) == 1)
+        a = store.get_vaccine(ID_A)
+        check("já decidida: get_vaccine(A) continua approved por analyst-soc1",
+              a["state"] == "approved" and a["decision"]["decided_by"] == "analyst-soc1")
+
+        # --- D-09: substituída pelo gerador mantém a decisão ---
+        store.upsert_batch([vB], NOW_ISO)
+        a, b = store.get_vaccine(ID_A), store.get_vaccine(ID_B)
+        check("D-09: A substituída continua approved com o bloco decision (Eddie)",
+              a["state"] == "approved" and a["decision"]["decided_by_name"] == "Eddie"
+              and a["superseded_by"] == ID_B)
+        check("D-09: B nasce proposed, sem decisão e sem superseded_by",
+              b["state"] == "proposed" and b["decision"] is None and b["superseded_by"] is None)
+        check("D-09: list_vaccines() só traz B", [v["id"] for v in store.list_vaccines()[0]] == [ID_B])
+        both = {v["id"]: v for v in store.list_vaccines(include_superseded=True)[0]}
+        check("D-09: include_superseded traz A approved e B proposed",
+              set(both) == {ID_A, ID_B} and both[ID_A]["state"] == "approved" and both[ID_B]["state"] == "proposed")
+        refused(store, path, "decidir A (decidida e substituída)", "already_decided", vaccine_id=ID_A,
+                decision="rejected", reason="Tarde demais")
+
+        # --- vaivém A-B-A ---
+        a_before = store.get_vaccine(ID_A)["decision"]
+        store.upsert_batch([vA], NOW_ISO)
+        a, b = store.get_vaccine(ID_A), store.get_vaccine(ID_B)
+        check("vaivém: A volta a ser a atual e continua approved com o mesmo bloco decision",
+              a["superseded_by"] is None and a["state"] == "approved" and a["decision"] == a_before)
+        check("vaivém: B fica superseded_by A e proposed", b["superseded_by"] == ID_A and b["state"] == "proposed")
+        refused(store, path, "decidir B (substituída e por decidir)", "vaccine_superseded", vaccine_id=ID_B)
+        check("vaivém: decision_rows continua com a linha de A", decision_rows(path) == rows_decided)
+
+        # --- reinício: VaccineStore nova sobre o mesmo ficheiro ---
+        reopened = VaccineStore(path)
+        check("reinício: decidir A -> already_decided",
+              decide_error(reopened, **request(vaccine_id=ID_A)) == "already_decided")
+        check("reinício: get_vaccine(A) igual ao da instância anterior",
+              reopened.get_vaccine(ID_A) == store.get_vaccine(ID_A))
+        observed.add("already_decided")
+
+    # --- inexistente ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA], NOW_ISO)
+        refused(store, path, "id inexistente num ficheiro existente", "entry_not_found", vaccine_id="vac-000000000000")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "inexistente.sqlite3")
+        refused(VaccineStore(path), path, "decisão válida sem ficheiro", "entry_not_found")
+        check("sem ficheiro: continua a não existir", not os.path.exists(path))
+
+    # --- motivo obrigatório pelo store ---
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vC], NOW_ISO)
+        refused(store, path, "rejeitar C com motivo só de espaços", "reason_required", decision="rejected", reason="   ")
+        check("reason_required: decision_rows == []", decision_rows(path) == [])
+        accepted = decide_error(store, **request(decision="rejected", decided_by="analyst-soc2",
+                                                 decided_by_name="Jeremy", reason="Regra ruidosa"))
+        check("a recusa não deixou nada pendurado: rejeitar C com motivo é aceite",
+              accepted is None and store.get_vaccine(ID_C)["state"] == "rejected")
+
+    expected_codes = {"already_decided", "vaccine_superseded", "entry_not_found", "reason_required"}
+    check(f"quatro códigos distintos observados ({sorted(observed)})", observed == expected_codes)
+    check("os quatro estão em ERROR_CODES", observed <= set(vaccine_decision.ERROR_CODES))
+    check("already_decided e vaccine_superseded em CONFLICT_CODES",
+          {"already_decided", "vaccine_superseded"} <= set(vaccine_decision.CONFLICT_CODES))
+    check("entry_not_found em NOT_FOUND_CODES", "entry_not_found" in vaccine_decision.NOT_FOUND_CODES)
+
+
 def main() -> None:
     run_tracer()
     run_validation_before_io()
+    run_refusals()
 
 
 if __name__ == "__main__":
