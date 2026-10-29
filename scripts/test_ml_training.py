@@ -219,6 +219,14 @@ def listagem(pasta) -> list[str]:
     return sorted(p.name for p in Path(pasta).iterdir())
 
 
+# Estado real de scripts/models/ antes de qualquer secção correr: o utilizador pode
+# ter adoptado um modelo (ACTIVE + vN/), por isso a secção 14 compara com isto
+# em vez de assumir só os dois .pkl legados.
+MODELOS_NO_ARRANQUE = (
+    listagem(SCRIPT_DIR / "models") if (SCRIPT_DIR / "models").is_dir() else []
+)
+
+
 def sobras_temporarias() -> list[str]:
     return sorted(glob.glob(str(Path(tempfile.gettempdir())
                               / f"{ml_training.TEMP_PREFIX}*")))
@@ -1156,12 +1164,15 @@ def secao_disco_do_utilizador() -> None:
     secao("14. scripts/models/ nunca foi tocado por este ficheiro")
 
     modelos = SCRIPT_DIR / "models"
-    check("(a) scripts/models/ tem exactamente os dois .pkl legados",
-          listagem(modelos) == ["isolation_forest.pkl", "scaler.pkl"])
-    check("(b) nenhuma pasta de versão (nenhum registo foi criado aqui)",
-          not [n for n in listagem(modelos) if n.startswith("v")])
-    check("(c) nem ACTIVE", not (modelos / "ACTIVE").exists())
-    check("(d) nem temporários", not [n for n in listagem(modelos) if ".tmp-" in n])
+    agora = listagem(modelos) if modelos.is_dir() else []
+    check("(a) scripts/models/ tem exactamente o que tinha antes deste ficheiro correr",
+          agora == MODELOS_NO_ARRANQUE)
+    check("(b) nenhuma pasta de versão nova (nenhum registo foi criado aqui)",
+          [n for n in agora if n.startswith("v")]
+          == [n for n in MODELOS_NO_ARRANQUE if n.startswith("v")])
+    check("(c) ACTIVE nem apareceu nem desapareceu",
+          ("ACTIVE" in agora) == ("ACTIVE" in MODELOS_NO_ARRANQUE))
+    check("(d) nem temporários", not [n for n in agora if ".tmp-" in n])
 
 
 # --- O runner --------------------------------------------------------------------

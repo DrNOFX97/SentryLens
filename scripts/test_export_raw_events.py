@@ -195,6 +195,17 @@ def correr_cli(argumentos, cliente, env=None) -> tuple[int, str, str]:
     return codigo, saida.getvalue(), erro.getvalue()
 
 
+# O backend (e os venvs/caches) escrevem aqui enquanto o teste corre; tudo isto
+# está no .gitignore e não é obra do CLI, por isso fora da varredura de lado.
+# `models/` e `snapshots/` NÃO entram: têm as suas próprias checks (e) e (f).
+PASTAS_DE_RUNTIME = {".venv", ".venv2", "__pycache__", ".pytest_cache", "historico"}
+SUFIXOS_DE_RUNTIME = (".log", ".log.err", ".sqlite3", ".sqlite3-journal")
+
+
+def _e_ficheiro_de_runtime(nome: str) -> bool:
+    return nome.endswith(SUFIXOS_DE_RUNTIME) or nome.startswith("system_alerts_history")
+
+
 def listagem_scripts() -> dict:
     """Nome -> tamanho de tudo o que está em `scripts/` (fora do venv e do
     `__pycache__`, que o próprio import do teste mexe) e dos ficheiros da raiz
@@ -202,8 +213,10 @@ def listagem_scripts() -> dict:
     sai da pasta pedida."""
     vistos: dict[str, int] = {}
     for raiz, pastas, ficheiros in os.walk(SCRIPT_DIR):
-        pastas[:] = [p for p in pastas if p not in {".venv", "__pycache__"}]
+        pastas[:] = [p for p in pastas if p not in PASTAS_DE_RUNTIME]
         for nome in ficheiros:
+            if _e_ficheiro_de_runtime(nome):
+                continue
             caminho = Path(raiz) / nome
             try:
                 vistos[str(caminho)] = caminho.stat().st_size
@@ -730,9 +743,8 @@ def test_nada_fora_da_pasta() -> None:
     check("(d) nenhum ficheiro alterado", alterados == [])
     check("(e) scripts/snapshots/ continua igual",
           sorted(p.name for p in (SCRIPT_DIR / "snapshots").iterdir()) == snapshots_antes)
-    check("(f) scripts/models/ nunca foi tocado (os dois .pkl do utilizador)",
-          sorted(p.name for p in (SCRIPT_DIR / "models").iterdir()) == modelos_antes
-          == ["isolation_forest.pkl", "scaler.pkl"])
+    check("(f) scripts/models/ nunca foi tocado (fica como o utilizador o deixou)",
+          sorted(p.name for p in (SCRIPT_DIR / "models").iterdir()) == modelos_antes)
 
 
 SECOES = (
