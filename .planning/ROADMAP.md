@@ -40,7 +40,7 @@ Detalhe completo: `.planning/milestones/v1.1-ROADMAP.md`
 
 **Phase Numbering:** a numeração continua a do v1.1 (que acabou na Phase 14). Decimais (15.1, ...) são inserções urgentes.
 
-- [ ] **Phase 15: Store de decisões** - Tabela `vaccine_decisions` só de acréscimo e máquina de estados pura, sem tocar em `vaccines`
+- [x] **Phase 15: Store de decisões** - Tabela `vaccine_decisions` só de acréscimo e máquina de estados pura, sem tocar em `vaccines` (completed 2026-10-29)
 - [ ] **Phase 16: API de decisão** - `POST /api/vaccines/{id}/decision`, estado e decisão no `GET`, filtro por estado, códigos de erro estáveis, nada é aplicado
 - [ ] **Phase 17: Aba, testes e documentação** - Botões Aprovar/Rejeitar no detalhe, suite verde e docs a refletir o R12
 
@@ -57,7 +57,7 @@ Detalhe completo: `.planning/milestones/v1.1-ROADMAP.md`
   3. Decidir duas vezes a mesma vaccine, ou uma vaccine substituída, ou um id que não existe, falha com um código estável distinto, e nada é gravado.
   4. O estado derivado de uma vaccine é a última decisão, ou `proposed` quando não há nenhuma.
 
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**

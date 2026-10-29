@@ -6,12 +6,12 @@
     {
       "number": "15",
       "name": "Store de decisões",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "16",
       "name": "API de decisão",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "17",
@@ -21,8 +21,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step (verify)",
-    "reason": "Phase 15 of 3 · 0% · ready to verify"
+    "label": "Advance to the next step (plan phase 16)",
+    "reason": "Phase 16 of 3 — needs a plan"
   },
-  "updated_at": "2026-10-29T12:50:28.434Z"
+  "updated_at": "2026-10-29T15:43:12.490Z"
 }
