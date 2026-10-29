@@ -1,28 +1,28 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v1.1 — R11 Vaccine Engine",
+  "milestone": "v1.2 — R12 Vaccine Lab",
   "phases": [
     {
-      "number": "12",
-      "name": "Motor de vaccines",
-      "status": "complete"
+      "number": "15",
+      "name": "Store de decisões",
+      "status": "in_progress"
     },
     {
-      "number": "13",
-      "name": "Store e API de leitura",
-      "status": "complete"
+      "number": "16",
+      "name": "API de decisão",
+      "status": "pending"
     },
     {
-      "number": "14",
-      "name": "Aba Vaccines, testes e documentação",
-      "status": "complete"
+      "number": "17",
+      "name": "Aba, testes e documentação",
+      "status": "pending"
     }
   ],
   "next": {
-    "command": "/gsd:progress",
-    "label": "Show progress",
-    "reason": "Unsure of state — showing progress"
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 15 of 3 · 0% · executing"
   },
-  "updated_at": "2026-10-29T11:40:15.028Z"
+  "updated_at": "2026-10-29T12:41:34.294Z"
 }

@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.2
 milestone_name: R12 Vaccine Lab
 current_phase: 15
-current_phase_name: por planear
-status: Ready to plan
-stopped_at: Phase 15 context gathered
-last_updated: "2026-10-29T11:59:54.537Z"
+current_phase_name: Store de decisões
+status: executing
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-10-29T12:41:42.026Z"
 last_activity: 2026-10-29
-last_activity_desc: Milestone v1.2 (R12 Vaccine Lab) started
-state_head: 896e1995a41af9a922b98aedc51c1917c3e94d7c
+last_activity_desc: Phase 15 execution started
+state_head: f66679fbf23b048ee34840b9f22a50d5a318a7db
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 
 ## Current Position
 
-Phase: 15 (Store de decisões) — por planear
-Plan: —
-Status: Ready to plan
-Last activity: 2026-10-29 — Milestone v1.2 (R12 Vaccine Lab) started
+Phase: 15 (Store de decisões) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-10-29 — Phase 15 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -43,6 +43,11 @@ Progress: [░░░░░░░░░░] 0%
 - v1.1 (referência): 10 planos em 3 fases; v1.0: 17 planos em 5 fases
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 15 P01 | 25min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -55,6 +60,7 @@ Recent decisions affecting current work:
 - [R12]: as decisões vivem numa tabela nova só de acréscimo (`vaccine_decisions`); a tabela `vaccines` do R11 não muda (estado fixo `proposed`, triggers intactos); o estado atual é derivado da última decisão.
 - [R12]: aprovar não aplica nada no Wazuh (aplicar é R21); qualquer analista pode decidir (só há uma API key) e o autor fica registado.
 - [R11 carry-over]: `ATTACK_ALERTS_SIZE=8000` é paliativo; truncagem por ataque (não por lote) por decidir.
+- [Phase 15]: DDL de vaccine_decisions confirmado pelo utilizador; VaccineDecisionError nao deriva de ValueError; ordem fixa de validacao antes de tocar no disco
 
 ### Pending Todos
 
@@ -78,9 +84,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-29T11:59:54.514Z
-Stopped at: Phase 15 context gathered
-Resume file: .planning/phases/15-store-de-decis-es/15-CONTEXT.md
+Last session: 2026-10-29T12:41:42.000Z
+Stopped at: Completed 15-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
