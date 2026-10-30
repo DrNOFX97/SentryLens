@@ -4,17 +4,17 @@ milestone: v1.2
 milestone_name: R12 Vaccine Lab
 current_phase: 16
 current_phase_name: API de decisão
-status: planning
-stopped_at: Phase 16 context gathered
-last_updated: "2026-10-29T16:12:56.047Z"
-last_activity: 2026-10-29
-last_activity_desc: Phase 15 complete, transitioned to Phase 16
-state_head: 78a07ff73d3f0da070554b45deef3d3c4b5e68cb
+status: executing
+stopped_at: Completed 16-01-PLAN.md
+last_updated: "2026-10-30T11:15:23.277Z"
+last_activity: 2026-10-30
+last_activity_desc: Phase 16 execution started
+state_head: a87a1130870706ca1dc1dcd181a8d0a6414d7a52
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 6
+  completed_plans: 4
   percent: 33
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-29)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** Phase 15 — Store de decisões
+**Current focus:** Phase 16 — API de decisão
 
 ## Current Position
 
-Phase: 16 — API de decisão
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-29 — Phase 15 complete, transitioned to Phase 16
+Phase: 16 (API de decisão) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-10-30 — Phase 16 execution started
 
 Progress: [███░░░░░░░] 33%
 
@@ -50,6 +50,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 15 P01 | 25min | 3 tasks | 5 files |
 | Phase 15 P02 | 15min | 2 tasks | 1 files |
 | Phase 15 P03 | 20min | 2 tasks | 2 files |
+| Phase 16 P01 | 10 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,9 @@ Recent decisions affecting current work:
 - [R12]: aprovar não aplica nada no Wazuh (aplicar é R21); qualquer analista pode decidir (só há uma API key) e o autor fica registado.
 - [R11 carry-over]: `ATTACK_ALERTS_SIZE=8000` é paliativo; truncagem por ataque (não por lote) por decidir.
 - [Phase 15]: DDL de vaccine_decisions confirmado pelo utilizador; VaccineDecisionError nao deriva de ValueError; ordem fixa de validacao antes de tocar no disco
+- [Phase 16]: Phase 16-01: teto do corpo 8192 bytes, excedido dá 422 invalid_body (não 413)
+- [Phase 16]: Phase 16-01: vaccine_id mal formado dá 422 invalid_vaccine_id por handler de RequestValidationError só da rota de decisão
+- [Phase 16]: Phase 16-01: autoria da decisão autodeclarada (analyst_id no corpo, validado no incident_store), não autenticada
 
 ### Pending Todos
 
@@ -86,9 +90,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-29T16:12:55.932Z
-Stopped at: Phase 16 context gathered
-Resume file: .planning/phases/16-api-de-decisao/16-CONTEXT.md
+Last session: 2026-10-30T11:15:23.148Z
+Stopped at: Completed 16-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
