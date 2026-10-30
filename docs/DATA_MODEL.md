@@ -204,10 +204,15 @@ validação — o risco em si continua decidido à mão por entrada, não calcul
 
 Uma vaccine é uma **proposta** de regra de deteção, gerada a partir de um ataque
 do Red vs Blue que ficou `not_detected` ou `partial`. Nunca é aplicada no Wazuh,
-nunca traz comandos e o estado é sempre `proposed` (aprovar ou rejeitar é o R12).
+nunca traz comandos. A vaccine em si é imutável (a coluna `state` da tabela
+`vaccines` é sempre `proposed`, imposta por `CHECK`); o `state` que a leitura
+devolve é derivado da decisão do analista (R12): `proposed`, `approved` ou
+`rejected` (ver "Decisão do analista (R12)" abaixo). **Aprovada significa só
+aceite pelo analista: nada é aplicado no Wazuh nem executado** (aplicar é o R21).
 Persistida em SQLite (`scripts/vaccines.sqlite3`), gerada em segundo plano pelo
-backend, servida só por leitura (`GET /api/vaccines[/{id}]`, ver
-[API.md](API.md) (secção Vaccines (R11))). Exemplo de `GET /api/vaccines/{id}` (a vaccine
+backend, servida por `GET /api/vaccines[/{id}]` e decidida por
+`POST /api/vaccines/{id}/decision` (ver [API.md](API.md) (secção Vaccines (R11, R12))).
+Exemplo de `GET /api/vaccines/{id}` de uma vaccine ainda por decidir (a vaccine
 não guarda IPs, ferramentas nem alvos, só referências ao ataque):
 
 ```json
@@ -221,7 +226,18 @@ não guarda IPs, ferramentas nem alvos, só referências ao ataque):
     "mitre_tactic": "Lateral Movement", "mitre_technique": "T1053",
     "incident_ids": ["INC-20261012-1"],
     "evidence": {"matched_event_ids": [4672, 4698], "matched_alert_count": 2, "network_detection_types": []}},
-  "state": "proposed", "superseded_by": null, "created_at": "2026-10-12T10:41:07+00:00"}}
+  "state": "proposed", "superseded_by": null, "created_at": "2026-10-12T10:41:07+00:00",
+  "decision": null}}
+```
+
+A mesma vaccine depois de rejeitada (só mudam `state` e `decision`; o nome vem da
+Equipa SOC, o instante do servidor):
+
+```json
+{"state": "rejected", "decision": {
+  "decided_by": "analyst-eddie", "decided_by_name": "Eddie",
+  "decided_at": "2026-10-13T09:02:45+00:00",
+  "reason": "O modelo ML já cobre este ataque noutra versão."}}
 ```
 
 ### Campos
@@ -247,9 +263,12 @@ texto vem de uma allowlist, por isso nenhum campo pode transportar um comando.
   `window_seconds` (300, a janela de correlação do Red vs Blue).
 - **Evento** (`EVENT_KEYS`, em `events[]`): `event_id`; `name` e `severity`
   vêm de `event_catalog.classify_alert`.
-- **Campos do store** (`STORE_FIELDS`, acrescentados ao ler): `state` (sempre
-  `proposed`); `superseded_by` (id da vaccine que a substituiu, ou `null`);
-  `created_at` (ISO-8601, quando o ciclo a gravou).
+- **Campos do store** (`STORE_FIELDS`, acrescentados ao ler): `state` (derivado
+  da decisão: `proposed` sem decisão, senão `approved` ou `rejected`);
+  `superseded_by` (id da vaccine que a substituiu, ou `null`); `created_at`
+  (ISO-8601, quando o ciclo a gravou); `decision` (R12): `null` sem decisão, senão
+  o bloco `DECISION_FIELDS` com `decided_by`, `decided_by_name`, `decided_at` e
+  `reason` (este pode ser `null` numa aprovação).
 
 ### Regras
 
@@ -271,7 +290,9 @@ texto vem de uma allowlist, por isso nenhum campo pode transportar um comando.
   para a nova (vaivém A, B, A repõe A). Um ataque que passa a `detected` não mexe
   nas suas vaccines. A lista só mostra as atuais; as substituídas aparecem com
   `include_superseded=true` e no detalhe.
-- **O store impõe as regras no próprio ficheiro:** `CHECK (state = 'proposed')`,
+- **O store impõe as regras no próprio ficheiro** (tabela `vaccines`; a decisão
+  tem a sua tabela, abaixo): `CHECK (state = 'proposed')` na coluna (o estado
+  servido não a lê, deriva-o da decisão),
   `CHECK (json_valid(payload))`, trigger que recusa DELETE e trigger que recusa
   UPDATE de tudo menos `superseded_by`. A escrita é `INSERT ... ON CONFLICT(id)
   DO NOTHING` e não `INSERT OR IGNORE`: este também engole em silêncio uma
@@ -323,13 +344,84 @@ O estado do gerador vive em memória: depois de reiniciar o backend volta a
 
 ### Envelope de `GET /api/vaccines`
 
-`{available, reason, total, limit, offset, vaccines[], generator}`. `reason:
-"no_data"` (e `available: false`) só quando o store não tem nenhuma linha; um
-filtro sem resultados com o store não vazio dá `reason: null`, `available: true`
-e lista vazia. `GET /api/vaccines/{id}` dá 404 `entry_not_found` para um id
-válido que não existe. Falha a ler o store dá 503 `store_unavailable`, sem texto
-de exceção nem caminho. Qualquer escrita (POST, PUT, PATCH, DELETE) dá 405: não
-há rota de escrita.
+`{available, reason, total, limit, offset, vaccines[], state_counts, generator}`.
+`reason: "no_data"` (e `available: false`) só quando o store não tem nenhuma
+linha; um filtro sem resultados com o store não vazio dá `reason: null`,
+`available: true` e lista vazia. O filtro `state` (`proposed|approved|rejected`)
+filtra pelo estado derivado. `state_counts`: ver "Decisão do analista (R12)".
+`GET /api/vaccines/{id}` dá 404 `entry_not_found` para um id válido que não
+existe. Falha a ler o store dá 503 `store_unavailable`, sem texto de exceção nem
+caminho. A única escrita é `POST /api/vaccines/{id}/decision`; PUT, PATCH e
+DELETE dão 405 em todas as rotas de vaccines.
+
+### Decisão do analista (R12) — `vaccine_decision.py` + tabela `vaccine_decisions`
+
+O analista aceita (`approved`) ou recusa (`rejected`) uma vaccine proposta. É um
+registo à parte: a tabela `vaccines` não muda um byte. A regra vive em
+`vaccine_decision.py` (puro, sem I/O) e o store aplica-a dentro de uma transação
+`BEGIN IMMEDIATE` (`decide_vaccine`).
+
+**Aprovada significa só aceite pelo analista. Nada é aplicado no Wazuh nem
+executado: a vaccine continua uma proposta, não aplicada.** Aplicar é o R21.
+
+Tabela `vaccine_decisions` (`DECISIONS_SCHEMA`), só de acréscimo:
+
+| Coluna | Restrição |
+|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` |
+| `vaccine_id` | `TEXT NOT NULL UNIQUE`, `REFERENCES vaccines(id)`, formato `vac-` + 12 caracteres |
+| `decision` | `CHECK (decision IN ('approved', 'rejected'))` |
+| `decided_by` | id do analista (`analyst-` + minúsculas, dígitos e hífen, até 72 caracteres) |
+| `decided_by_name` | 1 a 128 caracteres; copiado da Equipa SOC no momento da decisão |
+| `decided_at` | instante UTC ISO-8601, escrito pelo servidor |
+| `reason` | `NULL` ou 1 a 500 caracteres e não só espaços |
+| `previous_state` | `CHECK (previous_state = 'proposed')` |
+
+Mais uma restrição de tabela: `CHECK (decision <> 'rejected' OR reason IS NOT
+NULL)` (rejeitar exige motivo).
+
+- **Final no próprio ficheiro:** `UNIQUE(vaccine_id)` dá uma só decisão por
+  vaccine, e os triggers `vaccine_decisions_no_update` e
+  `vaccine_decisions_no_delete` recusam UPDATE e DELETE. Nada se reverte (reabrir
+  uma decisão é um requisito futuro). A inserção é um `INSERT` simples, sem
+  `ON CONFLICT` nem `OR IGNORE`: uma decisão duplicada falha alto.
+- **Transição:** `proposed -> approved | rejected` (`TRANSITIONS`). `approved` e
+  `rejected` são finais; decidir outra vez dá `already_decided`, mesmo que a
+  vaccine tenha entretanto sido substituída.
+- **Estado derivado** (`derive_state`): a decisão registada, ou `proposed` se não
+  houver nenhuma (`DERIVED_STATES`). Um ficheiro do R11, sem a tabela, conta tudo
+  como `proposed`.
+- **Substituídas:** uma vaccine substituída (`superseded_by` preenchido) e ainda
+  `proposed` não pode ser decidida (`vaccine_superseded`). Uma aprovada e depois
+  substituída continua `approved` e só aparece na lista com
+  `include_superseded=true`.
+- **Motivo:** obrigatório ao rejeitar (`reason_required`) e opcional ao aprovar.
+  Depois de `strip`, tem no máximo 500 caracteres (`REASON_MAX_LENGTH`), numa só
+  linha, sem caracteres de controlo nem de formatação (categorias
+  `FORBIDDEN_REASON_CATEGORIES`: `Cc`, `Cf`, `Cs`, `Co`, `Cn`, `Zl`, `Zp`); senão
+  `invalid_reason`. É texto do analista, nunca HTML nem instrução.
+- **Autoria autodeclarada, não autenticada:** só existe uma API key. O
+  `analyst_id` vem do cliente, o nome vem da Equipa SOC (o analista tem de existir
+  e estar ativo) e o instante vem do servidor. O registo diz quem o cliente disse
+  ser, o mesmo tipo de limite do SHA-256 dos `.pkl`; identidade por pedido fica
+  para uma fase futura. Um nome fora de `ANALYST_NAME_RE` (letras, dígitos, espaço,
+  ponto e hífen, a começar por letra ou dígito) dá `invalid_author`.
+- **`state_counts`** (`count_by_state`): contagem por estado derivado das
+  vaccines **atuais** (sem as substituídas), independente dos filtros do pedido.
+  É `null` sem amostra (store inexistente ou sem linhas), nunca zeros; com
+  amostra traz sempre as três chaves, com zero explícito nas ausentes.
+
+Códigos de erro estáveis (`ERROR_CODES` da Phase 15 mais os da rota), sempre em
+`detail`, nunca texto de exceção. A lista completa e os corpos estão em
+[API.md](API.md):
+
+| Código | HTTP | Origem |
+|---|---|---|
+| `invalid_vaccine_id`, `invalid_decision`, `invalid_author`, `invalid_decided_at`, `reason_required`, `invalid_reason` | 422 | `INVALID_INPUT_CODES` |
+| `invalid_body`, `analyst_not_found`, `analyst_inactive` | 422 | rota |
+| `entry_not_found` | 404 | `NOT_FOUND_CODES` |
+| `already_decided`, `vaccine_superseded` | 409 | `CONFLICT_CODES` |
+| `store_unavailable`, `incidents_unavailable` | 503 | rota |
 
 ### Limites conhecidos
 
@@ -341,8 +433,9 @@ há rota de escrita.
 - **A3:** com alertas truncados as vaccines gravam-se na mesma; o risco fica
   sinalizado em `generator.alerts_truncated`.
 - **A5:** o estado do gerador é em memória (ver acima).
-- O id não autentica (ver Regras). Uma vaccine é só uma proposta: nunca aplicada,
-  aprovada nem validada; escrever, aprovar e rejeitar é o R12.
+- O id não autentica (ver Regras). Uma vaccine é só uma proposta: nunca aplicada
+  nem validada. Aprová-la (R12) é só aceite pelo analista, com autoria
+  autodeclarada; aplicar no Wazuh é o R21.
 
 ## Alerta enriquecido — `main._enrich_alert`
 
