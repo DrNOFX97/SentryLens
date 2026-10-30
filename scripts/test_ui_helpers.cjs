@@ -163,4 +163,70 @@ check("slVacAnalystOptions: filtra inativos (0), ids inválidos, nomes vazios e 
 check("slVacAnalystOptions: null, {} e analysts não-array -> []",
   vao(null) === "[]" && vao({}) === "[]" && vao({ analysts: "x" }) === "[]");
 
+// slVacDecisionView: o que o bloco Decisão pode afirmar (modos avaliados por ordem, forma fixa).
+const VIEW_KEYS = '["mode","state","author","decidedAt","reason","supersededBy","code"]';
+const dv = (v, a, e) => ctx.slVacDecisionView(v, a, e);
+const dvs = (v, a, e) => JSON.stringify(dv(v, a, e));
+const EDDIE = [{ id: "analyst-eddie", name: "Eddie" }];
+const decidida = { state: "approved", superseded_by: null,
+  decision: { decided_by_name: "Eddie", decided_at: "2026-10-30T10:00:00+00:00", reason: null } };
+check("slVacDecisionView: vaccine null/undefined -> none",
+  dv(null, EDDIE, null).mode === "none" && dv(undefined, null, null).mode === "none");
+check("slVacDecisionView: approved com decisão -> decided, com autor e data, motivo null",
+  dvs(decidida, EDDIE, null) === JSON.stringify({ mode: "decided", state: "approved", author: "Eddie",
+    decidedAt: "2026-10-30T10:00:00+00:00", reason: null, supersededBy: null, code: null }));
+const rejeitadaSubstituida = { state: "rejected", superseded_by: "vac-0123456789ab",
+  decision: { decided_by_name: "Jeremy", decided_at: "2026-10-30T11:00:00+00:00", reason: "Regra ruidosa" } };
+check("slVacDecisionView: rejected e substituída continua decided e preserva o motivo",
+  dv(rejeitadaSubstituida, EDDIE, null).mode === "decided" && dv(rejeitadaSubstituida, EDDIE, null).reason === "Regra ruidosa");
+check("slVacDecisionView: decided não depende dos analistas (null, erro ou vazio)",
+  dv(decidida, null, "http_500").mode === "decided" && dv(decidida, [], null).mode === "decided"
+  && dv(decidida, null, null).mode === "decided");
+check("slVacDecisionView: approved sem decision -> decided com autor, data e motivo null",
+  dvs({ state: "approved", decision: null }, EDDIE, null) === JSON.stringify({ mode: "decided", state: "approved",
+    author: null, decidedAt: null, reason: null, supersededBy: null, code: null }));
+check("slVacDecisionView: estado desconhecido e estado ausente -> unknown_state",
+  dv({ state: "xpto" }, EDDIE, null).mode === "unknown_state" && dv({ state: "xpto" }, EDDIE, null).state === "xpto"
+  && dv({}, EDDIE, null).mode === "unknown_state" && dv({}, EDDIE, null).state === null
+  && dv({ state: 7 }, EDDIE, null).mode === "unknown_state");
+check("slVacDecisionView: proposed com superseded_by -> superseded, sem analistas à mistura",
+  dvs({ state: "proposed", superseded_by: "vac-aaaaaaaaaaaa" }, null, "http_500") === JSON.stringify({ mode: "superseded",
+    state: "proposed", author: null, decidedAt: null, reason: null, supersededBy: "vac-aaaaaaaaaaaa", code: null }));
+check("slVacDecisionView: proposed atual + analistas por carregar -> loading",
+  dv({ state: "proposed", superseded_by: null }, null, null).mode === "loading");
+const atual = { state: "proposed", superseded_by: null };
+check("slVacDecisionView: erro http_500 e http_503 -> analysts_error com incidents_unavailable",
+  ["http_500", "http_503"].every((c) => dv(atual, null, c).mode === "analysts_error" && dv(atual, null, c).code === "incidents_unavailable"));
+check("slVacDecisionView: network_error e unauthorized ficam como vieram",
+  dv(atual, null, "network_error").code === "network_error" && dv(atual, null, "unauthorized").code === "unauthorized");
+check("slVacDecisionView: o erro ganha à lista quando os dois vêm preenchidos",
+  dv(atual, EDDIE, "network_error").mode === "analysts_error");
+check("slVacDecisionView: lista vazia -> no_analysts; lista com analistas -> controls",
+  dv(atual, [], null).mode === "no_analysts" && dv(atual, EDDIE, null).mode === "controls");
+check("slVacDecisionView: todos os resultados têm exatamente as 7 chaves, pela mesma ordem",
+  [dv(null, null, null), dv(decidida, null, null), dv({ state: "x" }, null, null), dv(atual, null, null),
+   dv(atual, null, "http_500"), dv(atual, [], null), dv(atual, EDDIE, null),
+   dv({ state: "proposed", superseded_by: "vac-a" }, null, null)].every((v) => JSON.stringify(Object.keys(v)) === VIEW_KEYS));
+
+// slVacWarningText: o aviso do detalhe depende sempre do estado e diz sempre "não aplicada no Wazuh".
+const LABELS = { proposed: "Proposta", approved: "Aprovada", rejected: "Rejeitada" };
+const wt = (s) => ctx.slVacWarningText(s, LABELS);
+check("slVacWarningText: proposed", wt("proposed") === "Proposta — não aplicada no Wazuh");
+check("slVacWarningText: approved diz aceite pelo analista", wt("approved") === "Aprovada — aceite pelo analista, não aplicada no Wazuh");
+check("slVacWarningText: rejected", wt("rejected") === "Rejeitada — não aplicada no Wazuh");
+check("slVacWarningText: estado desconhecido aparece como veio", wt("xpto") === "xpto — não aplicada no Wazuh");
+check("slVacWarningText: null, undefined, número e vazio -> Estado desconhecido",
+  [null, undefined, 7, ""].every((s) => wt(s) === "Estado desconhecido — não aplicada no Wazuh"));
+check("slVacWarningText: toString/constructor não usam o protótipo dos labels",
+  wt("toString") === "toString — não aplicada no Wazuh" && wt("constructor") === "constructor — não aplicada no Wazuh");
+check("slVacWarningText: todas as variantes contêm 'não aplicada no Wazuh'",
+  ["proposed", "approved", "rejected", "xpto", null, 7].every((s) => wt(s).includes("não aplicada no Wazuh")));
+check("slVacWarningText: sem labels não rebenta", ctx.slVacWarningText("proposed", null) === "proposed — não aplicada no Wazuh");
+
+// slVacReasonCounter: pontos de código sobre 500.
+const rc = (r) => ctx.slVacReasonCounter(r);
+check("slVacReasonCounter: null, undefined e vazio -> 0/500", rc(null) === "0/500" && rc(undefined) === "0/500" && rc("") === "0/500");
+check("slVacReasonCounter: 'ab' -> 2/500 e um emoji conta 1", rc("ab") === "2/500" && rc("😀") === "1/500");
+check("slVacReasonCounter: 500 caracteres -> 500/500", rc("x".repeat(500)) === "500/500");
+
 finish();

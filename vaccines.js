@@ -26,6 +26,9 @@ const VAC_ID_RE = /^vac-[0-9a-f]{12}$/;
 // o store sem nada (reason no_data), o segundo é um filtro sem resultados.
 const VAC_NO_DATA_TEXT = "Sem dados — ainda não há vaccines propostas (nenhum ataque não detetado ou parcial já assente).";
 const VAC_FILTER_EMPTY_TEXT = "Nenhuma vaccine corresponde aos filtros.";
+// Texto do bloco Decisão quando não há botões a mostrar (D-03): nunca se esconde o bloco.
+const VAC_NO_ANALYSTS_TEXT = "Sem analistas ativos na Equipa SOC — cria ou reativa um analista na aba Equipa SOC para poder decidir.";
+const VAC_DECISION_LOADING_TEXT = "A carregar os analistas da Equipa SOC…";
 const VAC_GENERIC_ERROR = "Erro inesperado no pedido de vaccines — vê o backend.log.";
 
 // Só isto é aceite como código vindo do detalhe da resposta; qualquer outra
@@ -468,6 +471,7 @@ function vacRenderDetail(vaccine) {
   htmRender(document.getElementById("vac-detail-origin"), vacOriginHtml(vaccine));
   htmRender(document.getElementById("vac-detail-proposals"), vacProposalsHtml(vaccine));
   htmRender(document.getElementById("vac-detail-chain"), vacChainHtml(vaccine));
+  document.getElementById("vac-detail-warning").textContent = slVacWarningText(vaccine.state, VAC_STATE_LABELS);
   vacDetailVaccine = vaccine;
   vacRenderDecision();
 }
@@ -479,27 +483,68 @@ function vacRenderDetailError(code) {
   document.getElementById("vac-detail-origin").replaceChildren();
   document.getElementById("vac-detail-proposals").replaceChildren();
   document.getElementById("vac-detail-chain").replaceChildren();
+  document.getElementById("vac-detail-warning").textContent = slVacWarningText(null, VAC_STATE_LABELS);
   vacDetailVaccine = null;
   vacRenderDecision();
 }
 
-// Decisão do analista. Os botões só existem para uma vaccine proposta, atual
-// (sem superseded_by) e com pelo menos um analista ativo; a escolha de analista
-// e o motivo ficam só no DOM. Os restantes casos mostram só o rótulo do estado.
+// Linhas de texto do bloco Decisão (cada valor já escapado pelo htmlT).
+function vacShowDecisionLines(lines) {
+  htmRender(document.getElementById("vac-decision-state"),
+    htmlT`${lines.map((line) => htmlT`<span>${line}</span><br>`)}`);
+}
+
+// Decisão do analista (D-03, D-06, D-09). O que se mostra decide-se só por slVacDecisionView:
+// os botões só existem para uma vaccine proposta, atual e com analistas ativos; nos outros casos
+// o bloco explica porquê (decidida, substituída, estado desconhecido, analistas por carregar,
+// em falta ou indisponíveis) e nunca se esconde nem se desenha como ausência de dados.
 function vacRenderDecision() {
   const form = document.getElementById("vac-decision-form");
-  const stateLine = document.getElementById("vac-decision-state");
-  const vaccine = vacDetailVaccine;
-  if (!vaccine) {
-    form.hidden = true;
-    stateLine.textContent = "";
-    vacSyncDecisionControls();
-    return;
+  const view = slVacDecisionView(vacDetailVaccine, vacAnalysts, vacAnalystsError);
+  const proposed = "Estado: " + vacCell(vacLabel(VAC_STATE_LABELS, "proposed"));
+  let showForm = false;
+  switch (view.mode) {
+    case "decided":
+      vacShowDecisionLines([
+        "Estado: " + vacCell(vacLabel(VAC_STATE_LABELS, view.state)) + " · por " + vacCell(view.author)
+          + " · em " + vacCell(vacDate(view.decidedAt)),
+        "Motivo: " + vacCell(view.reason),
+      ]);
+      break;
+    case "superseded":
+      vacShowDecisionLines(["Substituída por " + vacCell(view.supersededBy)
+        + " — já não pode ser decidida; decide a vaccine atual deste ataque."]);
+      break;
+    case "unknown_state":
+      vacShowDecisionLines(["Estado " + vacCell(view.state) + " — sem decisão possível neste painel."]);
+      break;
+    case "analysts_error":
+      vacShowDecisionLines([proposed, vacErrorText(view.code)]);
+      break;
+    case "no_analysts":
+      vacShowDecisionLines([proposed, VAC_NO_ANALYSTS_TEXT]);
+      break;
+    case "loading":
+      vacShowDecisionLines([proposed, VAC_DECISION_LOADING_TEXT]);
+      break;
+    case "controls":
+      vacShowDecisionLines([proposed]);
+      showForm = true;
+      break;
+    case "none":
+    default:
+      vacShowDecisionLines([]);
   }
-  const label = vacLabel(VAC_STATE_LABELS, vaccine.state);
-  const open = vaccine.state === "proposed" && !vaccine.superseded_by && Array.isArray(vacAnalysts) && vacAnalysts.length > 0;
-  form.hidden = !open;
-  stateLine.textContent = open ? "Estado: " + label : label;
+  form.hidden = !showForm;
+  vacSyncDecisionControls();
+}
+
+// Nova vaccine aberta: o analista e o motivo nunca passam de uma vaccine para outra (D-01).
+function vacResetDecisionForm() {
+  document.getElementById("vac-decision-analyst").value = "";
+  document.getElementById("vac-decision-reason").value = "";
+  document.getElementById("vac-decision-count").textContent = slVacReasonCounter("");
+  vacSetDecisionStatus("", false);
   vacSyncDecisionControls();
 }
 
@@ -578,6 +623,7 @@ async function vacDecide(choice) {
       { method: "POST", body: check.body });
     if (seq === vacSelectSeq) {
       vacDetailVaccine = envelope.vaccine;
+      document.getElementById("vac-detail-warning").textContent = slVacWarningText(envelope.vaccine.state, VAC_STATE_LABELS);
       vacRenderDecision();
       vacSetDecisionStatus(envelope.notice, false);
     }
@@ -592,6 +638,7 @@ async function vacDecide(choice) {
 
 async function vacSelect(id) {
   if (!VAC_ID_RE.test(id)) return;
+  if (id !== vacSelectedId) vacResetDecisionForm();
   const seq = ++vacSelectSeq;
   vacSelectedId = id;
   document.querySelectorAll("#vac-body tr[data-id]").forEach((tr) =>
@@ -632,6 +679,9 @@ document.getElementById("vac-detail-decision").addEventListener("click", (event)
   else if (button.dataset.action === "vac-reject") vacDecide("rejected");
 });
 document.getElementById("vac-decision-analyst").addEventListener("change", vacSyncDecisionControls);
+document.getElementById("vac-decision-reason").addEventListener("input", (event) => {
+  document.getElementById("vac-decision-count").textContent = slVacReasonCounter(event.target.value);
+});
 
 // Ciclo de vida: recarrega só na passagem de inativa a ativa.
 function vacOnShow() {

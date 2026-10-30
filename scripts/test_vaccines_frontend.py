@@ -687,9 +687,12 @@ def run_detail() -> None:
     check('o painel tem #vac-detail-title',
           re.search(r'<h2[^>]*id="vac-detail-title"', bloco) is not None)
     aviso = re.search(r'<p[^>]*id="vac-detail-warning"[^>]*>(.*?)</p>', bloco, re.S)
-    check('o aviso fixo #vac-detail-warning tem class="vac-not-applied" e o texto exato',
+    check('o aviso #vac-detail-warning tem class="vac-not-applied" e o texto estático diz "não aplicada no Wazuh"',
           aviso is not None and "vac-not-applied" in aviso.group(0)
-          and aviso.group(1).strip() == "Proposta — não aplicada no Wazuh")
+          and "não aplicada no Wazuh" in aviso.group(1))
+    check("vacRenderDetail escreve o aviso por estado (slVacWarningText( com VAC_STATE_LABELS)",
+          "slVacWarningText(" in function_body(js, "vacRenderDetail")
+          and "VAC_STATE_LABELS" in function_body(js, "vacRenderDetail"))
     check("os h3 do painel são Decisão, Origem, Propostas e Cadeia, por esta ordem",
           re.findall(r"<h3>(.*?)</h3>", bloco) == ["Decisão", "Origem", "Propostas", "Cadeia"])
     check("o painel tem #vac-detail-origin, #vac-detail-proposals e #vac-detail-chain",
@@ -1062,6 +1065,92 @@ def run_decision_errors() -> None:
           and client_code(504, None) == "http_504")
 
 
+def run_decision_view() -> None:
+    """D-03, D-06, D-09, D-10, D-01, D-04: o bloco Decisão por modos, provado sobre as vaccines REAIS da rota
+    (slVacDecisionView em node:vm) e pelo contrato de texto de vaccines.js."""
+    files = served()
+    js = files["/vaccines.js"][2]
+    ui_js = files["/ui_helpers.js"][2]
+
+    # a) modos sobre respostas reais
+    _, respostas = real_api_keys()
+    lista = respostas["lista_decidida"]
+    por_id = {v["id"]: v for v in lista["vaccines"]} if lista else {}
+    analistas = [{"id": "analyst-eddie", "name": "Eddie"}]
+    check("há vaccines reais C, B e A depois das decisões", set(por_id) == {ID_C, ID_B, ID_A})
+    vistas = node_ui_helpers([["slVacDecisionView", [por_id.get(i), analistas, None]] for i in (ID_C, ID_B, ID_A)])
+    vc, vb, va = vistas if vistas else ({}, {}, {})
+    check("vaccine C real (aprovada): decided, approved, autor Eddie",
+          vc.get("mode") == "decided" and vc.get("state") == "approved" and vc.get("author") == "Eddie"
+          and bool(vc.get("decidedAt")))
+    check("vaccine B real (rejeitada): decided, rejected, motivo 'Regra ruidosa', autor Jeremy",
+          vb.get("mode") == "decided" and vb.get("state") == "rejected" and vb.get("reason") == "Regra ruidosa"
+          and vb.get("author") == "Jeremy")
+    check("vaccine A real (proposta e substituída por B): superseded com supersededBy B, sem botões",
+          va.get("mode") == "superseded" and va.get("supersededBy") == ID_B)
+    sem_analistas = node_ui_helpers([["slVacDecisionView", [por_id.get(i), None, "http_500"]] for i in (ID_C, ID_A)])
+    check("uma vaccine decidida ou substituída não depende da lista de analistas (mesmo com erro)",
+          sem_analistas is not None and [v["mode"] for v in sem_analistas] == ["decided", "superseded"])
+    avisos = node_ui_helpers([["slVacWarningText", [por_id.get(i, {}).get("state"), {"proposed": "Proposta",
+                              "approved": "Aprovada", "rejected": "Rejeitada"}]] for i in (ID_C, ID_B, ID_A)])
+    check("o aviso das vaccines reais: C aprovada, B rejeitada, A proposta, todos com 'não aplicada no Wazuh'",
+          avisos == ["Aprovada — aceite pelo analista, não aplicada no Wazuh",
+                     "Rejeitada — não aplicada no Wazuh", "Proposta — não aplicada no Wazuh"])
+
+    # b) vacRenderDecision: só decide pelo helper, com um ramo por modo
+    corpo = function_body(js, "vacRenderDecision")
+    check("vacRenderDecision decide só por slVacDecisionView(vacDetailVaccine, vacAnalysts, vacAnalystsError)",
+          "slVacDecisionView(vacDetailVaccine, vacAnalysts, vacAnalystsError)" in corpo)
+    modos = ("none", "decided", "unknown_state", "superseded", "analysts_error", "loading", "no_analysts", "controls")
+    em_falta = [m for m in modos if f'case "{m}"' not in corpo]
+    check("vacRenderDecision tem um case por modo (none, decided, unknown_state, superseded, analysts_error, "
+          "loading, no_analysts, controls)", not em_falta)
+    check("o modo decided desenha autor, data e motivo por vacCell( e vacDate(, nunca HTML à mão",
+          "vacCell(" in corpo and "vacDate(" in corpo and "vacShowDecisionLines(" in corpo and "innerHTML" not in corpo
+          and "htmRender(" in function_body(js, "vacShowDecisionLines")
+          and "htmlT`" in function_body(js, "vacShowDecisionLines"))
+    check("vacRenderDecision mantém vacSyncDecisionControls() e o modo analysts_error usa vacErrorText(",
+          "vacSyncDecisionControls()" in corpo and "vacErrorText(" in corpo)
+    m = re.search(r'const VAC_NO_ANALYSTS_TEXT = "([^"]*)"', js)
+    check("VAC_NO_ANALYSTS_TEXT diz 'Sem analistas ativos' e manda para a aba Equipa SOC",
+          m is not None and "Sem analistas ativos" in m.group(1) and "Equipa SOC" in m.group(1))
+    check("a frase da vaccine substituída diz 'já não pode ser decidida'", "já não pode ser decidida" in corpo)
+    check("VAC_DECISION_LOADING_TEXT existe e o modo loading o usa",
+          "const VAC_DECISION_LOADING_TEXT" in js and "VAC_DECISION_LOADING_TEXT" in corpo)
+    check("'Sem dados' continua a aparecer uma só vez em vaccines.js (um erro nunca é ausência de dados)",
+          js.count("Sem dados") == 1)
+
+    # c) D-01: reposição ao mudar de vaccine; D-04: contador
+    corpo = function_body(js, "vacSelect")
+    pos = corpo.find("vacResetDecisionForm(")
+    check("vacSelect repõe o formulário (vacResetDecisionForm) só quando o id muda, antes de atualizar vacSelectedId",
+          pos != -1 and re.search(r"if\s*\(\s*id\s*!==\s*vacSelectedId\s*\)\s*vacResetDecisionForm\(\)", corpo) is not None
+          and pos < corpo.find("vacSelectedId = id"))
+    corpo = function_body(js, "vacResetDecisionForm")
+    check("vacResetDecisionForm limpa o analista, o motivo, o contador (0/500) e a linha de estado",
+          all(x in corpo for x in ("vac-decision-analyst", "vac-decision-reason", "vac-decision-count",
+                                   'vacSetDecisionStatus("", false)', "slVacReasonCounter(")))
+    check("vacSetDecisionStatus escreve #vac-decision-status e tira a classe de erro quando isError é falso",
+          "vac-decision-status" in function_body(js, "vacSetDecisionStatus")
+          and "classList.toggle" in function_body(js, "vacSetDecisionStatus"))
+    check('há um listener "input" em #vac-decision-reason que escreve o contador com slVacReasonCounter(',
+          re.search(r'getElementById\("vac-decision-reason"\)\.addEventListener\("input"', js) is not None
+          and "slVacReasonCounter(" in js)
+
+    # d) D-10: aviso por estado
+    corpo = function_body(js, "vacDecide")
+    check("o 200 da decisão atualiza o aviso com a vaccine da resposta (slVacWarningText( em vacDecide)",
+          "slVacWarningText(" in corpo and "envelope.vaccine" in corpo)
+    corpo = function_body(js, "vacRenderDetailError")
+    check("vacRenderDetailError escreve o aviso de estado desconhecido e esconde o formulário (vacRenderDecision)",
+          "slVacWarningText(null, VAC_STATE_LABELS)" in corpo and "vacDetailVaccine = null" in corpo
+          and "vacRenderDecision()" in corpo)
+    check("vaccines.js usa slVacWarningText( pelo menos 3 vezes (detalhe, resposta do POST e detalhe com erro)",
+          js.count("slVacWarningText(") >= 3)
+    check("ui_helpers.js servido define slVacDecisionView, slVacWarningText e slVacReasonCounter",
+          all(f"function {n}(" in ui_js for n in ("slVacDecisionView", "slVacWarningText", "slVacReasonCounter")))
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
@@ -1072,6 +1161,7 @@ if __name__ == "__main__":
     run_decision()
     run_decision_contract()
     run_decision_errors()
+    run_decision_view()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:

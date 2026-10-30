@@ -424,6 +424,54 @@ function slVacAnalystOptions(envelope) {
   return options;
 }
 
+// O que o bloco Decisão do detalhe pode afirmar sobre a vaccine aberta (D-03, D-06, D-09).
+// Forma fixa: {mode, state, author, decidedAt, reason, supersededBy, code}, null onde não se aplica.
+// Modos, por esta ordem: none, decided, unknown_state, superseded, analysts_error, loading,
+// no_analysts, controls. Só uma proposta atual com analistas dá "controls". analysts é a lista
+// [{id, name}] (null enquanto carrega) e analystsError o código da falha ao lê-la (ou null).
+function slVacDecisionView(vaccine, analysts, analystsError) {
+  const view = (mode, fields) => Object.assign(
+    { mode, state: null, author: null, decidedAt: null, reason: null, supersededBy: null, code: null }, fields);
+  if (!vaccine || typeof vaccine !== "object") return view("none", {});
+  const state = typeof vaccine.state === "string" ? vaccine.state : null;
+  const supersededBy = vaccine.superseded_by === undefined ? null : vaccine.superseded_by;
+  if (state === "approved" || state === "rejected") {
+    const decision = vaccine.decision && typeof vaccine.decision === "object" ? vaccine.decision : {};
+    const pick = (value) => (value === undefined ? null : value);
+    return view("decided", {
+      state, supersededBy,
+      author: pick(decision.decided_by_name), decidedAt: pick(decision.decided_at), reason: pick(decision.reason),
+    });
+  }
+  if (state !== "proposed") return view("unknown_state", { state, supersededBy });
+  if (supersededBy !== null) return view("superseded", { state, supersededBy });
+  if (typeof analystsError === "string" && analystsError !== "") {
+    // A rota de analistas devolve um 500 genérico quando a base da Equipa SOC não abre.
+    const code = /^http_5\d\d$/.test(analystsError) ? "incidents_unavailable" : analystsError;
+    return view("analysts_error", { state, code });
+  }
+  if (!Array.isArray(analysts)) return view("loading", { state });
+  if (analysts.length === 0) return view("no_analysts", { state });
+  return view("controls", { state });
+}
+
+// Aviso fixo do detalhe por estado (D-10). labels é o mapa estado -> rótulo; um estado
+// desconhecido aparece como veio e a ausência dele diz "Estado desconhecido".
+function slVacWarningText(state, labels) {
+  const tail = "não aplicada no Wazuh";
+  if (typeof state !== "string" || state === "") return "Estado desconhecido — " + tail;
+  const known = !!labels && Object.prototype.hasOwnProperty.call(labels, state);
+  const label = known ? labels[state] : state;
+  if (known && state === "approved") return label + " — aceite pelo analista, " + tail;
+  return label + " — " + tail;
+}
+
+// Contador do motivo, em pontos de código sobre o máximo (D-04), como o len do backend.
+function slVacReasonCounter(reason) {
+  const length = typeof reason === "string" ? Array.from(reason).length : 0;
+  return length + "/" + SL_VAC_REASON_MAX;
+}
+
 // Liga o Tab preso a qualquer .modal visível. Só corre no browser (guarda por typeof document).
 function slInstallModalFocusTrap() {
   document.addEventListener("keydown", (ev) => {
