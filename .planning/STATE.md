@@ -5,17 +5,17 @@ milestone_name: R12 Vaccine Lab
 current_phase: 17
 current_phase_name: Aba, testes e documentação
 status: executing
-stopped_at: Completed 17-01-PLAN.md
-last_updated: "2026-10-30T16:50:00.356Z"
+stopped_at: Completed 17-04-PLAN.md
+last_updated: "2026-10-30T16:54:11.208Z"
 last_activity: 2026-10-30
 last_activity_desc: Phase 17 execution started
-state_head: 4c995f44cc2d068fc88e1c7bae635d9aeeb2ebff
+state_head: 112d7b45cb8087b206928981de531ba18442c727
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 7
-  percent: 58
+  completed_plans: 8
+  percent: 67
 ---
 
 # Project State
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 ## Current Position
 
 Phase: 17 (Aba, testes e documentação) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-10-30 — Phase 17 execution started
 
-Progress: [██████░░░░] 58%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [██████░░░░] 58%
 | Phase 16 P02 | 15 min | 2 tasks | 5 files |
 | Phase 16 P03 | 8 min | 2 tasks | 2 files |
 | Phase 17 P01 | 25min | 2 tasks | 5 files |
+| Phase 17 P04 | 15min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,7 @@ Recent decisions affecting current work:
 - [Phase 16]: 16-02: count_by_state corre depois de list_vaccines no mesmo try; estado desconhecido no ficheiro dá ValueError e 503
 - [Phase 16]: 16-03: o varrimento AST do fecho local segue referências a nomes e proíbe acesso por atributo a manager_client/vm_ssh_client/subprocess; allow_methods do CORS fixado por teste sem mudar main.py
 - [Phase 17]: 17-01: secção Decisão como markup estático; validação local analista, escolha, motivo; motivo conta pontos de código; só analistas com active 1/true
+- [Phase 17]: 17-04: aprovada documentada como aceite pelo analista, nada aplicado no Wazuh (R21); autoria autodeclarada tratada como limite conhecido
 
 ### Pending Todos
 
@@ -97,8 +99,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T16:50:00.214Z
-Stopped at: Completed 17-01-PLAN.md
+Last session: 2026-10-30T16:54:11.070Z
+Stopped at: Completed 17-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
