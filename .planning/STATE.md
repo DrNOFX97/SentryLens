@@ -4,18 +4,18 @@ milestone: v1.2
 milestone_name: R12 Vaccine Lab
 current_phase: 17
 current_phase_name: Aba, testes e documentação
-status: planning
-stopped_at: Phase 17 context gathered
-last_updated: "2026-10-30T11:53:12.285Z"
+status: executing
+stopped_at: Completed 17-01-PLAN.md
+last_updated: "2026-10-30T16:50:00.356Z"
 last_activity: 2026-10-30
-last_activity_desc: Phase 16 complete, transitioned to Phase 17
-state_head: 8f93d8ff81569b01080bac58ac894a4baffeb032
+last_activity_desc: Phase 17 execution started
+state_head: 4c995f44cc2d068fc88e1c7bae635d9aeeb2ebff
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 67
+  total_plans: 12
+  completed_plans: 7
+  percent: 58
 ---
 
 # Project State
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-29)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** Phase 16 — API de decisão
+**Current focus:** Phase 17 — Aba, testes e documentação
 
 ## Current Position
 
-Phase: 17 — Aba, testes e documentação
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-30 — Phase 16 complete, transitioned to Phase 17
+Phase: 17 (Aba, testes e documentação) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-10-30 — Phase 17 execution started
 
-Progress: [███████░░░] 67%
+Progress: [██████░░░░] 58%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [███████░░░] 67%
 | Phase 16 P01 | 10 min | 2 tasks | 3 files |
 | Phase 16 P02 | 15 min | 2 tasks | 5 files |
 | Phase 16 P03 | 8 min | 2 tasks | 2 files |
+| Phase 17 P01 | 25min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,7 @@ Recent decisions affecting current work:
 - [Phase 16]: 16-02: state_counts (envelope) e count_by_state (store); zeros explícitos com amostra, None sem amostra
 - [Phase 16]: 16-02: count_by_state corre depois de list_vaccines no mesmo try; estado desconhecido no ficheiro dá ValueError e 503
 - [Phase 16]: 16-03: o varrimento AST do fecho local segue referências a nomes e proíbe acesso por atributo a manager_client/vm_ssh_client/subprocess; allow_methods do CORS fixado por teste sem mudar main.py
+- [Phase 17]: 17-01: secção Decisão como markup estático; validação local analista, escolha, motivo; motivo conta pontos de código; só analistas com active 1/true
 
 ### Pending Todos
 
@@ -95,9 +97,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T11:53:12.085Z
-Stopped at: Phase 17 context gathered
-Resume file: .planning/phases/17-aba-testes-e-documenta-o/17-CONTEXT.md
+Last session: 2026-10-30T16:50:00.214Z
+Stopped at: Completed 17-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

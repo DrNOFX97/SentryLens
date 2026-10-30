@@ -103,11 +103,11 @@ Plans:
   3. `run_all_tests.py` termina com código 0 numa execução completa, sem Wazuh, incluindo os testes novos.
   4. `DATA_MODEL.md`, `API.md`, `ROADMAP_STATUS.md` (R12 ✅), `README.md` e `CLAUDE.md` descrevem o R12 com contagens medidas.
 
-**Plans:** 6 plans
+**Plans:** 1/6 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 17-01-PLAN.md — Tracer: secção Decisão no detalhe (select de analistas ativos, motivo, Aprovar/Rejeitar por `data-action`), `slVacDecisionBody` puro provado contra a rota real, `vacDecide` (único POST), validação local; contrato do bloco fixado por teste (VLB-06, VLB-07)
+- [x] 17-01-PLAN.md — Tracer: secção Decisão no detalhe (select de analistas ativos, motivo, Aprovar/Rejeitar por `data-action`), `slVacDecisionBody` puro provado contra a rota real, `vacDecide` (único POST), validação local; contrato do bloco fixado por teste (VLB-06, VLB-07)
 - [ ] 17-04-PLAN.md — `DATA_MODEL.md` (decisão do analista, estado derivado, `state_counts`) e `API.md` (POST de decisão, códigos, `?state=`), em paralelo (VLB-07)
 
 **Wave 2**
