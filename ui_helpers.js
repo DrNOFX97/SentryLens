@@ -472,6 +472,22 @@ function slVacReasonCounter(reason) {
   return length + "/" + SL_VAC_REASON_MAX;
 }
 
+// O que fazer a seguir a um erro da decisão (D-13): "refresh" refaz o detalhe e a lista (o servidor
+// pode ter gravado, ou outra pessoa decidiu primeiro), "reload_analysts" recarrega os analistas e
+// "none" deixa o formulário como estava. Nunca implica um novo POST.
+const SL_VAC_REFRESH_CODES = [
+  "already_decided", "vaccine_superseded", "entry_not_found", "store_unavailable",
+  "timeout", "network_error", "invalid_response", "http_409",
+];
+const SL_VAC_RELOAD_ANALYSTS_CODES = ["analyst_not_found", "analyst_inactive", "incidents_unavailable"];
+
+function slVacErrorFollowUp(code) {
+  if (typeof code !== "string") return "none";
+  if (SL_VAC_REFRESH_CODES.includes(code) || /^http_5\d\d$/.test(code)) return "refresh";
+  if (SL_VAC_RELOAD_ANALYSTS_CODES.includes(code)) return "reload_analysts";
+  return "none";
+}
+
 // Liga o Tab preso a qualquer .modal visível. Só corre no browser (guarda por typeof document).
 function slInstallModalFocusTrap() {
   document.addEventListener("keydown", (ev) => {

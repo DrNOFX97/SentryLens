@@ -229,4 +229,18 @@ check("slVacReasonCounter: null, undefined e vazio -> 0/500", rc(null) === "0/50
 check("slVacReasonCounter: 'ab' -> 2/500 e um emoji conta 1", rc("ab") === "2/500" && rc("😀") === "1/500");
 check("slVacReasonCounter: 500 caracteres -> 500/500", rc("x".repeat(500)) === "500/500");
 
+// slVacErrorFollowUp: o que fazer a seguir a um erro da decisão (nunca um novo POST).
+const fu = (c) => ctx.slVacErrorFollowUp(c);
+check("slVacErrorFollowUp: já decidida, substituída, 404, store, tempo, ligação, resposta ilegível, 409 e 5xx -> refresh",
+  ["already_decided", "vaccine_superseded", "entry_not_found", "store_unavailable", "timeout", "network_error",
+   "invalid_response", "http_409", "http_500", "http_503", "http_504"].every((c) => fu(c) === "refresh"));
+check("slVacErrorFollowUp: analista inexistente, desativado ou base da Equipa SOC em baixo -> reload_analysts",
+  ["analyst_not_found", "analyst_inactive", "incidents_unavailable"].every((c) => fu(c) === "reload_analysts"));
+check("slVacErrorFollowUp: validação, unauthorized, 403, 405 e 422 -> none",
+  ["invalid_body", "reason_required", "invalid_reason", "invalid_author", "invalid_decision", "analyst_required",
+   "unauthorized", "http_403", "http_405", "http_422"].every((c) => fu(c) === "none"));
+check("slVacErrorFollowUp: vazio, null, undefined e número -> none; um código desconhecido -> none",
+  ["", null, undefined, 42, "xpto"].every((c) => fu(c) === "none"));
+check("slVacErrorFollowUp: 'toString' não usa o protótipo", fu("toString") === "none" && fu("constructor") === "none");
+
 finish();

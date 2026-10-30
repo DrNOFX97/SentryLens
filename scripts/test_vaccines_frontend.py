@@ -296,7 +296,7 @@ _INNERHTML_RE = re.compile(r"\.innerHTML\b")
 _RAW_RE = re.compile(r"\bhtmlRaw\(|\bescapeHtml\(")
 _MESSAGE_RE = re.compile(r"\.message\b")
 _MESSAGE_SINKS = ("vacErrorText", "vacRenderError", "vacRenderDetailError", "vacRenderDecisionError",
-                  "vacSetAnalystsError")
+                  "vacSetAnalystsError", "slVacErrorFollowUp")
 
 
 def top_level_decls(js: str) -> list[str]:
@@ -1151,6 +1151,88 @@ def run_decision_view() -> None:
           all(f"function {n}(" in ui_js for n in ("slVacDecisionView", "slVacWarningText", "slVacReasonCounter")))
 
 
+def run_conflict() -> None:
+    """D-13, D-14: depois de um 409 (ou de qualquer erro em que o servidor pode ter gravado) o detalhe e a lista
+    são refeitos; respostas fora de ordem são descartadas e o refresco nunca se perde. Provado sobre o 409
+    REAL da rota e o detalhe real a seguir."""
+    files = served()
+    js = files["/vaccines.js"][2]
+    ui_js = files["/ui_helpers.js"][2]
+    eddie = [{"id": "analyst-eddie", "name": "Eddie"}]
+
+    # a) o 409 real e o detalhe real a seguir
+    _, respostas = real_api_keys((f"/api/vaccines/{ID_C}", f"/api/vaccines/{ID_A}"))
+    segunda = respostas["decisao_409"]
+    check("rota real: a segunda aprovação de C dá 409 com detail 'already_decided'",
+          segunda is not None and segunda[0] == 409 and segunda[1] == {"detail": "already_decided"})
+    codigo = client_code(*segunda) if segunda else None
+    check("o cliente vê o código 'already_decided'", codigo == "already_decided")
+    seguimento = node_ui_helpers([["slVacErrorFollowUp", [codigo]]])
+    check("slVacErrorFollowUp('already_decided') == 'refresh' (node, ui_helpers.js real)",
+          seguimento is not None and seguimento[0] == "refresh")
+    estado, detalhe = respostas["extra"][f"/api/vaccines/{ID_C}"]
+    vista = node_ui_helpers([["slVacDecisionView", [detalhe.get("vaccine"), eddie, None]]])
+    check("o detalhe real de C a seguir ao 409 é approved e a vista refeita é decided (sem botões)",
+          estado == 200 and detalhe["vaccine"]["state"] == "approved" and vista is not None
+          and vista[0]["mode"] == "decided" and vista[0]["author"] == "Eddie")
+    estado, antiga = respostas["extra"][f"/api/vaccines/{ID_A}"]
+    erros = respostas["erros_decisao"] or {}
+    super_resp = erros.get("vaccine_superseded")
+    vista_a = node_ui_helpers([["slVacDecisionView", [antiga.get("vaccine"), eddie, None]]])
+    check("rota real: decidir a vaccine substituída A dá 409 vaccine_superseded e o detalhe refeito é 'superseded'",
+          super_resp is not None and super_resp[0] == 409 and client_code(*super_resp) == "vaccine_superseded"
+          and vista_a is not None and vista_a[0]["mode"] == "superseded")
+
+    # b) o seguimento de cada recusa real da rota
+    codigos = {nome: client_code(*erros[nome]) for nome in erros}
+    resultados = node_ui_helpers([["slVacErrorFollowUp", [c]] for c in codigos.values()]) if codigos else None
+    por_nome = dict(zip(codigos, resultados)) if resultados else {}
+    esperado = {"already_decided": "refresh", "vaccine_superseded": "refresh", "entry_not_found": "refresh",
+                "analyst_not_found": "reload_analysts", "analyst_inactive": "reload_analysts",
+                "reason_required": "none", "invalid_body": "none", "invalid_author": "none", "invalid_decision": "none",
+                "invalid_reason": "none", "invalid_vaccine_id": "none", "metodo_put": "none", "sem_chave": "none"}
+    check("cada recusa real da rota tem o seguimento previsto (refresh, reload_analysts ou none)",
+          bool(por_nome) and all(por_nome.get(n) == v for n, v in esperado.items()))
+    if por_nome:
+        print(f"       seguimentos: {por_nome}")
+    locais = node_ui_helpers([["slVacErrorFollowUp", [c]] for c in ("analyst_required", "reason_required", "invalid_reason")])
+    check("os erros de validação local nunca mandam refazer nada", locais is not None and set(locais) == {"none"})
+    check("slVacErrorFollowUp está definido no ui_helpers.js servido", "function slVacErrorFollowUp(" in ui_js)
+
+    # c) vacRenderDecisionError: frase e seguimento, nunca um novo POST
+    corpo = function_body(js, "vacRenderDecisionError")
+    check("vacRenderDecisionError mostra vacErrorText( e escolhe o seguimento por slVacErrorFollowUp(",
+          "vacErrorText(" in corpo and "slVacErrorFollowUp(" in corpo)
+    check("seguimento refresh: vacSelect(vacSelectedId) refaz o detalhe e vacRefresh() a lista",
+          "vacSelect(vacSelectedId)" in corpo and "vacRefresh()" in corpo)
+    check("seguimento reload_analysts: vacLoadAnalysts()", "vacLoadAnalysts()" in corpo)
+    check("vacRenderDecisionError nunca chama vacDecide( (sem novo POST automático)", "vacDecide(" not in corpo)
+
+    # d) D-14: descarte fora de ordem em vacDecide
+    corpo = function_body(js, "vacDecide")
+    check("vacDecide captura seq antes do POST e compara com vacSelectSeq no sucesso e no erro (2 vezes)",
+          "const seq = vacSelectSeq" in corpo and len(re.findall(r"seq (?:!==|===) vacSelectSeq", corpo)) >= 2)
+    erro = corpo[corpo.find("catch (err)"):]
+    check("no erro, uma resposta de outra vaccine não mostra a frase mas, se o seguimento é refresh, refaz a lista",
+          "slVacErrorFollowUp(err.message)" in erro and "vacRefresh()" in erro
+          and "vacRenderDecisionError(err.message)" in erro)
+
+    # e) D-14: vacRefresh não perde um pedido por haver outro no ar
+    corpo = function_body(js, "vacRefresh")
+    check("vacRefresh tem a fila vacRefreshQueued (marcar, ler e limpar) e a declaração de topo",
+          js.count("vacRefreshQueued") >= 4 and corpo.count("vacRefreshQueued") >= 3
+          and re.search(r"^let vacRefreshQueued = false;", js, re.M) is not None)
+    check("vacRefresh marca a fila quando já está a carregar e só então sai",
+          re.search(r"if \(vacLoading\) \{\s*vacRefreshQueued = true;\s*return;\s*\}", corpo) is not None)
+    check("vacRefresh continua a usar vacBuildQuery (query do pedido e query atual, pelo menos 2 vezes)",
+          corpo.count("vacBuildQuery(") >= 2)
+    fim = corpo[corpo.find("finally"):]
+    check("no finally, vacRefresh limpa a marca e faz no máximo uma volta extra (vacRefresh() uma vez)",
+          "vacRefreshQueued = false" in fim and fim.count("vacRefresh()") == 1)
+    check("sem canal em tempo real nem temporizadores no seguimento (F16 D-15)",
+          not any(x in js for x in ("setInterval", "setTimeout", "WebSocket")))
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
@@ -1162,6 +1244,7 @@ if __name__ == "__main__":
     run_decision_contract()
     run_decision_errors()
     run_decision_view()
+    run_conflict()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:

@@ -87,6 +87,8 @@ const VAC_INVALID_ATTACK_TEXT = "ID de ataque inválido: usa um número inteiro 
 
 const vacTab = document.getElementById("tab-vaccines");
 let vacLoading = false;
+// Um refresco pedido enquanto outro está no ar (por exemplo depois de uma decisão) não se perde.
+let vacRefreshQueued = false;
 let vacWasActive = false;
 // Vaccine aberta no detalhe e contador que descarta respostas fora de ordem.
 let vacSelectedId = null;
@@ -337,7 +339,10 @@ function vacShowLoadingRow() {
 }
 
 async function vacRefresh() {
-  if (vacLoading) return;
+  if (vacLoading) {
+    vacRefreshQueued = true;
+    return;
+  }
   const query = vacBuildQuery();
   if (query === null) {
     document.getElementById("vac-notice").textContent = VAC_INVALID_ATTACK_TEXT;
@@ -358,9 +363,11 @@ async function vacRefresh() {
     line.classList.remove("vac-generator-error");
   } finally {
     vacLoading = false;
-    // Filtros mudados a meio do pedido: um (e só um) novo pedido, depois deste.
+    // Refresco pedido ou filtros mudados a meio do pedido: um (e só um) novo pedido, depois deste.
+    const queued = vacRefreshQueued;
+    vacRefreshQueued = false;
     const current = vacBuildQuery();
-    if (current !== null && current !== query) vacRefresh();
+    if (current !== null && (queued || current !== query)) vacRefresh();
   }
 }
 
@@ -565,9 +572,19 @@ function vacSetDecisionStatus(text, isError) {
   status.classList.toggle("vac-decision-error", isError);
 }
 
-// O código do erro só serve de chave de vacErrorText.
+// O código do erro só serve de chave de vacErrorText e do seguimento (D-13). Quando o servidor pode
+// ter gravado, ou outra pessoa decidiu primeiro, refaz-se o detalhe (o id não muda, por isso a frase
+// fica) e a lista com os contadores; com um analista entretanto inexistente recarregam-se os analistas.
+// O seguimento só faz pedidos GET: nunca há um novo POST automático.
 function vacRenderDecisionError(code) {
   vacSetDecisionStatus(vacErrorText(code), true);
+  const followUp = slVacErrorFollowUp(code);
+  if (followUp === "refresh") {
+    vacSelect(vacSelectedId);
+    vacRefresh();
+  } else if (followUp === "reload_analysts") {
+    vacLoadAnalysts();
+  }
 }
 
 // Guarda a falha ao ler os analistas (código estável, nunca texto do servidor).
@@ -630,6 +647,7 @@ async function vacDecide(choice) {
     vacRefresh();
   } catch (err) {
     if (seq === vacSelectSeq) vacRenderDecisionError(err.message);
+    else if (slVacErrorFollowUp(err.message) === "refresh") vacRefresh();
   } finally {
     vacDeciding = false;
     vacSyncDecisionControls();
