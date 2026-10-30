@@ -386,6 +386,44 @@ function slMttdView(metrics, error) {
   return { value: slFormatDuration(m.median_s), label, sub };
 }
 
+// --- Aba Vaccines: decisão do analista (R12) -------------------------------
+// Espelham os limites do backend (vaccine_decision.py); o servidor volta a validar tudo.
+const SL_VAC_REASON_MAX = 500;
+const SL_VAC_ANALYST_ID_RE = /^analyst-[a-z0-9-]{1,64}$/;
+// Categorias Unicode que o backend recusa num motivo (FORBIDDEN_REASON_CATEGORIES).
+const SL_VAC_FORBIDDEN_REASON_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]/u;
+
+// Valida o que o analista escolheu e constrói o corpo do POST de decisão.
+// Devolve {code, body}: code null e body {decision, analyst_id, reason}, ou
+// um código estável (analyst_required, invalid_author, invalid_decision,
+// reason_required, invalid_reason) e body null. Ordem: analista, escolha, motivo.
+function slVacDecisionBody(analystId, choice, reason) {
+  const fail = (code) => ({ code, body: null });
+  if (typeof analystId !== "string" || analystId === "") return fail("analyst_required");
+  if (!SL_VAC_ANALYST_ID_RE.test(analystId)) return fail("invalid_author");
+  if (choice !== "approved" && choice !== "rejected") return fail("invalid_decision");
+  const text = typeof reason === "string" ? reason.trim() : "";
+  if (choice === "rejected" && text === "") return fail("reason_required");
+  if (Array.from(text).length > SL_VAC_REASON_MAX || SL_VAC_FORBIDDEN_REASON_RE.test(text)) {
+    return fail("invalid_reason");
+  }
+  return { code: null, body: { decision: choice, analyst_id: analystId, reason: text === "" ? null : text } };
+}
+
+// Analistas que se podem escolher: só ativos (active vem do SQLite como 0/1),
+// com id válido e nome não vazio. Resposta ausente ou malformada -> [].
+function slVacAnalystOptions(envelope) {
+  const list = envelope && Array.isArray(envelope.analysts) ? envelope.analysts : [];
+  const options = [];
+  for (const analyst of list) {
+    if (!analyst || (analyst.active !== 1 && analyst.active !== true)) continue;
+    if (typeof analyst.id !== "string" || !SL_VAC_ANALYST_ID_RE.test(analyst.id)) continue;
+    if (typeof analyst.name !== "string" || analyst.name.trim() === "") continue;
+    options.push({ id: analyst.id, name: analyst.name });
+  }
+  return options;
+}
+
 // Liga o Tab preso a qualquer .modal visível. Só corre no browser (guarda por typeof document).
 function slInstallModalFocusTrap() {
   document.addEventListener("keydown", (ev) => {

@@ -1442,6 +1442,29 @@
       <section class="panel" id="vaccine-detail-panel" hidden>
         <h2 id="vac-detail-title">Vaccine</h2>
         <p id="vac-detail-warning" class="vac-not-applied" role="note">Proposta — não aplicada no Wazuh</p>
+        <h3>Decisão</h3>
+        <div id="vac-detail-decision" class="vac-decision">
+          <p id="vac-decision-state"></p>
+          <div id="vac-decision-form" class="vac-decision-form" hidden>
+            <div class="form-row">
+              <label for="vac-decision-analyst">Analista</label>
+              <select id="vac-decision-analyst">
+                <option value="">Escolher…</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="vac-decision-reason">Motivo (obrigatório para rejeitar)</label>
+              <textarea id="vac-decision-reason" maxlength="500" rows="3"></textarea>
+              <small id="vac-decision-count">0/500</small>
+            </div>
+            <p class="vac-decision-final">A decisão é final: não se reabre. Aprovar não aplica nada no Wazuh — só regista que o analista aceita a proposta.</p>
+            <div class="form-actions vac-decision-actions">
+              <button type="button" class="btn-primary" data-action="vac-approve" disabled>Aprovar</button>
+              <button type="button" class="btn-danger" data-action="vac-reject" disabled>Rejeitar</button>
+            </div>
+          </div>
+          <p id="vac-decision-status" role="status"></p>
+        </div>
         <h3>Origem</h3>
         <div id="vac-detail-origin" class="inc-meta"></div>
         <h3>Propostas</h3>

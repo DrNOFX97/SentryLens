@@ -16,8 +16,11 @@ Correr (a partir de scripts/):
 """
 
 import http.client
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -32,6 +35,7 @@ import main
 import serve_frontend
 import vaccine_engine
 import vaccine_ingest
+from incident_store import IncidentStore
 from vaccine_store import VaccineStore
 
 main.app.router.on_startup.clear()
@@ -89,6 +93,37 @@ def function_body(js: str, name: str) -> str:
         return ""
     end = re.search(r"^\}\s*$", js[start:], re.M)
     return js[start:start + end.end()] if end else js[start:]
+
+
+_NODE_SCRIPT = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const ctx = vm.createContext({});
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), ctx, { filename: process.argv[1] });
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  const out = JSON.parse(input).map(([name, args]) => JSON.stringify(ctx[name](...args)));
+  process.stdout.write("[" + out.join(",") + "]");
+});
+"""
+
+
+def node_ui_helpers(calls):
+    """Corre funções do ui_helpers.js REAL em node:vm (sem DOM) e devolve os
+    resultados, um por chamada `[nome_da_função, [args...]]`. Devolve None sem
+    node no PATH ou se o node falhar (quem chama decide se isso é uma falha)."""
+    node = shutil.which("node")
+    if node is None:
+        return None
+    helpers = str(serve_frontend.PROJECT_ROOT / "ui_helpers.js")
+    proc = subprocess.run([node, "-e", _NODE_SCRIPT, helpers], input=json.dumps(calls), capture_output=True,
+                          text=True, encoding="utf-8", timeout=60)
+    if proc.returncode != 0:
+        print(proc.stderr)
+        return None
+    return json.loads(proc.stdout)
 
 
 API_VARS = ("envelope", "vaccine", "origin", "evidence", "proposal", "rule",
@@ -153,6 +188,7 @@ def real_api_keys(extra_paths=()) -> tuple[set, dict]:
                                      incidents=("INC-20261012-1",)))
     iso1, iso2 = "2026-10-12T09:05:00+00:00", "2026-10-12T09:10:00+00:00"
     original_store, original_state = main.vaccine_store, main.vaccine_loop_state
+    original_incidents = main.incident_store
     tmp = tempfile.TemporaryDirectory()
     try:
         store = VaccineStore(os.path.join(tmp.name, "v.sqlite3"))
@@ -167,6 +203,20 @@ def real_api_keys(extra_paths=()) -> tuple[set, dict]:
         com_erro = client.get("/api/vaccines", headers=HEADERS)
         respostas = {"lista": lista.json(), "detalhe": detalhe.json(), "com_erro": com_erro.json()}
         chaves = all_keys(list(respostas.values()))
+        # Decisões: os corpos vêm do ui_helpers.js REAL (slVacDecisionBody, em node) e são enviados tal
+        # como estão. Sem node não há POST e respostas["decisao"] fica None.
+        respostas["decisao"] = respostas["decisao_rejeitar"] = None
+        main.incident_store = IncidentStore(os.path.join(tmp.name, "i.sqlite3"))
+        main.incident_store.create_analyst("analyst-eddie", "Eddie", 1, None, iso1)
+        main.incident_store.create_analyst("analyst-jeremy", "Jeremy", 2, None, iso1)
+        corpos = node_ui_helpers([["slVacDecisionBody", ["analyst-eddie", "approved", ""]],
+                                  ["slVacDecisionBody", ["analyst-jeremy", "rejected", "  Regra ruidosa  "]]])
+        respostas["corpos"] = [c["body"] for c in corpos] if corpos else None
+        if corpos:
+            for nome, vaccine_id, resultado in (("decisao", ID_C, corpos[0]), ("decisao_rejeitar", ID_B, corpos[1])):
+                resposta = client.post(f"/api/vaccines/{vaccine_id}/decision", headers=HEADERS, json=resultado["body"])
+                respostas[nome] = (resposta.status_code, resposta.json())
+                chaves |= all_keys(resposta.json()) | all_keys(resultado["body"])
         respostas["extra"] = {}
         for caminho in extra_paths:
             resposta = client.get(caminho, headers=HEADERS)
@@ -174,6 +224,7 @@ def real_api_keys(extra_paths=()) -> tuple[set, dict]:
         return chaves, respostas
     finally:
         main.vaccine_store, main.vaccine_loop_state = original_store, original_state
+        main.incident_store = original_incidents
         tmp.cleanup()
 
 
@@ -186,7 +237,8 @@ _DECL_RE = re.compile(r"^(?:const|let|var|class|function|async function)\s+([A-Z
 _INNERHTML_RE = re.compile(r"\.innerHTML\b")
 _RAW_RE = re.compile(r"\bhtmlRaw\(|\bescapeHtml\(")
 _MESSAGE_RE = re.compile(r"\.message\b")
-_MESSAGE_SINKS = ("vacErrorText", "vacRenderError", "vacRenderDetailError")
+_MESSAGE_SINKS = ("vacErrorText", "vacRenderError", "vacRenderDetailError", "vacRenderDecisionError",
+                  "vacSetAnalystsError")
 
 
 def top_level_decls(js: str) -> list[str]:
@@ -288,8 +340,10 @@ def run_tracer() -> None:
           "apiRequest(" in corpo_request)
     check('vaccines.js pede "/api/vaccines"', '"/api/vaccines"' in js)
     check("a chave nunca vai na query (sem api_key=)", "api_key=" not in js)
-    check("sem opção method nem verbos HTTP de escrita",
-          re.search(r"\bmethod\s*:", js) is None and re.search(r"\b(POST|PUT|PATCH|DELETE)\b", js) is None)
+    check('um só "method:" e um só "POST", ambos dentro de vacDecide; sem PUT, PATCH nem DELETE',
+          len(re.findall(r"\bmethod\s*:", js)) == 1 and js.count('"POST"') == 1
+          and re.search(r'method:\s*"POST"', function_body(js, "vacDecide")) is not None
+          and re.search(r"\b(PUT|PATCH|DELETE)\b", js) is None)
 
     # f) contrato de campos contra a resposta real da rota
     real, respostas = real_api_keys()
@@ -578,8 +632,8 @@ def run_detail() -> None:
     check('o aviso fixo #vac-detail-warning tem class="vac-not-applied" e o texto exato',
           aviso is not None and "vac-not-applied" in aviso.group(0)
           and aviso.group(1).strip() == "Proposta — não aplicada no Wazuh")
-    check("os h3 do painel são Origem, Propostas e Cadeia, por esta ordem",
-          re.findall(r"<h3>(.*?)</h3>", bloco) == ["Origem", "Propostas", "Cadeia"])
+    check("os h3 do painel são Decisão, Origem, Propostas e Cadeia, por esta ordem",
+          re.findall(r"<h3>(.*?)</h3>", bloco) == ["Decisão", "Origem", "Propostas", "Cadeia"])
     check("o painel tem #vac-detail-origin, #vac-detail-proposals e #vac-detail-chain",
           all(f'id="{i}"' in bloco for i in ("vac-detail-origin", "vac-detail-proposals", "vac-detail-chain")))
 
@@ -590,8 +644,10 @@ def run_detail() -> None:
     corpo = function_body(js, "vacSelect")
     check("vacSelect valida com VAC_ID_RE e ignora respostas fora de ordem (seq !== vacSelectSeq, 2 vezes)",
           "VAC_ID_RE" in corpo and corpo.count("seq !== vacSelectSeq") >= 2)
-    check("vacSelect é async e é a única chamada a /api/vaccines/ com o id",
-          "async function vacSelect(" in js and js.count('"/api/vaccines/"') == 1)
+    check("vacSelect (leitura) e vacDecide (escrita) são as únicas chamadas a /api/vaccines/ com o id",
+          "async function vacSelect(" in js and js.count('"/api/vaccines/"') == 2
+          and '"/api/vaccines/"' in function_body(js, "vacSelect")
+          and '"/api/vaccines/"' in function_body(js, "vacDecide"))
     check('há listeners "click" e "keydown" em #vac-body, com "Enter" e " "',
           re.search(r'getElementById\("vac-body"\)\.addEventListener\("click"', js) is not None
           and re.search(r'getElementById\("vac-body"\)\.addEventListener\("keydown"', js) is not None
@@ -701,6 +757,41 @@ def run_chain() -> None:
           and tres["vaccines"][0]["superseded_by"] is None)
 
 
+def run_decision() -> None:
+    """Tracer da decisão: o corpo que o ui_helpers.js real constrói é aceite pela rota real, e o markup e o
+    vacDecide do tracer estão ligados."""
+    files = served()
+    index_html = files["/index.html"][2]
+    js = files["/vaccines.js"][2]
+
+    check("node encontrado no PATH (necessário para executar o ui_helpers.js real)", shutil.which("node") is not None)
+    _, respostas = real_api_keys()
+    aprovar, rejeitar = respostas["decisao"], respostas["decisao_rejeitar"]
+    check("o corpo do helper (aprovar, eddie) é aceite pela rota real: 200, approved, autor Eddie, reason None",
+          aprovar is not None and aprovar[0] == 200 and aprovar[1]["vaccine"]["state"] == "approved"
+          and aprovar[1]["vaccine"]["decision"]["decided_by_name"] == "Eddie"
+          and aprovar[1]["vaccine"]["decision"]["reason"] is None)
+    check("o corpo do helper (rejeitar, jeremy, motivo aparado) é aceite pela rota real: 200, rejected, autor Jeremy",
+          rejeitar is not None and rejeitar[0] == 200 and rejeitar[1]["vaccine"]["state"] == "rejected"
+          and rejeitar[1]["vaccine"]["decision"]["decided_by_name"] == "Jeremy"
+          and rejeitar[1]["vaccine"]["decision"]["reason"] == "Regra ruidosa")
+    check("a resposta da decisão traz o aviso do servidor (notice) e a vaccine",
+          aprovar is not None and {"vaccine", "notice"} <= set(aprovar[1])
+          and "não aplicada no Wazuh" in aprovar[1]["notice"])
+
+    painel = index_html.find('<section class="panel" id="vaccine-detail-panel" hidden>')
+    fim = index_html.find("</section>", painel)
+    bloco = index_html[painel:fim] if painel != -1 and fim != -1 else ""
+    check("o painel de detalhe tem os botões data-action vac-approve e vac-reject",
+          'data-action="vac-approve"' in bloco and 'data-action="vac-reject"' in bloco)
+    corpo = function_body(js, "vacDecide")
+    check('vacDecide valida e constrói o corpo por slVacDecisionBody(, pede "/decision" e usa method: "POST"',
+          "slVacDecisionBody(" in corpo and '"/decision"' in corpo and 'method: "POST"' in corpo)
+    envelope_lidos = {p for v, p in data_accesses(js) if v == "envelope"}
+    check("vaccines.js lê envelope.vaccine e envelope.notice, ambos nas chaves reais da decisão",
+          {"vaccine", "notice"} <= envelope_lidos and {"vaccine", "notice"} <= real_api_keys()[0])
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
@@ -708,6 +799,7 @@ if __name__ == "__main__":
     run_states()
     run_detail()
     run_chain()
+    run_decision()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:

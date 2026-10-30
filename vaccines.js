@@ -1,8 +1,8 @@
 // Aba "Vaccines" (Roadmap v2, R11). Carregado depois de app.js: reutiliza os
 // seus globais (API_BASE, API_KEY, htmlT/htmRender de html.js, renderPanelError) e nunca os
-// redeclara. Só leitura: um único pedido GET a /api/vaccines com o cabeçalho
-// X-API-Key; nenhuma ação altera uma vaccine nem o Wazuh (as vaccines são
-// regras PROPOSTAS, nunca aplicadas).
+// redeclara. Leitura por GET a /api/vaccines com o cabeçalho X-API-Key; a única
+// escrita é a decisão do analista (vacDecide). Nenhuma ação altera o Wazuh
+// (as vaccines são regras PROPOSTAS, nunca aplicadas).
 //
 // Todos os identificadores de topo começam por vac ou VAC_: os scripts
 // clássicos partilham um só escopo global e um nome repetido rebenta o
@@ -16,7 +16,7 @@
 
 const VAC_VERDICT_LABELS = { not_detected: "Não detetado", partial: "Parcial" };
 const VAC_SENSOR_LABELS = { rule: "Regra", ml: "ML", network: "Rede" };
-const VAC_STATE_LABELS = { proposed: "Proposta" };
+const VAC_STATE_LABELS = { proposed: "Proposta", approved: "Aprovada", rejected: "Rejeitada" };
 const VAC_EXPECTED_SOURCE_LABELS = { log: "attack log", scenario_default: "omissão do cenário (Attack Library)" };
 
 // Mesmo formato que a rota de detalhe aceita (a rota volta a validar).
@@ -47,6 +47,12 @@ const VAC_ERROR_TEXT = {
   incidents_unavailable: "A base de incidentes não pôde ser lida — nada foi gravado para não perder a ligação aos incidentes.",
   unexpected_error: "Erro inesperado no gerador — vê o backend.log.",
   entry_not_found: "Esta vaccine não existe no store (o ficheiro pode ter sido trocado ou apagado).",
+  // Validação local da decisão (slVacDecisionBody): nenhum pedido é enviado.
+  analyst_required: "Escolhe o analista que decide antes de Aprovar ou Rejeitar.",
+  invalid_author: "O analista escolhido não tem um identificador válido — recarrega a página e escolhe outra vez.",
+  invalid_decision: "A escolha tem de ser Aprovar ou Rejeitar.",
+  reason_required: "Rejeitar exige um motivo — escreve porque é que a proposta não serve.",
+  invalid_reason: "O motivo tem no máximo 500 caracteres, numa só linha, sem caracteres de controlo.",
   http_404: "O backend não tem a rota de vaccines — reinicia-o com a versão atual.",
   http_422: "Filtro recusado pelo backend (valor fora do formato aceite).",
   http_502: "O backend devolveu 502 (erro de gateway) — tenta Atualizar daqui a pouco.",
@@ -64,6 +70,14 @@ let vacWasActive = false;
 // Vaccine aberta no detalhe e contador que descarta respostas fora de ordem.
 let vacSelectedId = null;
 let vacSelectSeq = 0;
+// Decisão: vaccine desenhada no detalhe, pedido em curso e analistas ativos
+// (null até carregar; vacAnalystsError guarda o código se falhou). Nada disto
+// vai para o armazenamento do browser: recarregar a página volta a "Escolher…".
+let vacDetailVaccine = null;
+let vacDeciding = false;
+let vacAnalysts = null;
+let vacAnalystsError = null;
+let vacAnalystsSeq = 0;
 // União das técnicas MITRE vistas nas respostas da sessão: alimenta o select
 // sem nunca encolher por causa do próprio filtro.
 const vacTechniques = new Set();
@@ -108,9 +122,9 @@ function vacErrorText(code) {
 
 // A mensagem do erro lançado é sempre um código, nunca texto do servidor.
 // O transporte (fetch, chave, timeout) é do apiRequest em api.js.
-async function vacRequest(path) {
+async function vacRequest(path, options) {
   try {
-    return await apiRequest(path);
+    return await apiRequest(path, options);
   } catch (err) {
     throw new Error(vacCodeFromApiError(err));
   }
@@ -436,6 +450,8 @@ function vacRenderDetail(vaccine) {
   htmRender(document.getElementById("vac-detail-origin"), vacOriginHtml(vaccine));
   htmRender(document.getElementById("vac-detail-proposals"), vacProposalsHtml(vaccine));
   htmRender(document.getElementById("vac-detail-chain"), vacChainHtml(vaccine));
+  vacDetailVaccine = vaccine;
+  vacRenderDecision();
 }
 
 function vacRenderDetailError(code) {
@@ -445,6 +461,115 @@ function vacRenderDetailError(code) {
   document.getElementById("vac-detail-origin").replaceChildren();
   document.getElementById("vac-detail-proposals").replaceChildren();
   document.getElementById("vac-detail-chain").replaceChildren();
+  vacDetailVaccine = null;
+  vacRenderDecision();
+}
+
+// Decisão do analista. Os botões só existem para uma vaccine proposta, atual
+// (sem superseded_by) e com pelo menos um analista ativo; a escolha de analista
+// e o motivo ficam só no DOM. Os restantes casos mostram só o rótulo do estado.
+function vacRenderDecision() {
+  const form = document.getElementById("vac-decision-form");
+  const stateLine = document.getElementById("vac-decision-state");
+  const vaccine = vacDetailVaccine;
+  if (!vaccine) {
+    form.hidden = true;
+    stateLine.textContent = "";
+    vacSyncDecisionControls();
+    return;
+  }
+  const label = vacLabel(VAC_STATE_LABELS, vaccine.state);
+  const open = vaccine.state === "proposed" && !vaccine.superseded_by && Array.isArray(vacAnalysts) && vacAnalysts.length > 0;
+  form.hidden = !open;
+  stateLine.textContent = open ? "Estado: " + label : label;
+  vacSyncDecisionControls();
+}
+
+// Botões desativados durante o pedido e enquanto não há analista escolhido.
+function vacSyncDecisionControls() {
+  const select = document.getElementById("vac-decision-analyst");
+  const blocked = vacDeciding || select.value === "";
+  document.querySelectorAll("#vac-detail-decision button[data-action]").forEach((button) => {
+    button.disabled = blocked;
+  });
+  select.disabled = vacDeciding;
+  document.getElementById("vac-decision-reason").disabled = vacDeciding;
+}
+
+function vacSetDecisionStatus(text, isError) {
+  const status = document.getElementById("vac-decision-status");
+  status.textContent = text;
+  status.classList.toggle("vac-decision-error", isError);
+}
+
+// O código do erro só serve de chave de vacErrorText.
+function vacRenderDecisionError(code) {
+  vacSetDecisionStatus(vacErrorText(code), true);
+}
+
+// Guarda a falha ao ler os analistas (código estável, nunca texto do servidor).
+function vacSetAnalystsError(code) {
+  vacAnalystsError = code;
+  vacAnalysts = null;
+}
+
+// Redesenha as options do select, mantendo a escolha só se o analista ainda existir.
+function vacRenderAnalystOptions() {
+  const select = document.getElementById("vac-decision-analyst");
+  const chosen = select.value;
+  const options = Array.isArray(vacAnalysts) ? vacAnalysts : [];
+  htmRender(select, htmlT`<option value="">Escolher…</option>${options.map((analyst) =>
+    htmlT`<option value="${analyst.id}">${analyst.name}</option>`)}`);
+  select.value = options.some((analyst) => analyst.id === chosen) ? chosen : "";
+}
+
+async function vacLoadAnalysts() {
+  const seq = ++vacAnalystsSeq;
+  try {
+    const envelope = await vacRequest("/api/soc/analysts?active_only=true");
+    if (seq !== vacAnalystsSeq) return;
+    vacAnalysts = slVacAnalystOptions(envelope);
+    vacAnalystsError = null;
+  } catch (err) {
+    if (seq !== vacAnalystsSeq) return;
+    vacSetAnalystsError(err.message);
+  }
+  vacRenderAnalystOptions();
+  vacRenderDecision();
+}
+
+// Único POST do ficheiro. A validação local (slVacDecisionBody) não envia
+// nada; um segundo clique durante o pedido é ignorado (vacDeciding).
+async function vacDecide(choice) {
+  if (vacDeciding) return;
+  const vaccine = vacDetailVaccine;
+  if (!vaccine || vaccine.id !== vacSelectedId) return;
+  const check = slVacDecisionBody(
+    document.getElementById("vac-decision-analyst").value, choice,
+    document.getElementById("vac-decision-reason").value);
+  if (check.code) {
+    vacRenderDecisionError(check.code);
+    return;
+  }
+  vacDeciding = true;
+  vacSyncDecisionControls();
+  vacSetDecisionStatus("A registar a decisão…", false);
+  const seq = vacSelectSeq;
+  try {
+    const envelope = await vacRequest("/api/vaccines/" + encodeURIComponent(vaccine.id) + "/decision",
+      { method: "POST", body: check.body });
+    if (seq === vacSelectSeq) {
+      vacDetailVaccine = envelope.vaccine;
+      vacRenderDecision();
+      vacSetDecisionStatus(envelope.notice, false);
+    }
+    vacRefresh();
+  } catch (err) {
+    if (seq === vacSelectSeq) vacRenderDecisionError(err.message);
+  } finally {
+    vacDeciding = false;
+    vacSyncDecisionControls();
+  }
 }
 
 async function vacSelect(id) {
@@ -482,10 +607,21 @@ for (const id of ["vac-attack-filter", "vac-technique-filter", "vac-superseded-f
 }
 document.getElementById("vac-refresh-btn").addEventListener("click", vacRefresh);
 
+document.getElementById("vac-detail-decision").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+  if (button.dataset.action === "vac-approve") vacDecide("approved");
+  else if (button.dataset.action === "vac-reject") vacDecide("rejected");
+});
+document.getElementById("vac-decision-analyst").addEventListener("change", vacSyncDecisionControls);
+
 // Ciclo de vida: recarrega só na passagem de inativa a ativa.
 function vacOnShow() {
   const active = vacIsActive();
-  if (active && !vacWasActive) vacRefresh();
+  if (active && !vacWasActive) {
+    vacRefresh();
+    vacLoadAnalysts();
+  }
   vacWasActive = active;
 }
 const vacObserver = new MutationObserver(vacOnShow);

@@ -127,4 +127,21 @@ check("rótulos da janela", ctx.slWindowLabel(1) === "última hora" && ctx.slWin
 check("nota sem recorte", ctx.slWindowNote(168, 720) === "A mostrar: últimos 7 dias");
 check("nota com recorte diz o máximo da fonte", ctx.slWindowNote(2160, 168) === "A mostrar: últimos 7 dias (máximo desta fonte)");
 
+// slVacDecisionBody (R12, aba Vaccines): valida o que o analista escreveu e constrói o corpo do POST de decisão.
+const vdb = (a, c, r) => ctx.slVacDecisionBody(a, c, r);
+const vdbJson = (a, c, r) => JSON.stringify(vdb(a, c, r));
+check("slVacDecisionBody: aprovar sem motivo -> corpo com reason null",
+  vdbJson("analyst-eddie", "approved", "") === '{"code":null,"body":{"decision":"approved","analyst_id":"analyst-eddie","reason":null}}');
+check("slVacDecisionBody: o corpo tem exatamente as chaves decision, analyst_id, reason (por esta ordem)",
+  JSON.stringify(Object.keys(vdb("analyst-eddie", "approved", "").body)) === '["decision","analyst_id","reason"]');
+check("slVacDecisionBody: o motivo vai aparado",
+  vdb("analyst-jeremy", "rejected", "  Regra ruidosa  ").body.reason === "Regra ruidosa");
+check("slVacDecisionBody: analista vazio, null e undefined -> analyst_required, sem corpo",
+  ["", null, undefined].every((a) => { const r = vdb(a, "approved", ""); return r.code === "analyst_required" && r.body === null; }));
+check("slVacDecisionBody: analista fora do formato -> invalid_author", vdb("Eddie", "approved", "").code === "invalid_author");
+check("slVacDecisionBody: escolha fora de approved/rejected -> invalid_decision", vdb("analyst-eddie", "applied", "").code === "invalid_decision");
+check("slVacDecisionBody: rejeitar com motivo só de espaços -> reason_required", vdb("analyst-eddie", "rejected", "   ").code === "reason_required");
+check("slVacDecisionBody: motivo com 501 caracteres -> invalid_reason", vdb("analyst-eddie", "rejected", "x".repeat(501)).code === "invalid_reason");
+check("slVacDecisionBody: motivo com quebra de linha -> invalid_reason", vdb("analyst-eddie", "rejected", "a\nb").code === "invalid_reason");
+
 finish();
