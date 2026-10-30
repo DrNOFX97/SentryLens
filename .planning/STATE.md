@@ -5,16 +5,16 @@ milestone_name: R12 Vaccine Lab
 current_phase: 16
 current_phase_name: API de decisão
 status: executing
-stopped_at: Completed 16-01-PLAN.md
-last_updated: "2026-10-30T11:15:23.277Z"
+stopped_at: Completed 16-02-PLAN.md
+last_updated: "2026-10-30T11:21:26.702Z"
 last_activity: 2026-10-30
 last_activity_desc: Phase 16 execution started
-state_head: a87a1130870706ca1dc1dcd181a8d0a6414d7a52
+state_head: 2d405710ee26cb5b1db65387b7628d33161cee66
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
   percent: 33
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 ## Current Position
 
 Phase: 16 (API de decisão) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-10-30 — Phase 16 execution started
 
@@ -51,6 +51,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 15 P02 | 15min | 2 tasks | 1 files |
 | Phase 15 P03 | 20min | 2 tasks | 2 files |
 | Phase 16 P01 | 10 min | 2 tasks | 3 files |
+| Phase 16 P02 | 15 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Recent decisions affecting current work:
 - [Phase 16]: Phase 16-01: teto do corpo 8192 bytes, excedido dá 422 invalid_body (não 413)
 - [Phase 16]: Phase 16-01: vaccine_id mal formado dá 422 invalid_vaccine_id por handler de RequestValidationError só da rota de decisão
 - [Phase 16]: Phase 16-01: autoria da decisão autodeclarada (analyst_id no corpo, validado no incident_store), não autenticada
+- [Phase 16]: 16-02: state_counts (envelope) e count_by_state (store); zeros explícitos com amostra, None sem amostra
+- [Phase 16]: 16-02: count_by_state corre depois de list_vaccines no mesmo try; estado desconhecido no ficheiro dá ValueError e 503
 
 ### Pending Todos
 
@@ -90,8 +93,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T11:15:23.148Z
-Stopped at: Completed 16-01-PLAN.md
+Last session: 2026-10-30T11:21:26.595Z
+Stopped at: Completed 16-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

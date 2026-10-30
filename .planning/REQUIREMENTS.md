@@ -16,7 +16,7 @@ Um analista decide o destino de cada vaccine proposta (aprovar ou rejeitar), com
 
 ### Leitura e dashboard
 
-- [ ] **VLB-05**: `GET /api/vaccines[/{id}]` devolve o estado derivado e a decisão (autor, data, motivo) e filtra por estado; sem decisão mostra `proposed`, sem amostra continua "Sem dados" (nunca 0).
+- [x] **VLB-05**: `GET /api/vaccines[/{id}]` devolve o estado derivado e a decisão (autor, data, motivo) e filtra por estado; sem decisão mostra `proposed`, sem amostra continua "Sem dados" (nunca 0).
 - [ ] **VLB-06**: O detalhe da vaccine na aba Vaccines tem botões Aprovar e Rejeitar (com campo de motivo), via `data-action` e listener delegado (nenhum handler inline), com erros mostrados pela frase do código estável.
 
 ### Qualidade
@@ -48,7 +48,7 @@ Reconhecidos, fora deste marco.
 | VLB-03 | Phase 15 | Complete |
 | VLB-01 | Phase 16 | Pending |
 | VLB-04 | Phase 16 | Pending |
-| VLB-05 | Phase 16 | Pending |
+| VLB-05 | Phase 16 | Complete |
 | VLB-06 | Phase 17 | Pending |
 | VLB-07 | Phase 17 | Pending |
 
