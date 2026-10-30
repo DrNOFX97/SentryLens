@@ -2037,14 +2037,40 @@ def _vaccine_decision_refusal(code: str) -> HTTPException:
     return HTTPException(status_code=VACCINE_DECISION_HTTP_STATUS[code], detail=code)
 
 
+def _reject_duplicate_keys(pairs: list) -> dict:
+    """object_pairs_hook: uma chave repetida (em qualquer nível) é ambígua, nunca "a última ganha"."""
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("chave repetida")
+        result[key] = value
+    return result
+
+
+async def _read_vaccine_decision_body(request: Request) -> bytes | None:
+    """Corpo bruto até VACCINE_DECISION_BODY_MAX_BYTES, ou None se o passar (D-09).
+    Um Content-Length acima do teto (ou que não é um número) recusa sem ler nada;
+    sem Content-Length (corpo por partes) a leitura pára assim que passa do teto,
+    por isso nunca se guarda mais do que o teto mais uma parte."""
+    declared = request.headers.get("content-length")
+    if declared is not None and (not (declared.isascii() and declared.isdigit()) or int(declared) > VACCINE_DECISION_BODY_MAX_BYTES):
+        return None
+    received = bytearray()
+    async for chunk in request.stream():
+        received += chunk
+        if len(received) > VACCINE_DECISION_BODY_MAX_BYTES:
+            return None
+    return bytes(received)
+
+
 def _parse_vaccine_decision_body(raw: bytes) -> tuple[dict | None, str | None]:
     """Corpo de contrato fechado, lido à mão (D-04): devolve (campos, None) com
     exatamente `decision`, `analyst_id` e `reason` (None se ausente), ou
     (None, código). Pura. Os valores de `decision` e `reason` são validados por
     `validate_request` dentro de `decide_vaccine`, não aqui."""
     try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (UnicodeDecodeError, ValueError, RecursionError):
         return None, "invalid_body"
     if not isinstance(data, dict):
         return None, "invalid_body"
@@ -2071,8 +2097,8 @@ async def decide_vaccine_route(vaccine_id: Annotated[str, Path(pattern=VACCINE_I
     estado já derivado. Todas as recusas têm um código estável em `detail` e não
     gravam nada: 422 corpo/analista/valores, 404 vaccine inexistente, 409 já
     decidida ou substituída, 503 store ou base de analistas indisponível."""
-    raw = await request.body()
-    fields, code = _parse_vaccine_decision_body(raw)
+    raw = await _read_vaccine_decision_body(request)
+    fields, code = (None, "invalid_body") if raw is None else _parse_vaccine_decision_body(raw)
     if code is not None:
         raise _vaccine_decision_refusal(code)
     try:
