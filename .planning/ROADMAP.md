@@ -120,7 +120,7 @@ Plans:
 - [ ] 17-03-PLAN.md — Badge de estado e estilos com tokens, filtro Estado, contadores das vaccines atuais (`kpiRender`, "—" sem amostra), textos da aba sem "só leitura" (VLB-06, VLB-07)
 
 **Wave 5**
-- [ ] 17-05-PLAN.md — Suite completa com código 0 e contagem medida em `README.md`, `ROADMAP_STATUS.md` (R12 ✅) e `CLAUDE.md` (VLB-07)
+- [ ] 17-05-PLAN.md — Flake de `test_ml_training.py` corrigido (temporário próprio por execução); suite completa com código 0 em duas execuções seguidas, sem escolher tentativas; contagem com proveniência em `README.md`, `ROADMAP_STATUS.md` (R12 ✅) e `CLAUDE.md` (VLB-07)
 
 ## Progress
 
