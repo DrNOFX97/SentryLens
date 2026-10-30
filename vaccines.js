@@ -26,7 +26,7 @@ const VAC_ID_RE = /^vac-[0-9a-f]{12}$/;
 // o store sem nada (reason no_data), o segundo é um filtro sem resultados.
 const VAC_NO_DATA_TEXT = "Sem dados — ainda não há vaccines propostas (nenhum ataque não detetado ou parcial já assente).";
 const VAC_FILTER_EMPTY_TEXT = "Nenhuma vaccine corresponde aos filtros.";
-const VAC_GENERIC_ERROR = "Erro inesperado ao ler as vaccines.";
+const VAC_GENERIC_ERROR = "Erro inesperado no pedido de vaccines — vê o backend.log.";
 
 // Só isto é aceite como código vindo do detalhe da resposta; qualquer outra
 // coisa (HTML, caminho, texto de exceção) cai no código HTTP.
@@ -44,19 +44,37 @@ const VAC_ERROR_TEXT = {
   attack_outside_alert_window: "Há ataques mais antigos do que a janela de alertas consultada.",
   source_unavailable: "Uma fonte de dados do Red vs Blue esteve indisponível.",
   attack_log_unreadable: "O attack log (attack_log.jsonl) não pôde ser lido.",
-  incidents_unavailable: "A base de incidentes não pôde ser lida — nada foi gravado para não perder a ligação aos incidentes.",
+  // Serve o gerador e a decisão: em ambos a base de incidentes e da Equipa SOC não pôde ser lida.
+  incidents_unavailable: "A base de incidentes e da Equipa SOC (scripts/incidents.sqlite3) não pôde ser lida — nada foi gravado; vê o backend.log.",
   unexpected_error: "Erro inesperado no gerador — vê o backend.log.",
   entry_not_found: "Esta vaccine não existe no store (o ficheiro pode ter sido trocado ou apagado).",
   // Validação local da decisão (slVacDecisionBody): nenhum pedido é enviado.
   analyst_required: "Escolhe o analista que decide antes de Aprovar ou Rejeitar.",
-  invalid_author: "O analista escolhido não tem um identificador válido — recarrega a página e escolhe outra vez.",
   invalid_decision: "A escolha tem de ser Aprovar ou Rejeitar.",
   reason_required: "Rejeitar exige um motivo — escreve porque é que a proposta não serve.",
   invalid_reason: "O motivo tem no máximo 500 caracteres, numa só linha, sem caracteres de controlo.",
+  // Recusas da rota de decisão (vaccine_decision.ERROR_CODES e main.VACCINE_DECISION_ROUTE_CODES).
+  // O nome do analista (ou o seu identificador) tem caracteres fora do aceite, como o apóstrofo (F16 D-07).
+  invalid_author: "O nome do analista tem caracteres fora do aceite (por exemplo um apóstrofo) — corrige-o na Equipa SOC e recarrega a página.",
+  invalid_vaccine_id: "O identificador da vaccine está mal formado — escolhe a vaccine outra vez na tabela.",
+  invalid_decided_at: "O backend recusou a data da decisão (erro do servidor, não do pedido) — vê o backend.log.",
+  invalid_body: "O pedido foi recusado por estar fora do contrato do backend — recarrega a página para teres a versão atual do dashboard.",
+  analyst_not_found: "Esse analista já não existe na Equipa SOC — escolhe outro analista na lista (é atualizada ao recarregar).",
+  analyst_inactive: "Esse analista está desativado na Equipa SOC — escolhe outro analista na lista (é atualizada ao recarregar).",
+  already_decided: "Esta vaccine já foi decidida — outra pessoa ou outro separador decidiu primeiro; a vista é atualizada.",
+  vaccine_superseded: "Esta vaccine foi substituída por uma mais recente — a vista é atualizada e decide-se a atual.",
+  // Transporte e HTTP sem código estável: servem a leitura e a decisão.
+  timeout: "O backend não respondeu em 15 s — o pedido pode ter chegado ao backend; se estavas a decidir, a decisão pode ter ficado gravada e a vista é atualizada para o mostrar.",
+  invalid_response: "O backend devolveu uma resposta ilegível — o pedido pode ter chegado ao backend; se estavas a decidir, a vista é atualizada para mostrar se a decisão ficou gravada (vê o backend.log).",
+  http_403: "Acesso recusado pelo backend — confirma a API key e a origem do dashboard.",
   http_404: "O backend não tem a rota de vaccines — reinicia-o com a versão atual.",
-  http_422: "Filtro recusado pelo backend (valor fora do formato aceite).",
+  http_405: "O backend não aceita este método na rota de decisão — reinicia-o com a versão atual.",
+  http_409: "Conflito: a vaccine mudou entretanto — a vista é atualizada.",
+  http_422: "O backend recusou o pedido (valor fora do formato aceite) — recarrega a página e tenta de novo.",
+  http_500: "Erro interno do backend — vê o backend.log.",
   http_502: "O backend devolveu 502 (erro de gateway) — tenta Atualizar daqui a pouco.",
   http_503: "O backend está indisponível (503) — tenta Atualizar daqui a pouco.",
+  http_504: "O backend demorou demasiado a responder — tenta de novo; se estavas a decidir, a vista é atualizada.",
 };
 
 // Os mesmos formatos que a rota GET /api/vaccines aceita (a rota volta a validar).

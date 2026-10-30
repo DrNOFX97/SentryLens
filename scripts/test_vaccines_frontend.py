@@ -74,7 +74,7 @@ def get(port: int, path: str, headers: dict | None = None) -> tuple[int, dict, s
 
 # --- helpers ---------------------------------------------------------------
 
-SERVED_PATHS = ("/index.html", "/vaccines.js", "/app.js", "/style.css", "/ui_helpers.js")
+SERVED_PATHS = ("/index.html", "/vaccines.js", "/app.js", "/style.css", "/ui_helpers.js", "/api.js")
 
 
 def served() -> dict[str, tuple[int, dict, str]]:
@@ -247,6 +247,34 @@ def real_api_keys(extra_paths=()) -> tuple[set, dict]:
             decidida = client.get("/api/vaccines?include_superseded=true", headers=HEADERS)
             respostas["lista_decidida"] = decidida.json()
             chaves |= all_keys(segunda.json()) | all_keys(decidida.json())
+        # Recusas reais da rota de decisão, por nome: (estado HTTP, corpo JSON). Estados do store neste ponto:
+        # C aprovada, B rejeitada, A substituída (ainda proposta). Os pedidos recusados não gravam nada.
+        respostas["erros_decisao"] = None
+        if corpos:
+            aprovar = {"decision": "approved", "analyst_id": "analyst-eddie"}
+            rota = "/api/vaccines/{}/decision"
+            pedidos = {
+                "already_decided": (ID_C, aprovar),
+                "vaccine_superseded": (ID_A, aprovar),
+                "reason_required": (ID_C, {"decision": "rejected", "analyst_id": "analyst-eddie"}),
+                "analyst_not_found": (ID_C, {**aprovar, "analyst_id": "analyst-ninguem"}),
+                "analyst_inactive": (ID_C, {**aprovar, "analyst_id": "analyst-mike"}),
+                "invalid_body": (ID_C, {**aprovar, "decided_by_name": "Eddie"}),
+                "invalid_author": (ID_C, {**aprovar, "analyst_id": "Eddie O'Neil"}),
+                "invalid_decision": (ID_C, {**aprovar, "decision": "maybe"}),
+                "invalid_reason": (ID_C, {**aprovar, "reason": "linha um\nlinha dois"}),
+                "invalid_vaccine_id": ("vac-xyz", aprovar),
+                "entry_not_found": ("vac-000000000000", aprovar),
+            }
+            erros = {}
+            for nome, (vaccine_id, corpo) in pedidos.items():
+                resposta = client.post(rota.format(vaccine_id), headers=HEADERS, json=corpo)
+                erros[nome] = (resposta.status_code, resposta.json())
+            put = client.put(rota.format(ID_C), headers=HEADERS, json=aprovar)
+            erros["metodo_put"] = (put.status_code, put.json())
+            sem_chave = client.post(rota.format(ID_C), json=aprovar)
+            erros["sem_chave"] = (sem_chave.status_code, sem_chave.json())
+            respostas["erros_decisao"] = erros
         respostas["extra"] = {}
         for caminho in extra_paths:
             resposta = client.get(caminho, headers=HEADERS)
@@ -911,6 +939,129 @@ def run_decision_contract() -> None:
           estados == {ID_C: "approved", ID_B: "rejected", ID_A: "proposed"})
 
 
+_SLUG_RE = re.compile(r"^[a-z_]{1,64}$")
+
+
+def client_code(status: int, body) -> str:
+    """O código de erro como o cliente o vê: a regra de apiCodeFromResponse (api.js: 401 -> unauthorized,
+    422 com lista -> validation_error, 403 sem slug -> forbidden, detail a casar ^[a-z_]{1,64}$ -> detail,
+    senão http_<estado>, ou validation_error se for 422) seguida da de vacCodeFromApiError (vaccines.js:
+    forbidden e validation_error passam a http_<estado>)."""
+    detail = body.get("detail") if isinstance(body, dict) else None
+    slug = detail if isinstance(detail, str) and _SLUG_RE.match(detail) else None
+    if status == 401:
+        code = "unauthorized"
+    elif status == 422 and isinstance(detail, list):
+        code = "validation_error"
+    elif status == 403 and not slug:
+        code = "forbidden"
+    else:
+        code = slug or ("validation_error" if status == 422 else f"http_{status}")
+    return transport_code(code)
+
+
+def transport_code(code: str) -> str:
+    """A regra de vacCodeFromApiError: forbidden e validation_error ficam http_<estado> (o estado de
+    ambos é fixo: 403 e 422)."""
+    return {"forbidden": "http_403", "validation_error": "http_422"}.get(code, code)
+
+
+def run_decision_errors() -> None:
+    """D-11: cada erro que a decisão pode dar (rota, validação local, transporte) tem frase PT-PT em
+    VAC_ERROR_TEXT, provada contra as recusas REAIS da rota; o texto do servidor nunca é a frase."""
+    import vaccine_decision
+
+    files = served()
+    js = files["/vaccines.js"][2]
+    api_js = files["/api.js"][2]
+    objeto = re.search(r"const VAC_ERROR_TEXT = \{(.*?)^\};", js, re.S | re.M)
+    corpo_objeto = objeto.group(1) if objeto else ""
+    chaves = set(re.findall(r"^\s{2}([A-Za-z_]\w*):", corpo_objeto, re.M))
+    frases = dict(re.findall(r'^\s{2}([A-Za-z_]\w*):\s*"(.*)",\s*$', corpo_objeto, re.M))
+
+    # a) cobertura por conjunto de códigos
+    pedidos = (set(vaccine_decision.ERROR_CODES) | set(main.VACCINE_DECISION_ROUTE_CODES)
+               | {"analyst_required", "http_403", "http_405", "http_409", "http_500", "http_504"})
+    em_falta = sorted(pedidos - chaves)
+    check("VAC_ERROR_TEXT tem frase para vaccine_decision.ERROR_CODES, os códigos da rota, analyst_required "
+          "e http_403/405/409/500/504", not em_falta)
+    if em_falta:
+        print(f"       códigos sem frase: {em_falta}")
+
+    # b) transporte: as chaves de API_ERROR_TEXT (depois da regra de vacCodeFromApiError) têm frase
+    api_obj = re.search(r"const API_ERROR_TEXT = \{(.*?)^\};", api_js, re.S | re.M)
+    api_chaves = set(re.findall(r"^\s{2}([A-Za-z_]\w*):", api_obj.group(1), re.M)) if api_obj else set()
+    check("api.js servido tem API_ERROR_TEXT com timeout, invalid_response e network_error",
+          {"timeout", "invalid_response", "network_error"} <= api_chaves)
+    transporte = {transport_code(c) for c in api_chaves} | {"http_405", "http_409", "http_500"}
+    sem_frase = sorted(transporte - chaves)
+    check("cada código de transporte do api.js (e http_405/409/500) tem frase em VAC_ERROR_TEXT", not sem_frase)
+    if sem_frase:
+        print(f"       códigos de transporte sem frase: {sem_frase}")
+
+    # c) conteúdo das frases
+    check("nenhuma frase de VAC_ERROR_TEXT contém 'Sem dados', 'undefined' nem 'null'",
+          bool(frases) and not any(x in f for f in frases.values() for x in ("Sem dados", "undefined", "null")))
+    curtas = sorted(c for c in pedidos | transporte if c in frases and len(frases[c]) < 20)
+    check("cada frase dos códigos da decisão e do transporte tem pelo menos 20 caracteres", not curtas)
+    for c in ("timeout", "invalid_response"):
+        f = frases.get(c, "")
+        check(f"{c}: diz que o pedido pode ter chegado ao backend, que a decisão pode ter ficado gravada e que "
+              "a vista é atualizada, sem falar do Wazuh Indexer",
+              "pode ter chegado" in f and "decisão" in f and "atualiz" in f and "Indexer" not in f)
+    check("http_422 serve filtros e decisão (diz que o backend recusou o pedido, sem falar só de filtro)",
+          "recusou o pedido" in frases.get("http_422", "") and "filtro" not in frases.get("http_422", "").lower())
+    f = frases.get("invalid_author", "")
+    check("invalid_author diz que o nome do analista tem caracteres fora do aceite e manda corrigi-lo na Equipa SOC",
+          "nome" in f and "caracteres" in f and "Equipa SOC" in f)
+    f = frases.get("already_decided", "")
+    check("already_decided diz que outra pessoa ou outro separador já decidiu e que a vista é atualizada",
+          "outro separador" in f and "atualiz" in f)
+    f = frases.get("vaccine_superseded", "")
+    check("vaccine_superseded diz que foi substituída e que se decide a atual", "substituída" in f and "atual" in f)
+    check("analyst_inactive e analyst_not_found mandam escolher outro analista",
+          all("outro analista" in frases.get(c, "") for c in ("analyst_inactive", "analyst_not_found")))
+    gen = re.search(r'const VAC_GENERIC_ERROR = "([^"]*)"', js)
+    check("VAC_GENERIC_ERROR já não diz 'ao ler' (serve leitura e decisão)",
+          gen is not None and "ao ler" not in gen.group(1) and "vaccines" in gen.group(1))
+    check("a frase de incidents_unavailable serve o gerador e a decisão (sem 'perder a ligação')",
+          "perder a ligação" not in frases.get("incidents_unavailable", "x")
+          and "Equipa SOC" in frases.get("incidents_unavailable", ""))
+
+    # d) respostas reais da rota: o código que o cliente extrai tem frase própria
+    _, respostas = real_api_keys()
+    erros = respostas["erros_decisao"]
+    check("recusas reais da rota de decisão obtidas (precisa de node)", erros is not None)
+    esperados = {
+        "already_decided": (409, "already_decided"), "vaccine_superseded": (409, "vaccine_superseded"),
+        "reason_required": (422, "reason_required"), "analyst_not_found": (422, "analyst_not_found"),
+        "analyst_inactive": (422, "analyst_inactive"), "invalid_body": (422, "invalid_body"),
+        "invalid_author": (422, "invalid_author"), "invalid_decision": (422, "invalid_decision"),
+        "invalid_reason": (422, "invalid_reason"), "invalid_vaccine_id": (422, "invalid_vaccine_id"),
+        "entry_not_found": (404, "entry_not_found"), "metodo_put": (405, "http_405"),
+        "sem_chave": (401, "unauthorized"),
+    }
+    for nome, (estado_esperado, codigo_esperado) in esperados.items():
+        estado, corpo = (erros or {}).get(nome, (None, None))
+        codigo = client_code(estado, corpo) if estado is not None else None
+        check(f"rota real: {nome} -> {estado_esperado} e o cliente vê '{codigo_esperado}', com frase própria",
+              estado == estado_esperado and codigo == codigo_esperado and codigo in frases
+              and frases[codigo] != (gen.group(1) if gen else None))
+        if estado is not None and (estado, codigo) != (estado_esperado, codigo_esperado):
+            print(f"       obtido: {estado} {corpo!r} -> {codigo}")
+    put_detail = ((erros or {}).get("metodo_put") or (None, {}))[1]
+    check("o PUT na rota dá 405 com um detail que não é slug (o cliente cai em http_405)",
+          isinstance(put_detail, dict) and not _SLUG_RE.match(str(put_detail.get("detail"))))
+
+    # e) a própria regra client_code
+    check("client_code segue a regra do api.js: 422 com lista, 403 sem slug, slug e http_<estado>",
+          client_code(422, {"detail": [{"loc": []}]}) == "http_422"
+          and client_code(403, {"detail": "Forbidden"}) == "http_403"
+          and client_code(409, {"detail": "already_decided"}) == "already_decided"
+          and client_code(500, {"detail": "Internal Server Error"}) == "http_500"
+          and client_code(504, None) == "http_504")
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
@@ -920,6 +1071,7 @@ if __name__ == "__main__":
     run_chain()
     run_decision()
     run_decision_contract()
+    run_decision_errors()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:
