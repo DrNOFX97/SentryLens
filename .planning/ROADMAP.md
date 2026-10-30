@@ -103,7 +103,7 @@ Plans:
   3. `run_all_tests.py` termina com código 0 numa execução completa, sem Wazuh, incluindo os testes novos.
   4. `DATA_MODEL.md`, `API.md`, `ROADMAP_STATUS.md` (R12 ✅), `README.md` e `CLAUDE.md` descrevem o R12 com contagens medidas.
 
-**Plans:** 2/6 plans executed
+**Plans:** 3/6 plans executed
 
 Plans:
 **Wave 1**
@@ -111,7 +111,7 @@ Plans:
 - [x] 17-04-PLAN.md — `DATA_MODEL.md` (decisão do analista, estado derivado, `state_counts`) e `API.md` (POST de decisão, códigos, `?state=`), em paralelo (VLB-07)
 
 **Wave 2**
-- [ ] 17-06-PLAN.md — Frase PT-PT para cada código de erro da decisão, provada contra as respostas reais da rota (VLB-06, VLB-07)
+- [x] 17-06-PLAN.md — Frase PT-PT para cada código de erro da decisão, provada contra as respostas reais da rota (VLB-06, VLB-07)
 
 **Wave 3**
 - [ ] 17-02-PLAN.md — Bloco Decisão por estado (decidida só de leitura, substituída, sem analistas), reposição ao mudar de vaccine, contador, aviso por estado; 409 e erros que mudam o estado refazem detalhe e lista (VLB-06, VLB-07)

@@ -5,16 +5,16 @@ milestone_name: R12 Vaccine Lab
 current_phase: 17
 current_phase_name: Aba, testes e documentação
 status: executing
-stopped_at: Completed 17-04-PLAN.md
-last_updated: "2026-10-30T16:54:11.208Z"
+stopped_at: Completed 17-06-PLAN.md
+last_updated: "2026-10-30T16:58:53.088Z"
 last_activity: 2026-10-30
 last_activity_desc: Phase 17 execution started
-state_head: 112d7b45cb8087b206928981de531ba18442c727
+state_head: c3632f845762f4d38137381d6263d32d9d2bf965
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 8
+  completed_plans: 9
   percent: 67
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 ## Current Position
 
 Phase: 17 (Aba, testes e documentação) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-10-30 — Phase 17 execution started
 
@@ -55,6 +55,7 @@ Progress: [███████░░░] 67%
 | Phase 16 P03 | 8 min | 2 tasks | 2 files |
 | Phase 17 P01 | 25min | 2 tasks | 5 files |
 | Phase 17 P04 | 15min | 2 tasks | 2 files |
+| Phase 17 P06 | 15 min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,7 @@ Recent decisions affecting current work:
 - [Phase 16]: 16-03: o varrimento AST do fecho local segue referências a nomes e proíbe acesso por atributo a manager_client/vm_ssh_client/subprocess; allow_methods do CORS fixado por teste sem mudar main.py
 - [Phase 17]: 17-01: secção Decisão como markup estático; validação local analista, escolha, motivo; motivo conta pontos de código; só analistas com active 1/true
 - [Phase 17]: 17-04: aprovada documentada como aceite pelo analista, nada aplicado no Wazuh (R21); autoria autodeclarada tratada como limite conhecido
+- [Phase 17]: 17-06: incidents_unavailable e VAC_GENERIC_ERROR servem leitura e decisão; invalid_analyst_id do D-11 não existe no backend, segue-se invalid_author
 
 ### Pending Todos
 
@@ -99,8 +101,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T16:54:11.070Z
-Stopped at: Completed 17-04-PLAN.md
+Last session: 2026-10-30T16:58:52.952Z
+Stopped at: Completed 17-06-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
