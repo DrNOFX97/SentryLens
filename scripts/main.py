@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -35,9 +36,12 @@ for _stream in (sys.stdout, sys.stderr):
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 import incident_ingest
@@ -93,6 +97,7 @@ from system_monitor import (
     measure_network_speed,
     record_usage_sample,
 )
+from vaccine_decision import ANALYST_ID_RE, CONFLICT_CODES, INVALID_INPUT_CODES, NOT_FOUND_CODES, VaccineDecisionError
 from vaccine_engine import VACCINE_ID_RE, build_vaccine_candidates
 from vaccine_store import VaccineStore, resolve_db_path as resolve_vaccines_db_path
 from wazuh_client import WazuhIndexerClient, WazuhManagerClient
@@ -1999,6 +2004,116 @@ async def get_vaccine(vaccine_id: Annotated[str, Path(pattern=VACCINE_ID_RE)]):
     if vaccine is None:
         raise HTTPException(status_code=404, detail="entry_not_found")
     return {"vaccine": vaccine}
+
+
+# --- Decisão do analista (R12, Phase 16) ---------------------------------
+# Teto do corpo bruto. O corpo válido mais longo possível é um motivo de 500
+# caracteres escrito como pares de escapes \uXXXX\uXXXX (12 bytes cada), abaixo
+# de 6200 bytes: 8192 nunca recusa um corpo válido. Excedê-lo dá 422 invalid_body
+# (não 413), para todos os erros do corpo terem o mesmo formato.
+VACCINE_DECISION_BODY_MAX_BYTES = 8192
+VACCINE_DECISION_BODY_KEYS = frozenset({"decision", "analyst_id", "reason"})
+VACCINE_DECISION_REQUIRED_KEYS = frozenset({"decision", "analyst_id"})
+# Códigos que são da rota (a Phase 15 só conhece os seus ERROR_CODES).
+VACCINE_DECISION_ROUTE_CODES = ("invalid_body", "analyst_not_found", "analyst_inactive",
+                                "store_unavailable", "incidents_unavailable")
+VACCINE_DECISION_HTTP_STATUS = {
+    **{code: 422 for code in INVALID_INPUT_CODES},
+    **{code: 404 for code in NOT_FOUND_CODES},
+    **{code: 409 for code in CONFLICT_CODES},
+    "invalid_body": 422,
+    "analyst_not_found": 422,
+    "analyst_inactive": 422,
+    "store_unavailable": 503,
+    "incidents_unavailable": 503,
+}
+VACCINE_DECISION_NOTICE = ("Decisão registada: aprovada significa só aceite pelo analista. "
+                           "Vaccine não aplicada no Wazuh: nada foi aplicado nem executado.")
+_VACCINE_DECISION_ANALYST_ID = re.compile(ANALYST_ID_RE)
+
+
+def _vaccine_decision_refusal(code: str) -> HTTPException:
+    """Recusa com o código estável como `detail` (string), nunca texto de exceção."""
+    return HTTPException(status_code=VACCINE_DECISION_HTTP_STATUS[code], detail=code)
+
+
+def _parse_vaccine_decision_body(raw: bytes) -> tuple[dict | None, str | None]:
+    """Corpo de contrato fechado, lido à mão (D-04): devolve (campos, None) com
+    exatamente `decision`, `analyst_id` e `reason` (None se ausente), ou
+    (None, código). Pura. Os valores de `decision` e `reason` são validados por
+    `validate_request` dentro de `decide_vaccine`, não aqui."""
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None, "invalid_body"
+    if not isinstance(data, dict):
+        return None, "invalid_body"
+    keys = set(data)
+    if not keys <= VACCINE_DECISION_BODY_KEYS or not keys >= VACCINE_DECISION_REQUIRED_KEYS:
+        return None, "invalid_body"
+    decision, analyst_id, reason = data["decision"], data["analyst_id"], data.get("reason")
+    if not isinstance(decision, str) or not isinstance(analyst_id, str) or not (reason is None or isinstance(reason, str)):
+        return None, "invalid_body"
+    if _VACCINE_DECISION_ANALYST_ID.fullmatch(analyst_id) is None:
+        return None, "invalid_author"
+    return {"decision": decision, "analyst_id": analyst_id, "reason": reason}, None
+
+
+@app.post("/api/vaccines/{vaccine_id}/decision", dependencies=_REQUIRE_API_KEY)
+async def decide_vaccine_route(vaccine_id: Annotated[str, Path(pattern=VACCINE_ID_RE)], request: Request):
+    """Decisão do analista sobre uma vaccine: `approved` ou `rejected` (final).
+    Corpo fechado `{"decision", "analyst_id", "reason"?}`; `reason` é obrigatório
+    ao rejeitar. Aprovada significa só aceite pelo analista: esta rota não aplica
+    nada no Wazuh nem executa nada. A autoria é autodeclarada, não autenticada:
+    só existe uma API key, por isso o registo diz quem o cliente disse ser (o
+    analista tem de existir e estar ativo na Equipa SOC; o nome vem do
+    incident_store e o instante do servidor). Resposta `{vaccine, notice}` com o
+    estado já derivado. Todas as recusas têm um código estável em `detail` e não
+    gravam nada: 422 corpo/analista/valores, 404 vaccine inexistente, 409 já
+    decidida ou substituída, 503 store ou base de analistas indisponível."""
+    raw = await request.body()
+    fields, code = _parse_vaccine_decision_body(raw)
+    if code is not None:
+        raise _vaccine_decision_refusal(code)
+    try:
+        analyst = await run_in_threadpool(incident_store.get_analyst, fields["analyst_id"])
+    except sqlite3.Error:
+        logger.exception("Vaccines: base de analistas ilegível")
+        raise _vaccine_decision_refusal("incidents_unavailable")
+    if analyst is None:
+        raise _vaccine_decision_refusal("analyst_not_found")
+    if not analyst["active"]:
+        raise _vaccine_decision_refusal("analyst_inactive")
+    try:
+        await run_in_threadpool(
+            vaccine_store.decide_vaccine,
+            vaccine_id=vaccine_id, decision=fields["decision"], decided_by=analyst["id"],
+            decided_by_name=analyst["name"], reason=fields["reason"], now_iso=_now_iso())
+    except VaccineDecisionError as exc:
+        raise _vaccine_decision_refusal(exc.code)
+    except (sqlite3.Error, ValueError):
+        logger.exception("Vaccines: escrita da decisão falhou")
+        raise _vaccine_decision_refusal("store_unavailable")
+    try:
+        vaccine = await run_in_threadpool(vaccine_store.get_vaccine, vaccine_id)
+    except (sqlite3.Error, ValueError):
+        logger.exception("Vaccines: releitura depois da decisão falhou")
+        raise _vaccine_decision_refusal("store_unavailable")
+    if vaccine is None:
+        raise _vaccine_decision_refusal("store_unavailable")
+    return {"vaccine": vaccine, "notice": VACCINE_DECISION_NOTICE}
+
+
+@app.exception_handler(RequestValidationError)
+async def _vaccine_decision_validation_error(request: Request, exc: RequestValidationError):
+    """Só a rota de decisão muda: um `vaccine_id` mal formado dá 422 com
+    `detail` em string (`invalid_vaccine_id`) em vez da lista do FastAPI, para o
+    cliente ler um código estável. Qualquer outra rota delega no handler por
+    omissão, com a resposta inalterada."""
+    if request.scope.get("endpoint") is decide_vaccine_route:
+        code = "invalid_vaccine_id" if all(e.get("loc", ("",))[0] == "path" for e in exc.errors()) else "invalid_body"
+        return JSONResponse(status_code=422, content={"detail": code})
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.get("/api/export/report", dependencies=_REQUIRE_API_KEY)

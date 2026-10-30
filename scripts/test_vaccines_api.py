@@ -330,8 +330,10 @@ def snapshot_store(store: VaccineStore, path: str) -> tuple:
 
 
 def run_guarantees() -> None:
-    """D-09/D-10: sem rota de escrita, API key em cada rota, estado sempre proposed,
-    503 estável sem fuga de texto de exceção nem de caminho, 422/401."""
+    """D-09/D-10: a única escrita HTTP é o POST de decisão do R12 (as de leitura
+    recusam escritas com 405), API key em cada rota, estado sempre proposed
+    enquanto ninguém decide, 503 estável sem fuga de texto de exceção nem de
+    caminho, 422/401."""
     original_load, original_build = main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report
     original_indexer = main.indexer_client.get_recent_alerts
     tmp = tempfile.TemporaryDirectory()
@@ -356,13 +358,17 @@ def run_guarantees() -> None:
         check("depois das tentativas de escrita o store está igual (ids, payloads, superseded_by, state, linhas)",
               snapshot_store(real_store, vaccines_path) == before)
 
-        # --- D-10: só duas rotas, só GET, API key na própria rota ---
+        # --- D-10: três rotas, só a de decisão (R12) escreve, API key na própria rota ---
         vaccine_routes = [r for r in main.app.routes if getattr(r, "path", "").startswith("/api/vaccines")]
-        check("main.app.routes tem exatamente as rotas /api/vaccines e /api/vaccines/{vaccine_id}",
-              sorted(r.path for r in vaccine_routes) == ["/api/vaccines", "/api/vaccines/{vaccine_id}"])
-        check("ambas as rotas só aceitam GET/HEAD",
-              all(r.methods <= {"GET", "HEAD"} and "GET" in r.methods for r in vaccine_routes))
-        check("ambas têm require_api_key nas dependencies da própria rota",
+        check("main.app.routes tem exatamente as rotas /api/vaccines, /api/vaccines/{vaccine_id} e /api/vaccines/{vaccine_id}/decision",
+              sorted(r.path for r in vaccine_routes)
+              == ["/api/vaccines", "/api/vaccines/{vaccine_id}", "/api/vaccines/{vaccine_id}/decision"])
+        read_routes = [r for r in vaccine_routes if not r.path.endswith("/decision")]
+        decision_routes = [r for r in vaccine_routes if r.path.endswith("/decision")]
+        check("as duas rotas de leitura só aceitam GET/HEAD",
+              all(r.methods <= {"GET", "HEAD"} and "GET" in r.methods for r in read_routes))
+        check("a rota de decisão só aceita POST", len(decision_routes) == 1 and decision_routes[0].methods == {"POST"})
+        check("as três têm require_api_key nas dependencies da própria rota",
               all(any(getattr(d, "dependency", None) is main.require_api_key for d in r.dependencies)
                   for r in vaccine_routes))
 
