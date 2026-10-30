@@ -143,5 +143,24 @@ check("slVacDecisionBody: escolha fora de approved/rejected -> invalid_decision"
 check("slVacDecisionBody: rejeitar com motivo só de espaços -> reason_required", vdb("analyst-eddie", "rejected", "   ").code === "reason_required");
 check("slVacDecisionBody: motivo com 501 caracteres -> invalid_reason", vdb("analyst-eddie", "rejected", "x".repeat(501)).code === "invalid_reason");
 check("slVacDecisionBody: motivo com quebra de linha -> invalid_reason", vdb("analyst-eddie", "rejected", "a\nb").code === "invalid_reason");
+check("slVacDecisionBody: analista com maiúscula (analyst-A) -> invalid_author", vdb("analyst-A", "approved", "").code === "invalid_author");
+check("slVacDecisionBody: APPROVED e vazio -> invalid_decision", vdb("analyst-eddie", "APPROVED", "").code === "invalid_decision" && vdb("analyst-eddie", "", "").code === "invalid_decision");
+check("slVacDecisionBody: rejeitar com motivo vazio ou null -> reason_required", vdb("analyst-eddie", "rejected", "").code === "reason_required" && vdb("analyst-eddie", "rejected", null).code === "reason_required");
+check("slVacDecisionBody: aprovar com motivo só de espaços -> reason null", vdb("analyst-eddie", "approved", "  ").body.reason === null);
+check("slVacDecisionBody: 500 caracteres é válido", vdb("analyst-eddie", "rejected", "x".repeat(500)).code === null);
+check("slVacDecisionBody: 500 emoji (1000 unidades UTF-16) é válido; 501 emoji -> invalid_reason",
+  vdb("analyst-eddie", "rejected", "😀".repeat(500)).code === null && vdb("analyst-eddie", "rejected", "😀".repeat(501)).code === "invalid_reason");
+check("slVacDecisionBody: tabulação, U+202E e U+2028 no motivo -> invalid_reason",
+  ["a\tb", "a‮b", "a b"].every((r) => vdb("analyst-eddie", "rejected", r).code === "invalid_reason"));
+
+// slVacAnalystOptions: só analistas ativos, com id válido e nome não vazio.
+const vao = (e) => JSON.stringify(ctx.slVacAnalystOptions(e));
+check("slVacAnalystOptions: filtra inativos (0), ids inválidos, nomes vazios e itens nulos; aceita active true",
+  vao({ analysts: [
+    { id: "analyst-eddie", name: "Eddie", active: 1 }, { id: "analyst-x", name: "X", active: 0 },
+    { id: "bad id", name: "Y", active: 1 }, { id: "analyst-z", name: "  ", active: 1 }, null,
+    { id: "analyst-t", name: "Tom", active: true }] }) === '[{"id":"analyst-eddie","name":"Eddie"},{"id":"analyst-t","name":"Tom"}]');
+check("slVacAnalystOptions: null, {} e analysts não-array -> []",
+  vao(null) === "[]" && vao({}) === "[]" && vao({ analysts: "x" }) === "[]");
 
 finish();

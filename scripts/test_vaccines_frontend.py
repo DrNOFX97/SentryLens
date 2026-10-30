@@ -1,12 +1,17 @@
 """
-Contrato estático da aba Vaccines (R11, Phase 14) sobre os ficheiros SERVIDOS
-pelo serve_frontend.py, ligado às chaves reais de GET /api/vaccines. Sem
-browser, sem node, sem Wazuh: não executa JavaScript, lê o texto de
-vaccines.js e do index.html tal como o servidor estático os entrega e
-compara cada campo que vaccines.js lê de um objeto da API com as chaves da
+Contrato estático da aba Vaccines (R11/R12) sobre os ficheiros SERVIDOS
+pelo serve_frontend.py, ligado às chaves reais das rotas de vaccines. Sem
+browser e sem Wazuh: lê o texto de vaccines.js e do index.html tal como o
+servidor estático os entrega e compara cada campo que vaccines.js (e os
+helpers slVac* do ui_helpers.js) lê de um objeto da API com as chaves da
 resposta REAL da rota (TestClient sobre um store temporário semeado pelo
 motor de vaccines). Apanha, por exemplo, `created` em vez de `created_at`
 sem precisar de um browser.
+
+O único JavaScript executado é o ui_helpers.js, em node:vm (sem DOM): serve
+para provar que o corpo que slVacDecisionBody constrói é aceite pela rota
+real de decisão e que slVacAnalystOptions lê campos reais. Sem node no PATH
+estes checks falham de propósito.
 
 Segue o estilo de test_serve_frontend.py: standalone, check()/[OK]/[FALHOU],
 sys.exit(1) em caso de falha.
@@ -69,7 +74,7 @@ def get(port: int, path: str, headers: dict | None = None) -> tuple[int, dict, s
 
 # --- helpers ---------------------------------------------------------------
 
-SERVED_PATHS = ("/index.html", "/vaccines.js", "/app.js", "/style.css")
+SERVED_PATHS = ("/index.html", "/vaccines.js", "/app.js", "/style.css", "/ui_helpers.js")
 
 
 def served() -> dict[str, tuple[int, dict, str]]:
@@ -127,13 +132,25 @@ def node_ui_helpers(calls):
 
 
 API_VARS = ("envelope", "vaccine", "origin", "evidence", "proposal", "rule",
-            "catalogEvent", "generator", "counts")
+            "catalogEvent", "generator", "counts", "decision", "analyst")
 _ACCESS_RE = re.compile(r"\b(" + "|".join(API_VARS) + r")\s*\??\.\s*([A-Za-z_$][\w$]*)")
 
 
 def data_accesses(js: str) -> set[tuple[str, str]]:
     """Pares (variável, propriedade) lidos de objetos vindos da API."""
     return set(_ACCESS_RE.findall(js))
+
+
+def sl_vac_bodies(ui_js: str) -> str:
+    """Corpos concatenados das funções slVac* do ui_helpers.js (os helpers puros
+    da aba Vaccines): também leem campos de objetos da API."""
+    nomes = re.findall(r"^function (slVac\w+)\(", ui_js, re.M)
+    return "\n".join(function_body(ui_js, nome) for nome in nomes)
+
+
+def field_accesses(files: dict) -> set[tuple[str, str]]:
+    """Campos lidos de objetos da API por vaccines.js e pelos helpers slVac*."""
+    return data_accesses(files["/vaccines.js"][2]) | data_accesses(sl_vac_bodies(files["/ui_helpers.js"][2]))
 
 
 def make_attack(attack_id, verdict, expected, achieved, scenario="smb_enum", event_ids=(5140, 5145),
@@ -209,6 +226,11 @@ def real_api_keys(extra_paths=()) -> tuple[set, dict]:
         main.incident_store = IncidentStore(os.path.join(tmp.name, "i.sqlite3"))
         main.incident_store.create_analyst("analyst-eddie", "Eddie", 1, None, iso1)
         main.incident_store.create_analyst("analyst-jeremy", "Jeremy", 2, None, iso1)
+        main.incident_store.create_analyst("analyst-mike", "Mike", 1, None, iso1)
+        main.incident_store.deactivate_analyst("analyst-mike")
+        analistas = client.get("/api/soc/analysts?active_only=true", headers=HEADERS)
+        respostas["analistas"] = (analistas.status_code, analistas.json())
+        chaves |= all_keys(analistas.json())
         corpos = node_ui_helpers([["slVacDecisionBody", ["analyst-eddie", "approved", ""]],
                                   ["slVacDecisionBody", ["analyst-jeremy", "rejected", "  Regra ruidosa  "]]])
         respostas["corpos"] = [c["body"] for c in corpos] if corpos else None
@@ -217,6 +239,14 @@ def real_api_keys(extra_paths=()) -> tuple[set, dict]:
                 resposta = client.post(f"/api/vaccines/{vaccine_id}/decision", headers=HEADERS, json=resultado["body"])
                 respostas[nome] = (resposta.status_code, resposta.json())
                 chaves |= all_keys(resposta.json()) | all_keys(resultado["body"])
+        # Segunda aprovação da mesma vaccine (409) e a lista depois das decisões.
+        respostas["decisao_409"] = respostas["lista_decidida"] = None
+        if corpos:
+            segunda = client.post(f"/api/vaccines/{ID_C}/decision", headers=HEADERS, json=corpos[0]["body"])
+            respostas["decisao_409"] = (segunda.status_code, segunda.json())
+            decidida = client.get("/api/vaccines?include_superseded=true", headers=HEADERS)
+            respostas["lista_decidida"] = decidida.json()
+            chaves |= all_keys(segunda.json()) | all_keys(decidida.json())
         respostas["extra"] = {}
         for caminho in extra_paths:
             resposta = client.get(caminho, headers=HEADERS)
@@ -357,7 +387,7 @@ def run_tracer() -> None:
     proibidas = {"command", "argv", "build_command", "tool", "target", "source", "operator"}
     check("a resposta real não tem nenhuma chave de comando, ferramenta, alvo ou operador",
           not (proibidas & real))
-    acessos = data_accesses(js)
+    acessos = field_accesses(files)
     desconhecidos = sorted(a for a in acessos if a[1] not in real and a[1] != "length")
     check("cada campo lido de um objeto da API existe na resposta real", not desconhecidos)
     if desconhecidos:
@@ -545,7 +575,7 @@ def run_states() -> None:
 
     # c) campos do gerador lidos, todos dentro das chaves reais
     real, respostas = real_api_keys()
-    acessos = data_accesses(js)
+    acessos = field_accesses(files)
     esperados = {("envelope", "generator"), ("generator", "status"), ("generator", "error_code"),
                  ("generator", "last_run_at"), ("generator", "last_success_at"), ("generator", "alerts_truncated"),
                  ("generator", "counts"), ("counts", "pending_settle"), ("vaccine", "superseded_by")}
@@ -654,7 +684,7 @@ def run_detail() -> None:
           and '"Enter"' in js and '" "' in js and "preventDefault" in js)
 
     # c) contrato de campos do detalhe
-    acessos = data_accesses(js)
+    acessos = field_accesses(files)
     esperados = {("envelope", "vaccine"), ("origin", "mitre_tactic"), ("origin", "incident_ids"),
                  ("origin", "evidence"), ("evidence", "matched_event_ids"), ("evidence", "matched_alert_count"),
                  ("evidence", "network_detection_types"), ("vaccine", "proposals"), ("vaccine", "expected"),
@@ -792,6 +822,95 @@ def run_decision() -> None:
           {"vaccine", "notice"} <= envelope_lidos and {"vaccine", "notice"} <= real_api_keys()[0])
 
 
+def run_decision_contract() -> None:
+    """Contrato do bloco Decisão: markup, listener delegado, analistas reais e campos lidos."""
+    files = served()
+    index_html = files["/index.html"][2]
+    js = files["/vaccines.js"][2]
+    ui_js = files["/ui_helpers.js"][2]
+
+    # a) markup do bloco no painel de detalhe
+    painel = index_html.find('<section class="panel" id="vaccine-detail-panel" hidden>')
+    fim = index_html.find("</section>", painel)
+    bloco = index_html[painel:fim] if painel != -1 and fim != -1 else ""
+    for marcador in ("vac-detail-decision", "vac-decision-state", "vac-decision-count"):
+        check(f'o bloco Decisão tem #{marcador}', f'id="{marcador}"' in bloco)
+    check("#vac-decision-form começa escondido (hidden)",
+          re.search(r'<div[^>]*id="vac-decision-form"[^>]*\bhidden\b', bloco) is not None)
+    check('label[for=vac-decision-analyst] e select cuja primeira option tem value="" e o texto "Escolher…"',
+          'for="vac-decision-analyst"' in bloco
+          and re.search(r'<select id="vac-decision-analyst">\s*<option value="">Escolher…</option>', bloco) is not None)
+    check("label[for=vac-decision-reason] e textarea com maxlength=500",
+          'for="vac-decision-reason"' in bloco
+          and re.search(r'<textarea[^>]*id="vac-decision-reason"[^>]*maxlength="500"', bloco) is not None)
+    check('#vac-decision-status é um parágrafo com role="status", fora do formulário',
+          re.search(r'<p id="vac-decision-status" role="status">', bloco) is not None
+          and bloco.index('id="vac-decision-status"') > bloco.index('class="vac-decision-final"'))
+    for acao, texto in (("vac-approve", "Aprovar"), ("vac-reject", "Rejeitar")):
+        check(f"o botão {texto} é type=button, começa disabled e liga-se por data-action={acao}",
+              re.search(r'<button type="button"[^>]*data-action="' + acao + r'"[^>]*\bdisabled\b[^>]*>' + texto + "</button>",
+                        bloco) is not None)
+    aviso = re.search(r'<p class="vac-decision-final">([^<]*)</p>\s*<div class="form-actions[^"]*">\s*<button', bloco)
+    check("o aviso fixo, junto aos botões, diz que a decisão é final e que aprovar não aplica nada no Wazuh",
+          aviso is not None and "final" in aviso.group(1) and "não aplica nada no Wazuh" in aviso.group(1))
+    aba = index_html.find('id="tab-vaccines"')
+    proxima = index_html.find('<div class="tab-content"', aba + 1)
+    check("nenhum atributo on*= no bloco #tab-vaccines do index.html",
+          aba != -1 and re.search(r"\son[a-z]+\s*=", index_html[aba:proxima]) is None)
+
+    # b) vaccines.js: listener delegado, estado dos botões, analistas
+    check('vaccines.js liga "vac-approve" e "vac-reject" por closest("[data-action]") num listener de #vac-detail-decision',
+          '"vac-approve"' in js and '"vac-reject"' in js and 'closest("[data-action]")' in js
+          and re.search(r'getElementById\("vac-detail-decision"\)\.addEventListener\("click"', js) is not None)
+    check("vaccines.js não tem atributos on*= nem handlers inline", re.search(r"\bon[a-z]+\s*=\s*[\"']", js) is None)
+    corpo = function_body(js, "vacDecide")
+    check("vacDecide recusa o segundo clique (vacDeciding) e dessincroniza os botões (vacSyncDecisionControls)",
+          "vacDeciding" in corpo and "vacSyncDecisionControls" in corpo)
+    corpo = function_body(js, "vacSyncDecisionControls")
+    check('vacSyncDecisionControls desativa os botões com vacDeciding ou com o select em ""',
+          "disabled" in corpo and "vacDeciding" in corpo and '=== ""' in corpo)
+    corpo = function_body(js, "vacLoadAnalysts")
+    check("vacLoadAnalysts pede /api/soc/analysts?active_only=true e filtra por slVacAnalystOptions(",
+          '"/api/soc/analysts?active_only=true"' in corpo and "slVacAnalystOptions(" in corpo)
+    check("vaccines.js não guarda nada no armazenamento do browser", "localStorage" not in js and "sessionStorage" not in js)
+
+    # c) campos lidos pelo JS e pelos helpers slVac*, contra as respostas reais
+    check("/ui_helpers.js é servido e define slVacDecisionBody e slVacAnalystOptions",
+          files["/ui_helpers.js"][0] == 200 and "function slVacDecisionBody(" in ui_js
+          and "function slVacAnalystOptions(" in ui_js)
+    real, respostas = real_api_keys()
+    acessos = field_accesses(files)
+    esperados = {("analyst", "id"), ("analyst", "name"), ("analyst", "active"), ("envelope", "analysts"),
+                 ("envelope", "notice")}
+    check("o JS lê analyst.id, analyst.name, analyst.active, envelope.analysts e envelope.notice", esperados <= acessos)
+    desconhecidos = sorted(a for a in acessos if a[1] not in real and a[1] != "length")
+    check("cada campo lido (vaccines.js e slVac*) existe nas respostas reais, incluindo analistas e decisões",
+          not desconhecidos)
+    if desconhecidos:
+        print(f"       campos que a API não tem: {desconhecidos}")
+
+    # d) analistas reais: só os ativos, e o helper devolve Eddie e Jeremy
+    estado, analistas = respostas["analistas"]
+    check("rota real: GET /api/soc/analysts?active_only=true -> 200 e sem o analista desativado",
+          estado == 200 and sorted(a["name"] for a in analistas["analysts"]) == ["Eddie", "Jeremy"])
+    opcoes = node_ui_helpers([["slVacAnalystOptions", [analistas]]])
+    check("slVacAnalystOptions sobre o corpo real devolve Eddie e Jeremy, com id e nome",
+          opcoes is not None and sorted((o["id"], o["name"]) for o in opcoes[0])
+          == [("analyst-eddie", "Eddie"), ("analyst-jeremy", "Jeremy")])
+    mike = {"analysts": [{"id": "analyst-mike", "name": "Mike", "active": 0}]}
+    vazio = node_ui_helpers([["slVacAnalystOptions", [mike]]])
+    check("slVacAnalystOptions nunca lista um analista com active 0", vazio is not None and vazio[0] == [])
+
+    # e) decisões reais: segunda aprovação e lista depois das decisões
+    segunda = respostas["decisao_409"]
+    check("rota real: a segunda aprovação da mesma vaccine dá 409 already_decided",
+          segunda is not None and segunda[0] == 409 and segunda[1] == {"detail": "already_decided"})
+    lista = respostas["lista_decidida"]
+    estados = {v["id"]: v["state"] for v in lista["vaccines"]} if lista else {}
+    check("rota real: depois das decisões C está approved, B rejected e A (substituída) continua proposed",
+          estados == {ID_C: "approved", ID_B: "rejected", ID_A: "proposed"})
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
@@ -800,6 +919,7 @@ if __name__ == "__main__":
     run_detail()
     run_chain()
     run_decision()
+    run_decision_contract()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:
