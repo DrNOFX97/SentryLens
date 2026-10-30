@@ -36,8 +36,8 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 
-from vaccine_decision import (DECISION_FIELDS, DECISION_RECORD_KEYS, VaccineDecisionError, check_transition,
-                              derive_state, validate_request)
+from vaccine_decision import (DECISION_FIELDS, DECISION_RECORD_KEYS, DERIVED_STATES, VaccineDecisionError,
+                              check_transition, derive_state, validate_request)
 
 DB_PATH_ENV = "SENTRYLENS_VACCINES_DB_PATH"
 DEFAULT_DB_FILENAME = "vaccines.sqlite3"
@@ -306,6 +306,30 @@ class VaccineStore:
             columns, source, _ = self._read_fragments(conn)
             row = conn.execute(columns + source + " WHERE v.id = ?", (vaccine_id,)).fetchone()
             return self._to_vaccine(row) if row is not None else None
+
+    def count_by_state(self) -> dict[str, int] | None:
+        """Contagem por estado derivado das vaccines ATUAIS (superseded_by IS NULL),
+        sem nenhum filtro do pedido: o KPI não muda ao filtrar a tabela (D-11).
+        None sem amostra (ficheiro inexistente ou sem linhas), nunca zeros; com
+        amostra traz as três chaves de DERIVED_STATES, com zero explícito nas
+        ausentes. Só leitura (ligação mode=ro), não cria o ficheiro nem toca no
+        esquema. Um estado lido fora de DERIVED_STATES é ValueError (linha
+        corrompida; a rota responde 503)."""
+        with self._read() as conn:
+            if conn is None:
+                return None
+            if conn.execute("SELECT COUNT(*) FROM vaccines").fetchone()[0] == 0:
+                return None
+            _, source, state_expression = self._read_fragments(conn)
+            rows = conn.execute(
+                "SELECT " + state_expression + " AS derived_state, COUNT(*) AS n" + source
+                + " WHERE v.superseded_by IS NULL GROUP BY " + state_expression).fetchall()
+        counts = {state: 0 for state in DERIVED_STATES}
+        for row in rows:
+            if row["derived_state"] not in counts:
+                raise ValueError("estado derivado desconhecido no store")
+            counts[row["derived_state"]] = row["n"]
+        return counts
 
     def _read_fragments(self, conn: sqlite3.Connection) -> tuple[str, str, str]:
         """(colunas, FROM, expressão de estado) fixos, escolhidos juntos pela mesma

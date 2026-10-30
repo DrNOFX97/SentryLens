@@ -795,8 +795,8 @@ def run_file_r11_intact(tmp: str, path: str) -> None:
 def run_closed_api_and_trace() -> None:
     """D-03: API pública fechada e nenhum caminho do store atualiza ou apaga uma decisão."""
     public = sorted(name for name in vars(VaccineStore) if not name.startswith("_"))
-    check(f"API pública exatamente decide_vaccine, get_vaccine, list_vaccines, upsert_batch ({public})",
-          public == ["decide_vaccine", "get_vaccine", "list_vaccines", "upsert_batch"])
+    check(f"API pública exatamente count_by_state, decide_vaccine, get_vaccine, list_vaccines, upsert_batch ({public})",
+          public == ["count_by_state", "decide_vaccine", "get_vaccine", "list_vaccines", "upsert_batch"])
     with open(vaccine_store.__file__, encoding="utf-8") as handle:
         source = handle.read()
     check("o código do store não tem UPDATE nem DELETE FROM sobre vaccine_decisions",
@@ -839,6 +839,55 @@ def run_closed_api_and_trace() -> None:
         check("a decisão aceite ficou como única linha gravada", len(decision_rows(path)) == 1)
 
 
+def file_fingerprint(path: str) -> tuple[bytes, int]:
+    with open(path, "rb") as handle:
+        content = handle.read()
+    return content, os.stat(path).st_mtime_ns
+
+
+def run_state_counts() -> None:
+    """D-11: count_by_state() conta as vaccines atuais por estado derivado; None sem amostra; só leitura."""
+    with tempfile.TemporaryDirectory() as tmp:
+        missing = os.path.join(tmp, "nao_existe.sqlite3")
+        check("ficheiro inexistente -> count_by_state() is None", VaccineStore(missing).count_by_state() is None)
+        check("ficheiro inexistente: count_by_state não o cria", not os.path.exists(missing))
+
+        empty = os.path.join(tmp, "vazio.sqlite3")
+        conn = sqlite3.connect(empty)
+        conn.executescript(vaccine_store.VACCINES_SCHEMA)
+        conn.commit()
+        conn.close()
+        check("ficheiro só com o esquema e 0 linhas -> None", VaccineStore(empty).count_by_state() is None)
+
+        old = os.path.join(tmp, "antigo.sqlite3")
+        make_r11_file(old, [vA, vC])
+        before = file_fingerprint(old)
+        check("ficheiro antigo sem vaccine_decisions -> tudo proposed",
+              VaccineStore(old).count_by_state() == {"proposed": 2, "approved": 0, "rejected": 0})
+        check("ficheiro antigo: continua sem a tabela e igual byte a byte e mtime",
+              not has_decisions_table(old) and file_fingerprint(old) == before)
+
+        path = os.path.join(tmp, "v.sqlite3")
+        store = VaccineStore(path)
+        store.upsert_batch([vA, vC], NOW_ISO)
+        store.decide_vaccine(**request(vaccine_id=ID_A))
+        store.upsert_batch([vB], NOW_ISO)  # A aprovada e substituída por B
+        check("A aprovada e substituída não conta (só as atuais): {proposed 2, approved 0, rejected 0}",
+              store.count_by_state() == {"proposed": 2, "approved": 0, "rejected": 0})
+        store.decide_vaccine(**request(vaccine_id=ID_C))
+        store.decide_vaccine(**request(vaccine_id=ID_B, decision="rejected", decided_by="analyst-soc2",
+                                       decided_by_name="Jeremy", reason="Regra ruidosa"))
+        counts = store.count_by_state()
+        check("C aprovada e B rejeitada -> {proposed 0, approved 1, rejected 1}",
+              counts == {"proposed": 0, "approved": 1, "rejected": 1})
+        check("as chaves vêm pela ordem de DERIVED_STATES", list(counts) == list(vaccine_decision.DERIVED_STATES))
+        _, total, _ = store.list_vaccines()
+        check("a soma das contagens é igual ao total de list_vaccines() sem filtros", sum(counts.values()) == total)
+        before = file_fingerprint(path)
+        store.count_by_state()
+        check("count_by_state não altera bytes nem st_mtime_ns do ficheiro", file_fingerprint(path) == before)
+
+
 def run_file_guarantees() -> None:
     """Critério 1 e D-01/D-02/D-03/D-07/D-12: as garantias valem no próprio ficheiro (SQL direto,
     sqlite_master, traço das instruções), não só no código do store."""
@@ -863,6 +912,7 @@ def main() -> None:
     run_concurrency()
     run_state_filter()
     run_file_guarantees()
+    run_state_counts()
 
 
 if __name__ == "__main__":

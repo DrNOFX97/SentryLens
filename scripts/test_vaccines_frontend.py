@@ -549,6 +549,11 @@ def run_states() -> None:
                    "vac-superseded-note", "vac-generator-error", "vac-error-state"):
         check(f"style.css servido define .{classe}", re.search(r"\." + re.escape(classe) + r"\s*\{", css) is not None)
 
+    # h) Phase 16: o backend já serve approved/rejected; o rótulo é da Phase 17. Um estado sem
+    # rótulo desenha-se como o próprio texto (escapado pelo htmlT), nunca "undefined".
+    check("vacRowsHtml desenha o estado sem rótulo como o próprio texto (approved/rejected, nunca undefined)",
+          "vacCell(VAC_STATE_LABELS[vaccine.state] || vaccine.state)" in linhas)
+
 
 def run_detail() -> None:
     files = served()

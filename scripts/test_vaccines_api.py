@@ -32,6 +32,7 @@ import incident_ingest
 import main
 import vaccine_decision
 import vaccine_engine
+import vaccine_store as vaccine_store_module
 from attack_scenarios import SCENARIOS
 from incident_store import IncidentStore
 from vaccine_store import VaccineStore
@@ -411,6 +412,75 @@ def run_state_read() -> None:
         tmp.cleanup()
 
 
+def file_fingerprint(path: str) -> tuple[bytes, int]:
+    with open(path, "rb") as handle:
+        content = handle.read()
+    return content, os.stat(path).st_mtime_ns
+
+
+def run_state_counts_api() -> None:
+    """D-11/D-13: state_counts no envelope (universo das atuais, sem filtros; None sem amostra) e GET sem efeitos."""
+    original_load, original_build = main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report
+    original_indexer = main.indexer_client.get_recent_alerts
+    tmp = tempfile.TemporaryDirectory()
+    real_store = None
+    try:
+        vaccines_path = seed_decided(tmp.name)
+        real_store = main.vaccine_store
+        expected = {"proposed": 1, "approved": 0, "rejected": 1}
+        for query in ("", "?state=approved", "?state=rejected", "?state=proposed", "?attack_id=3", "?technique=T1087",
+                      "?include_superseded=true", "?attack_id=999"):
+            body = client.get("/api/vaccines" + query, headers=HEADERS).json()
+            check(f"state_counts == {expected} em /api/vaccines{query}", body["state_counts"] == expected)
+
+        # --- GET sem efeitos: bytes e mtime do ficheiro iguais ---
+        before = file_fingerprint(vaccines_path)
+        paths = ["/api/vaccines", "/api/vaccines?include_superseded=true"]
+        paths += [f"/api/vaccines?state={s}&include_superseded=true" for s in vaccine_decision.DERIVED_STATES]
+        paths += [f"/api/vaccines/{i}" for i in ("vac-bd617cce8054", "vac-3eb8018acb1c", "vac-5fe3861aa2a3")]
+        for path in paths:
+            check(f"GET {path} -> 200", client.get(path, headers=HEADERS).status_code == 200)
+        check("os GET (lista, filtros, contagens e detalhe) não alteram bytes nem st_mtime_ns do ficheiro",
+              file_fingerprint(vaccines_path) == before)
+
+        # --- sem amostra: store inexistente ---
+        missing = os.path.join(tmp.name, "nao_existe.sqlite3")
+        main.vaccine_store = VaccineStore(missing)
+        for query in ("", "?state=approved"):
+            r = client.get("/api/vaccines" + query, headers=HEADERS)
+            body = r.json()
+            check(f"store inexistente /api/vaccines{query}: state_counts None, no_data, total 0",
+                  r.status_code == 200 and body["state_counts"] is None and body["reason"] == "no_data"
+                  and body["total"] == 0 and body["available"] is False)
+        check("store inexistente: os GET não criam o ficheiro", not os.path.exists(missing))
+
+        # --- sem amostra: esquema sem linhas ---
+        empty = os.path.join(tmp.name, "vazio.sqlite3")
+        conn = sqlite3.connect(empty)
+        conn.executescript(vaccine_store_module.VACCINES_SCHEMA)
+        conn.commit()
+        conn.close()
+        main.vaccine_store = VaccineStore(empty)
+        body = client.get("/api/vaccines", headers=HEADERS).json()
+        check("store sem linhas: state_counts None e no_data", body["state_counts"] is None and body["reason"] == "no_data")
+
+        # --- 503 quando count_by_state falha (list_vaccines devolve normalmente) ---
+        for exc in (sqlite3.OperationalError("db partida C:\segredo"), ValueError("estado corrompido C:\segredo")):
+            broken = MagicMock()
+            broken.list_vaccines.return_value = ([], 0, 1)
+            broken.count_by_state.side_effect = exc
+            main.vaccine_store = broken
+            r = client.get("/api/vaccines", headers=HEADERS)
+            check(f"{type(exc).__name__} em count_by_state -> 503 store_unavailable sem texto de exceção",
+                  r.status_code == 503 and r.json() == {"detail": "store_unavailable"}
+                  and "db partida" not in r.text and "segredo" not in r.text and "corrompido" not in r.text)
+    finally:
+        main.vaccine_store = real_store if real_store is not None else main.vaccine_store
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = original_load, original_build
+        main.indexer_client.get_recent_alerts = original_indexer
+        tmp.cleanup()
+
+
 def snapshot_store(store: VaccineStore, path: str) -> tuple:
     """Estado completo do store lido diretamente (não pela rota): linhas com payload,
     superseded_by e state, mais um SELECT COUNT(*) ao ficheiro."""
@@ -525,6 +595,8 @@ if __name__ == "__main__":
     run_guarantees()
     print()
     run_state_read()
+    print()
+    run_state_counts_api()
     print()
     if failures:
         print(f"{len(failures)} verificação(ões) falharam:")

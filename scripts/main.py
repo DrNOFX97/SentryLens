@@ -1981,13 +1981,17 @@ async def list_vaccines(
     quando o veredito muda, a anterior fica com `superseded_by` e só aparece com
     `include_superseded=true` (o detalhe devolve-a sempre); uma vaccine aprovada
     e depois substituída continua `approved`. `total` conta com os mesmos
-    filtros. 200 com `no_data` só se o store não tem linhas (um filtro sem
-    resultados dá `reason` null); 503 estável se não for possível lê-lo."""
+    filtros. `state_counts` ({proposed, approved, rejected}) conta as vaccines
+    atuais e não depende dos filtros; é `null` sem amostra (store inexistente ou
+    sem linhas), nunca 0. 200 com `no_data` só se o store não tem linhas (um
+    filtro sem resultados dá `reason` null); 503 estável se não for possível
+    lê-lo."""
     try:
         rows, total, store_total = await run_in_threadpool(
             vaccine_store.list_vaccines,
             attack_id=attack_id, technique=technique, include_superseded=include_superseded,
             state=state, limit=limit, offset=offset)
+        state_counts = await run_in_threadpool(vaccine_store.count_by_state)
     except (sqlite3.Error, ValueError):
         logger.exception("Vaccines: store ilegível")
         raise HTTPException(status_code=503, detail="store_unavailable")
@@ -1998,6 +2002,7 @@ async def list_vaccines(
         "limit": limit,
         "offset": offset,
         "vaccines": rows,
+        "state_counts": state_counts,
         "generator": vaccine_loop_state.snapshot(),
     }
 
