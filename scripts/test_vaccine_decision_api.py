@@ -13,8 +13,10 @@ Correr (a partir de scripts/):
     python test_vaccine_decision_api.py
 """
 
+import ast
 import json
 import os
+import pathlib
 import re
 import sqlite3
 import sys
@@ -447,10 +449,292 @@ def run_refusals() -> None:
         tmp.cleanup()
 
 
+# --- Varrimento "nada aplica nem executa" (D-14) -----------------------------
+# Tudo por AST: comentários e docstrings não contam. As funções scan_* e
+# handler_problems são puras (recebem código-fonte) para o autoteste as poder
+# exercitar contra violações plantadas.
+SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
+
+FORBIDDEN_IMPORT_ROOTS = frozenset({
+    "subprocess", "ssh_client", "paramiko", "asyncssh", "wazuh_client", "httpx", "requests", "socket",
+    "urllib", "http", "pty", "shlex", "multiprocessing", "ctypes",
+})
+FORBIDDEN_NAMES = frozenset({
+    "subprocess", "ssh_client", "VMSSHClient", "vm_ssh_client", "manager_client", "WazuhManagerClient", "paramiko",
+})
+# No fecho de funções locais (ex.: _build_attack_registry) o Indexer pode ser lido,
+# por isso só estas raízes são proibidas.
+CLOSURE_FORBIDDEN_ROOTS = frozenset({"manager_client", "vm_ssh_client", "VMSSHClient", "subprocess"})
+OS_EXEC_CALLS = frozenset({"system", "popen", "posix_spawn", "posix_spawnp", "startfile", "fork", "forkpty"})
+DYNAMIC_CALLS = frozenset({"__import__", "import_module", "eval", "exec"})
+
+HANDLER_NAME = "decide_vaccine_route"
+HANDLER_STORE_ALLOWED = {"decide_vaccine", "get_vaccine"}
+HANDLER_INCIDENT_ALLOWED = {"get_analyst"}
+HANDLER_FORBIDDEN_NAMES = frozenset({"indexer_client", "manager_client", "vm_ssh_client", "ws_manager",
+                                     "network_ws_manager"})
+ROUTES_STORE_ALLOWED = {"list_vaccines", "count_by_state", "get_vaccine", "decide_vaccine"}
+EXPECTED_VACCINE_FUNCTIONS = {
+    "_run_vaccine_cycle", "_vaccine_cycle_body", "_vaccine_loop", "_start_vaccine_loop", "list_vaccines",
+    "get_vaccine", "decide_vaccine_route", "_parse_vaccine_decision_body", "_read_vaccine_decision_body",
+    "_vaccine_decision_refusal", "_vaccine_decision_validation_error",
+}
+EXPECTED_VACCINE_PATHS = {"/api/vaccines", "/api/vaccines/{vaccine_id}", "/api/vaccines/{vaccine_id}/decision"}
+
+
+def _root_name(node) -> str | None:
+    """Nome na raiz de uma cadeia a.b.c (ou None se a raiz não é um Name)."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _process_call(node: ast.Call) -> str | None:
+    """os.system/os.popen/os.spawn*/os.exec*/asyncio.create_subprocess_* (ou o nome importado sozinho)."""
+    func = node.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        if func.value.id == "os" and (func.attr in OS_EXEC_CALLS or func.attr.startswith(("spawn", "exec"))):
+            return f"os.{func.attr}"
+        if func.value.id == "asyncio" and func.attr.startswith("create_subprocess_"):
+            return f"asyncio.{func.attr}"
+    if isinstance(func, ast.Name) and func.id.startswith("create_subprocess_"):
+        return func.id
+    return None
+
+
+def _dynamic_call(node: ast.Call) -> str | None:
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else None
+    return name if name in DYNAMIC_CALLS else None
+
+
+def scan_subtree(root, where: str, mode: str) -> list[str]:
+    """Violações numa subárvore. mode "full": imports, nomes e chamadas proibidos;
+    mode "closure": acesso a manager_client/vm_ssh_client/VMSSHClient/subprocess e chamadas de processo."""
+    found: list[str] = []
+    for node in ast.walk(root):
+        line = getattr(node, "lineno", 0)
+        if mode == "full":
+            if isinstance(node, ast.Import):
+                found += [f"{where}:{line}: import {a.name}" for a in node.names
+                          if a.name.split(".")[0] in FORBIDDEN_IMPORT_ROOTS]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                if node.module.split(".")[0] in FORBIDDEN_IMPORT_ROOTS:
+                    found.append(f"{where}:{line}: from {node.module} import ...")
+                elif node.module.split(".")[0] in ("os", "asyncio"):
+                    found += [f"{where}:{line}: from {node.module} import {a.name}" for a in node.names
+                              if a.name in OS_EXEC_CALLS or a.name.startswith(("spawn", "exec", "create_subprocess_"))]
+            elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
+                found.append(f"{where}:{line}: nome {node.id}")
+            elif isinstance(node, ast.Call):
+                what = _process_call(node) or _dynamic_call(node)
+                if what:
+                    found.append(f"{where}:{line}: chamada {what}")
+        else:
+            if isinstance(node, ast.Attribute) and _root_name(node) in CLOSURE_FORBIDDEN_ROOTS:
+                found.append(f"{where}:{line}: acesso a {_root_name(node)}.{node.attr}")
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id in CLOSURE_FORBIDDEN_ROOTS:
+                    found.append(f"{where}:{line}: chamada {node.func.id}")
+                what = _process_call(node)
+                if what:
+                    found.append(f"{where}:{line}: chamada {what}")
+    return found
+
+
+def scan_module(source: str, where: str = "<módulo>") -> list[str]:
+    return scan_subtree(ast.parse(source), where, "full")
+
+
+def _top_level_functions(tree: ast.Module) -> dict:
+    return {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _route_path(func) -> str | None:
+    """Primeiro argumento string do primeiro decorador-chamada (@app.get("/api/..."))."""
+    for deco in func.decorator_list:
+        if isinstance(deco, ast.Call) and deco.args and isinstance(deco.args[0], ast.Constant) \
+                and isinstance(deco.args[0].value, str):
+            return deco.args[0].value
+    return None
+
+
+def _is_vaccine_function(func) -> bool:
+    path = _route_path(func)
+    return "vaccine" in func.name.lower() or (path is not None and path.startswith("/api/vaccines"))
+
+
+def _local_closure(seeds, funcs: dict) -> set:
+    """Seeds mais todas as funções de topo do ficheiro que alcançam por referência a um nome (chamada ou argumento)."""
+    seen, queue = set(seeds), list(seeds)
+    while queue:
+        for node in ast.walk(funcs[queue.pop()]):
+            if isinstance(node, ast.Name) and node.id in funcs and node.id not in seen:
+                seen.add(node.id)
+                queue.append(node.id)
+    return seen
+
+
+def scan_main(source: str) -> tuple[list[str], set]:
+    """(violações, nomes das funções de vaccines) de um main.py: regras completas nas funções de vaccines,
+    regras de fecho nas funções locais que elas alcançam."""
+    tree = ast.parse(source)
+    funcs = _top_level_functions(tree)
+    seeds = {name for name, func in funcs.items() if _is_vaccine_function(func)}
+    found: list[str] = []
+    for name in sorted(seeds):
+        found += scan_subtree(funcs[name], name, "full")
+    for name in sorted(_local_closure(seeds, funcs) - seeds):
+        found += scan_subtree(funcs[name], name, "closure")
+    return found, seeds
+
+
+def _store_attrs(nodes, store: str) -> tuple[set, int]:
+    """(atributos usados de `store`, nº de usos do nome sem atributo)."""
+    attrs: set = set()
+    attribute_uses = 0
+    name_uses = 0
+    for tree_node in nodes:
+        for node in ast.walk(tree_node):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == store:
+                attrs.add(node.attr)
+                attribute_uses += 1
+            elif isinstance(node, ast.Name) and node.id == store:
+                name_uses += 1
+    return attrs, name_uses - attribute_uses
+
+
+def handler_problems(source: str, handler: str = HANDLER_NAME) -> list[str]:
+    """Problemas do handler de decisão e dos auxiliares locais que alcança (D-08, D-14, D-15)."""
+    tree = ast.parse(source)
+    funcs = _top_level_functions(tree)
+    if handler not in funcs:
+        return [f"handler {handler} não encontrado"]
+    nodes = [funcs[n] for n in _local_closure({handler}, funcs)]
+    problems: list[str] = []
+    vac_attrs, vac_bare = _store_attrs(nodes, "vaccine_store")
+    inc_attrs, inc_bare = _store_attrs(nodes, "incident_store")
+    if vac_attrs != HANDLER_STORE_ALLOWED:
+        problems.append(f"métodos de vaccine_store {sorted(vac_attrs)} != {sorted(HANDLER_STORE_ALLOWED)}")
+    if inc_attrs != HANDLER_INCIDENT_ALLOWED:
+        problems.append(f"métodos de incident_store {sorted(inc_attrs)} != {sorted(HANDLER_INCIDENT_ALLOWED)}")
+    if vac_bare or inc_bare:
+        problems.append("um store é usado sem ser por atributo")
+    lines: dict = {}
+    for node in ast.walk(funcs[handler]):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "vaccine_store":
+            lines.setdefault(node.attr, []).append(node.lineno)
+    for method in sorted(HANDLER_STORE_ALLOWED):
+        if len(lines.get(method, [])) != 1:
+            problems.append(f"vaccine_store.{method} aparece {len(lines.get(method, []))} vez(es) no handler (esperada 1)")
+    if len(lines.get("decide_vaccine", [])) == 1 and len(lines.get("get_vaccine", [])) == 1 \
+            and lines["decide_vaccine"][0] >= lines["get_vaccine"][0]:
+        problems.append("get_vaccine vem antes de decide_vaccine (D-08: decidir antes de reler)")
+    for tree_node in nodes:
+        for node in ast.walk(tree_node):
+            if isinstance(node, ast.Name) and (node.id in HANDLER_FORBIDDEN_NAMES or node.id.startswith("append_")):
+                problems.append(f"{tree_node.name}:{node.lineno}: nome {node.id}")
+    problems += scan_subtree(funcs[handler], handler, "full")
+    return problems
+
+
+def run_no_apply() -> None:
+    # --- autoteste: o varrimento apanha violações plantadas e deixa passar código limpo ---
+    check("varrimento: autoteste, subprocess numa função _vaccine_* é apanhado",
+          bool(scan_main("def _vaccine_probe():\n    subprocess.run(['x'])\n")[0]))
+    check("varrimento: autoteste, manager_client numa rota de vaccines é apanhado",
+          bool(scan_main("async def list_vaccines():\n    await manager_client.restart()\n")[0]))
+    check("varrimento: autoteste, manager_client numa rota /api/vaccines* (nome neutro) é apanhado",
+          bool(scan_main('@app.get("/api/vaccines/x")\nasync def probe():\n    await manager_client.restart()\n')[0]))
+    check("varrimento: autoteste, os.system numa função auxiliar chamada por uma de vaccines é apanhado",
+          bool(scan_main("def _helper():\n    os.system('x')\n\ndef _vaccine_probe():\n    _helper()\n")[0]))
+    check("varrimento: autoteste, vm_ssh_client.run passado como argumento a um auxiliar é apanhado",
+          bool(scan_main("def _helper():\n    run(vm_ssh_client.run)\n\ndef _vaccine_probe():\n    _helper()\n")[0]))
+    check("varrimento: autoteste, import subprocess num módulo vaccine_* é apanhado",
+          bool(scan_module("import subprocess\n")) and bool(scan_module("def f():\n    from socket import socket\n")))
+    check("varrimento: autoteste, asyncio.create_subprocess_exec e os.execv são apanhados",
+          bool(scan_module("async def f():\n    await asyncio.create_subprocess_exec('x')\n"))
+          and bool(scan_module("def f():\n    os.execv('x', [])\n")))
+    clean_main = ("def _helper(vm_ssh_client):\n    return vm_ssh_client is not None\n\n"
+                  "def _vaccine_probe(a, b):\n    return a + b\n")
+    clean_found, clean_seeds = scan_main(clean_main)
+    check("varrimento: autoteste, fonte limpa não dá nenhuma violação (e uma comparação com None não conta)",
+          clean_found == [] and clean_seeds == {"_vaccine_probe"} and scan_module("import re\nx = 1 + 2\n") == [])
+    good_handler = ("async def decide_vaccine_route():\n    a = incident_store.get_analyst(1)\n"
+                    "    vaccine_store.decide_vaccine(1)\n    return vaccine_store.get_vaccine(1)\n")
+    check("varrimento: autoteste, handler conforme não dá problemas", handler_problems(good_handler) == [])
+    check("varrimento: autoteste, handler com get_vaccine antes de decide_vaccine é apanhado",
+          bool(handler_problems("async def decide_vaccine_route():\n    incident_store.get_analyst(1)\n"
+                                "    vaccine_store.get_vaccine(1)\n    vaccine_store.decide_vaccine(1)\n")))
+    check("varrimento: autoteste, handler com método de store a mais, ws_manager ou append_* é apanhado",
+          bool(handler_problems(good_handler + "    vaccine_store.upsert_batch(1)\n"))
+          and bool(handler_problems(good_handler + "    await ws_manager.broadcast(1)\n"))
+          and bool(handler_problems(good_handler + "    append_alert_history(1)\n")))
+    check("varrimento: autoteste, handler que chama um auxiliar local com manager_client é apanhado",
+          bool(handler_problems("def _aux():\n    manager_client.x()\n\n" + good_handler.replace(
+              "    a = ", "    _aux()\n    a = ", 1))))
+
+    # --- módulos vaccine_*.py inteiros ---
+    module_files = sorted(SCRIPTS_DIR.glob("vaccine_*.py"))
+    names = {p.stem for p in module_files}
+    check(f"varrimento: o glob vaccine_*.py encontra os quatro módulos {sorted(names)}",
+          {"vaccine_decision", "vaccine_engine", "vaccine_ingest", "vaccine_store"} <= names)
+    for path in module_files:
+        violations = scan_module(path.read_text(encoding="utf-8"), path.name)
+        check(f"varrimento: {path.name} sem imports, nomes nem chamadas que apliquem ou executem {violations}",
+              violations == [])
+
+    # --- funções de vaccines de main.py ---
+    main_source = (SCRIPTS_DIR / "main.py").read_text(encoding="utf-8")
+    violations, vaccine_functions = scan_main(main_source)
+    check(f"varrimento: main.py, funções de vaccines e fecho local sem violações {violations}", violations == [])
+    check(f"varrimento: main.py, o conjunto de funções de vaccines inclui as onze esperadas "
+          f"(em falta: {sorted(EXPECTED_VACCINE_FUNCTIONS - vaccine_functions)})",
+          EXPECTED_VACCINE_FUNCTIONS <= vaccine_functions)
+
+    # --- handler de decisão ---
+    problems = handler_problems(main_source)
+    check(f"varrimento: handler de decisão só usa decide_vaccine, get_vaccine e get_analyst, por esta ordem, "
+          f"sem Wazuh, WebSocket nem histórico {problems}", problems == [])
+    main_funcs = _top_level_functions(ast.parse(main_source))
+    route_funcs = [f for f in main_funcs.values() if (_route_path(f) or "").startswith("/api/vaccines")]
+    route_nodes = [main_funcs[n] for n in _local_closure({f.name for f in route_funcs}, main_funcs)]
+    route_attrs, route_bare = _store_attrs(route_nodes, "vaccine_store")
+    check(f"varrimento: as rotas /api/vaccines* só usam {sorted(ROUTES_STORE_ALLOWED)} do vaccine_store "
+          f"(usam {sorted(route_attrs)})", len(route_funcs) == 3 and route_attrs <= ROUTES_STORE_ALLOWED and route_bare == 0)
+
+    # --- rotas registadas ---
+    vac_routes = [r for r in main.app.routes if "vaccine" in getattr(r, "path", "").lower()]
+    paths = {r.path for r in vac_routes}
+    check(f"varrimento: as rotas com 'vaccine' no caminho são exatamente as três permitidas {sorted(paths)}",
+          paths == EXPECTED_VACCINE_PATHS and len(vac_routes) == 3)
+    check("varrimento: nenhuma rota de vaccines tem apply, deploy, activate, execute ou enable no caminho",
+          not any(re.search(r"apply|deploy|activate|execute|enable", r.path, re.IGNORECASE) for r in vac_routes))
+    methods_of = {r.path: set(getattr(r, "methods", None) or ()) for r in vac_routes}
+    union = set().union(*methods_of.values()) if methods_of else set()
+    check(f"varrimento: só a rota de decisão aceita POST e nenhuma aceita PUT, PATCH nem DELETE {methods_of}",
+          union <= {"GET", "HEAD", "POST"}
+          and [p for p, m in methods_of.items() if "POST" in m] == ["/api/vaccines/{vaccine_id}/decision"]
+          and all(methods_of.values()))
+    check("varrimento: todas as rotas de vaccines têm require_api_key nas dependencies da própria rota",
+          all(any(getattr(d, "dependency", None) is main.require_api_key for d in r.dependencies)
+              for r in vac_routes))
+
+    # --- texto: aprovada não é aplicada ---
+    notice = main.VACCINE_DECISION_NOTICE
+    doc = " ".join((main.decide_vaccine_route.__doc__ or "").split())  # a docstring quebra linhas a meio de frases
+    check("varrimento: VACCINE_DECISION_NOTICE diz 'aceite pelo analista' e 'não aplicada no Wazuh'",
+          "aceite pelo analista" in notice and "não aplicada no Wazuh" in notice)
+    check("varrimento: a docstring do handler diz 'aceite pelo analista', 'não aplica nada no Wazuh' e 'autodeclarada'",
+          all(text in doc for text in ("aceite pelo analista", "não aplica nada no Wazuh", "autodeclarada")))
+
+
 if __name__ == "__main__":
     run_tracer()
     print()
     run_refusals()
+    print()
+    run_no_apply()
     print()
     if failures:
         print(f"{len(failures)} verificação(ões) falharam:")
