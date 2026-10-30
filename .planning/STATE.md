@@ -5,11 +5,11 @@ milestone_name: R12 Vaccine Lab
 current_phase: 17
 current_phase_name: Aba, testes e documentação
 status: planning
-stopped_at: Phase 16 complete, ready to plan Phase 17
-last_updated: "2026-10-30T11:29:08.491Z"
+stopped_at: Phase 17 context gathered
+last_updated: "2026-10-30T11:53:12.285Z"
 last_activity: 2026-10-30
 last_activity_desc: Phase 16 complete, transitioned to Phase 17
-state_head: 43d037d74b86687f22b575ad78aed79731f14b14
+state_head: 8f93d8ff81569b01080bac58ac894a4baffeb032
 progress:
   total_phases: 3
   completed_phases: 2
@@ -95,9 +95,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T11:26:41.133Z
-Stopped at: Phase 16 complete, ready to plan Phase 17
-Resume file: None
+Last session: 2026-10-30T11:53:12.085Z
+Stopped at: Phase 17 context gathered
+Resume file: .planning/phases/17-aba-testes-e-documenta-o/17-CONTEXT.md
 
 ## Operator Next Steps
 
