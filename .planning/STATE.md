@@ -4,17 +4,17 @@ milestone: v1.2
 milestone_name: R12 Vaccine Lab
 current_phase: 16
 current_phase_name: API de decisão
-status: executing
-stopped_at: Completed 16-02-PLAN.md
-last_updated: "2026-10-30T11:21:26.702Z"
+status: verifying
+stopped_at: Completed 16-03-PLAN.md
+last_updated: "2026-10-30T11:26:41.249Z"
 last_activity: 2026-10-30
 last_activity_desc: Phase 16 execution started
-state_head: 2d405710ee26cb5b1db65387b7628d33161cee66
+state_head: 6561b323d9275a5a32dc7ff45ed60ac1feacf0b7
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
   percent: 33
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 
 Phase: 16 (API de decisão) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-30 — Phase 16 execution started
 
 Progress: [███░░░░░░░] 33%
@@ -52,6 +52,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 15 P03 | 20min | 2 tasks | 2 files |
 | Phase 16 P01 | 10 min | 2 tasks | 3 files |
 | Phase 16 P02 | 15 min | 2 tasks | 5 files |
+| Phase 16 P03 | 8 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,7 @@ Recent decisions affecting current work:
 - [Phase 16]: Phase 16-01: autoria da decisão autodeclarada (analyst_id no corpo, validado no incident_store), não autenticada
 - [Phase 16]: 16-02: state_counts (envelope) e count_by_state (store); zeros explícitos com amostra, None sem amostra
 - [Phase 16]: 16-02: count_by_state corre depois de list_vaccines no mesmo try; estado desconhecido no ficheiro dá ValueError e 503
+- [Phase 16]: 16-03: o varrimento AST do fecho local segue referências a nomes e proíbe acesso por atributo a manager_client/vm_ssh_client/subprocess; allow_methods do CORS fixado por teste sem mudar main.py
 
 ### Pending Todos
 
@@ -93,8 +95,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T11:21:26.595Z
-Stopped at: Completed 16-02-PLAN.md
+Last session: 2026-10-30T11:26:41.133Z
+Stopped at: Completed 16-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

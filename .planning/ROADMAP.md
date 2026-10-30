@@ -80,7 +80,7 @@ Plans:
   3. Nenhuma rota nem módulo aplica uma vaccine no Wazuh ou executa comandos (varrimento por teste), e o texto das respostas diz que "aprovada" não é "aplicada".
   4. `allow_methods` do CORS e `test_cors.py` cobrem o método novo.
 
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 Plans:
 **Wave 1**
@@ -90,7 +90,7 @@ Plans:
 - [x] 16-02-PLAN.md — Leitura: `?state=` (422 fora do conjunto), `state`/`decision` na lista e no detalhe, aprovada substituída só com `include_superseded`, `state_counts` das vaccines atuais (None sem amostra), GET sem efeitos no ficheiro (VLB-05)
 
 **Wave 3**
-- [ ] 16-03-PLAN.md — Garantias: varrimento AST de `main.py` + `vaccine_*.py` (nada aplica nem executa, provado contra violações plantadas), handler só com decide/get/get_analyst, texto aprovada != aplicada, preflight CORS do POST e suite completa 84/84 (VLB-04, VLB-01)
+- [x] 16-03-PLAN.md — Garantias: varrimento AST de `main.py` + `vaccine_*.py` (nada aplica nem executa, provado contra violações plantadas), handler só com decide/get/get_analyst, texto aprovada != aplicada, preflight CORS do POST e suite completa 84/84 (VLB-04, VLB-01)
 
 ### Phase 17: Aba, testes e documentação
 

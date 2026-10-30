@@ -9,10 +9,10 @@ Um analista decide o destino de cada vaccine proposta (aprovar ou rejeitar), com
 
 ### Decisão
 
-- [ ] **VLB-01**: Um analista pode aprovar ou rejeitar uma vaccine por `POST /api/vaccines/{id}/decision` (`approved` | `rejected`), com API key por rota; CORS e `allow_methods` ficam coerentes com o método usado.
+- [x] **VLB-01**: Um analista pode aprovar ou rejeitar uma vaccine por `POST /api/vaccines/{id}/decision` (`approved` | `rejected`), com API key por rota; CORS e `allow_methods` ficam coerentes com o método usado.
 - [x] **VLB-02**: O estado segue `proposed → approved | rejected` e é final: uma segunda decisão sobre a mesma vaccine devolve 409 com código estável, e uma vaccine já substituída (`superseded_by`) não pode ser decidida.
 - [x] **VLB-03**: Cada decisão fica num registo só de acréscimo (tabela `vaccine_decisions`) com quem decidiu (analista da Equipa SOC), quando, o motivo (obrigatório ao rejeitar) e o estado anterior; a tabela `vaccines` continua imutável com `state='proposed'` imposto pelo SQLite.
-- [ ] **VLB-04**: Nenhuma rota nem código aplica uma vaccine no Wazuh nem executa comandos; "aprovada" significa só "aceite pelo analista", e um teste varre isto.
+- [x] **VLB-04**: Nenhuma rota nem código aplica uma vaccine no Wazuh nem executa comandos; "aprovada" significa só "aceite pelo analista", e um teste varre isto.
 
 ### Leitura e dashboard
 
@@ -46,8 +46,8 @@ Reconhecidos, fora deste marco.
 |-------------|-------|--------|
 | VLB-02 | Phase 15, 16 | Complete |
 | VLB-03 | Phase 15 | Complete |
-| VLB-01 | Phase 16 | Pending |
-| VLB-04 | Phase 16 | Pending |
+| VLB-01 | Phase 16 | Complete |
+| VLB-04 | Phase 16 | Complete |
 | VLB-05 | Phase 16 | Complete |
 | VLB-06 | Phase 17 | Pending |
 | VLB-07 | Phase 17 | Pending |
