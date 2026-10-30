@@ -41,7 +41,7 @@ Detalhe completo: `.planning/milestones/v1.1-ROADMAP.md`
 **Phase Numbering:** a numeração continua a do v1.1 (que acabou na Phase 14). Decimais (15.1, ...) são inserções urgentes.
 
 - [x] **Phase 15: Store de decisões** - Tabela `vaccine_decisions` só de acréscimo e máquina de estados pura, sem tocar em `vaccines` (completed 2026-10-29)
-- [ ] **Phase 16: API de decisão** - `POST /api/vaccines/{id}/decision`, estado e decisão no `GET`, filtro por estado, códigos de erro estáveis, nada é aplicado
+- [x] **Phase 16: API de decisão** - `POST /api/vaccines/{id}/decision`, estado e decisão no `GET`, filtro por estado, códigos de erro estáveis, nada é aplicado (completed 2026-10-30)
 - [ ] **Phase 17: Aba, testes e documentação** - Botões Aprovar/Rejeitar no detalhe, suite verde e docs a refletir o R12
 
 ## Phase Details
@@ -80,7 +80,7 @@ Plans:
   3. Nenhuma rota nem módulo aplica uma vaccine no Wazuh ou executa comandos (varrimento por teste), e o texto das respostas diz que "aprovada" não é "aplicada".
   4. `allow_methods` do CORS e `test_cors.py` cobrem o método novo.
 
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**

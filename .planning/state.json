@@ -11,18 +11,18 @@
     {
       "number": "16",
       "name": "API de decisão",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "17",
       "name": "Aba, testes e documentação",
-      "status": "pending"
+      "status": "in_progress"
     }
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step (verify)",
-    "reason": "Phase 16 of 3 · 33% · ready to verify"
+    "label": "Advance to the next step (plan phase 17)",
+    "reason": "Phase 17 of 3 — needs a plan"
   },
-  "updated_at": "2026-10-30T11:26:37.802Z"
+  "updated_at": "2026-10-30T11:29:08.525Z"
 }
