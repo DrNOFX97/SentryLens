@@ -359,19 +359,24 @@ agora a biblioteca).
 
 **Testes:** `scripts/test_attack_library.py`.
 
-## 💉 Vaccines (R11)
+## 💉 Vaccines (R11, R12)
 
 Vaccines **propostas** a partir de ataques do Red vs Blue que ficaram
 `not_detected` ou `partial`: a regra de deteção que faltou, com a origem
-(ataque, cenário, MITRE, incidentes). Só leitura. São geradas pelo backend em
-segundo plano (no arranque e a cada 5 min), nunca aplicadas no Wazuh e nunca
-levam comandos. Não existe rota de escrita: POST, PUT, PATCH e DELETE dão `405`.
-As duas rotas exigem `X-API-Key`.
+(ataque, cenário, MITRE, incidentes). São geradas pelo backend em segundo plano
+(no arranque e a cada 5 min), nunca levam comandos e **nunca são aplicadas no
+Wazuh**. As rotas de leitura são só `GET`; a única escrita é
+`POST /api/vaccines/{id}/decision` (R12), em que o analista aprova ou rejeita.
+**Aprovada significa só aceite pelo analista: nada é aplicado no Wazuh nem
+executado** (aplicar é o R21). PUT, PATCH e DELETE dão `405` em todas as rotas de
+vaccines, e GET, PUT, PATCH e DELETE também na rota de decisão. As três rotas
+exigem `X-API-Key`.
 
 | Método | Rota | Parâmetros | Resposta | Erros |
 |---|---|---|---|---|
-| GET | `/api/vaccines` | `attack_id` (1–999999999), `technique` (`^T\d{4}(\.\d{3})?$`), `include_superseded` (default `false`), `limit` (1–500, default 200), `offset` (>= 0) | `{available, reason, total, limit, offset, vaccines[], generator}` | 401, 422, 503 (`store_unavailable`) |
+| GET | `/api/vaccines` | `attack_id` (1–999999999), `technique` (`^T\d{4}(\.\d{3})?$`), `include_superseded` (default `false`), `state` (`proposed\|approved\|rejected`), `limit` (1–500, default 200), `offset` (>= 0) | `{available, reason, total, limit, offset, vaccines[], state_counts, generator}`; cada vaccine traz `state` e `decision` | 401, 422 (também `state` fora do conjunto), 503 (`store_unavailable`) |
 | GET | `/api/vaccines/{id}` | `id`: `^vac-[0-9a-f]{12}$` | `{vaccine}` (inclui as substituídas) | 401, 404 (`entry_not_found`), 422 (id malformado), 503 (`store_unavailable`) |
+| POST | `/api/vaccines/{id}/decision` | `id`: `^vac-[0-9a-f]{12}$`; corpo `{decision, analyst_id, reason?}` | `{vaccine, notice}` | 401, 404, 405, 409, 422, 503 (ver "Decisão (R12)") |
 
 `reason: "no_data"` (com `available: false`) só quando o store não tem nenhuma
 vaccine; um filtro sem resultados dá `200`, lista vazia e `reason: null`. Por
@@ -380,11 +385,75 @@ omissão a lista só traz a vaccine atual de cada ataque; as substituídas
 `generator` diz como correu o último ciclo de geração (`status`, `error_code`
 estável, `last_run_at`, `last_success_at`, `alerts_truncated`, `counts`): um
 Indexer em baixo chega aqui como código, nunca como lista vazia nem como texto de
-exceção. Campos de cada vaccine, regras do id e do store, gerador e limites
-conhecidos em [DATA_MODEL.md](DATA_MODEL.md) (secção Vaccine (R11)).
+exceção. `state_counts` (`{proposed, approved, rejected}`) conta as vaccines
+atuais (sem as substituídas) e **não depende dos filtros** do pedido; é `null`
+sem amostra (store inexistente ou sem linhas), nunca 0. `decision` é `null`
+enquanto a vaccine está `proposed`, senão `{decided_by, decided_by_name,
+decided_at, reason}`. Campos de cada vaccine, regras do id e do store, gerador e
+limites conhecidos em [DATA_MODEL.md](DATA_MODEL.md) (secção Vaccine (R11)).
+
+### Decisão (R12)
+
+`POST /api/vaccines/{id}/decision` regista a decisão do analista. O corpo é um
+contrato fechado: só as chaves `decision` (`approved` ou `rejected`),
+`analyst_id` (um analista ativo da Equipa SOC, ver `GET /api/soc/analysts`) e
+`reason` (opcional ao aprovar; obrigatório ao rejeitar; máximo 500 caracteres,
+numa só linha). Uma chave a mais ou em falta, um tipo errado, JSON inválido ou uma
+chave repetida dá `invalid_body`. O corpo bruto tem o teto de 8192 bytes:
+excedê-lo também dá `422` `invalid_body` (não 413). O nome do analista e o instante
+da decisão vêm do servidor, nunca do pedido. A autoria é **autodeclarada e não
+autenticada**: só existe uma API key, por isso o registo diz quem o cliente disse
+ser. A decisão é final (aprovada e rejeitada não voltam atrás).
+
+Pedido:
+
+```json
+{"decision": "rejected", "analyst_id": "analyst-eddie", "reason": "O modelo ML já cobre este ataque."}
+```
+
+Resposta `200` (a `vaccine` já traz o estado derivado e o bloco `decision`; o
+`notice` é o texto fixo do backend, `VACCINE_DECISION_NOTICE`):
+
+```json
+{"vaccine": {"id": "vac-bd617cce8054", "state": "rejected",
+   "decision": {"decided_by": "analyst-eddie", "decided_by_name": "Eddie",
+                "decided_at": "2026-10-30T09:02:45+00:00",
+                "reason": "O modelo ML já cobre este ataque."}},
+ "notice": "Decisão registada: aprovada significa só aceite pelo analista. Vaccine não aplicada no Wazuh: nada foi aplicado nem executado."}
+```
+
+(A `vaccine` da resposta traz todos os campos da vaccine; o exemplo mostra só os
+que mudam.) Todas as recusas respondem `{"detail": "<código>"}` com um código
+estável e não gravam nada:
+
+| Código (`detail`) | Status | Quando |
+|---|---|---|
+| `invalid_vaccine_id` | 422 | `id` do caminho mal formado |
+| `invalid_decision` | 422 | `decision` diferente de `approved` e `rejected` |
+| `invalid_author` | 422 | `analyst_id` fora do formato, ou nome do analista com caracteres não aceites |
+| `invalid_decided_at` | 422 | instante inválido (defesa; o instante vem do servidor) |
+| `reason_required` | 422 | rejeitar sem motivo (vazio ou só espaços) |
+| `invalid_reason` | 422 | motivo com mais de 500 caracteres, com quebra de linha ou com caracteres de controlo/formatação |
+| `invalid_body` | 422 | corpo que não cumpre o contrato fechado, ou acima de 8192 bytes |
+| `analyst_not_found` | 422 | o analista não existe na Equipa SOC |
+| `analyst_inactive` | 422 | o analista existe mas está desativado |
+| `entry_not_found` | 404 | vaccine inexistente |
+| `already_decided` | 409 | a vaccine já tem decisão (também a repetição da mesma decisão: não há idempotência) |
+| `vaccine_superseded` | 409 | vaccine substituída e ainda `proposed` |
+| `store_unavailable` | 503 | o store não escreveu ou não releu |
+| `incidents_unavailable` | 503 | a base de analistas (incidentes) não está legível |
+
+Mais `401` sem API key ou com chave errada (a chave ganha sempre, mesmo com um id
+malformado) e `405` em GET, PUT, PATCH e DELETE nesta rota. Um `503
+store_unavailable` pode acontecer **depois** de a decisão ter sido gravada (a
+releitura falhou): um novo `GET` mostra o estado real e um novo `POST` dá `409`.
+O CORS já lista `POST` em `allow_methods` (`test_cors.py` cobre o preflight desta
+rota).
 
 **Testes:** `scripts/test_vaccine_engine.py`, `test_vaccine_store.py`,
-`test_vaccine_ingest.py`, `test_vaccines_api.py`, `test_vaccines_frontend.py`.
+`test_vaccine_ingest.py`, `test_vaccines_api.py`, `test_vaccines_frontend.py`,
+`test_vaccine_decision.py`, `test_vaccine_decision_store.py`,
+`test_vaccine_decision_api.py` e `test_cors.py` (pelo preflight da rota de decisão).
 
 ## 📡 Network SOC (R6)
 
@@ -482,8 +551,9 @@ novo sai do browser). A nota de `docs/superpowers/specs/2026-10-07-r7-detection-
 | GET | `/api/detections` | `hours` (máx. 168), `limit` (≤200) | Vista unificada regra/ML/rede via `DetectionEvent` (R7) |
 | GET | `/api/attack-library` | — | Catálogo de referência dos cenários de ataque (R5) |
 | GET | `/api/attack-library/{id}` | — | Detalhe de uma entrada da biblioteca (R5) |
-| GET | `/api/vaccines` | `attack_id`, `technique`, `include_superseded`, `limit`, `offset` | Vaccines propostas (R11), só leitura, com o estado do gerador |
+| GET | `/api/vaccines` | `attack_id`, `technique`, `include_superseded`, `state`, `limit`, `offset` | Vaccines propostas (R11) com `state`, `decision`, `state_counts` e o estado do gerador |
 | GET | `/api/vaccines/{id}` | — | Detalhe de uma vaccine: regra proposta e origem (R11) |
+| POST | `/api/vaccines/{id}/decision` | `{decision, analyst_id, reason?}` | Decisão do analista (R12): aprovar ou rejeitar; não aplica nada no Wazuh |
 | GET | `/api/compliance` | `hours` | Veredito RGPD/NIS2/AI Act por alerta |
 | GET | `/api/nis2-lookup` | `cae_principal` (obrig.), `cae_secundarios`, `nipc`, `colaboradores`, `faturacao_eur`, `excecao_conhecida` | Classificação NIS2 sugerida |
 | GET | `/api/history/query` | `date_from`, `date_to`, `severity`, `rgpd_estado`, `nis2_estado`, `ai_act_estado`, `limit` (máx. 1000) | Consulta o histórico via índice SQLite |
