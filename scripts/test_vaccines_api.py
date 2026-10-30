@@ -20,6 +20,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import typing
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -29,6 +30,7 @@ from fastapi.testclient import TestClient
 
 import incident_ingest
 import main
+import vaccine_decision
 import vaccine_engine
 from attack_scenarios import SCENARIOS
 from incident_store import IncidentStore
@@ -322,6 +324,93 @@ def run_history() -> None:
         tmp.cleanup()
 
 
+def decide(vaccine_id: str, decision: str, analyst_id: str, reason: str | None = None):
+    body = {"decision": decision, "analyst_id": analyst_id}
+    if reason is not None:
+        body["reason"] = reason
+    return client.post(f"/api/vaccines/{vaccine_id}/decision", headers=HEADERS, json=body)
+
+
+def seed_decided(tmp: str) -> str:
+    """Monta o cenário da leitura: vac-bd617cce8054 aprovada (eddie) e depois
+    substituída por vac-3eb8018acb1c; vac-5fe3861aa2a3 rejeitada (jeremy).
+    Devolve o caminho do store."""
+    log_path, vaccines_path = wire(tmp)
+    incident_ingest.ingest_raw_alerts(main.incident_store, [raw_alert("a3", 970, 4672)], log_path, SCENARIOS)
+    main.incident_store.create_analyst("analyst-eddie", "Eddie", 1, None, NOW.isoformat())
+    main.incident_store.create_analyst("analyst-jeremy", "Jeremy", 2, None, NOW.isoformat())
+    set_ml(ML_RESULTS)
+    asyncio.run(main._run_vaccine_cycle())
+    r1 = decide("vac-bd617cce8054", "approved", "analyst-eddie")
+    r2 = decide("vac-5fe3861aa2a3", "rejected", "analyst-jeremy", "Regra ruidosa")
+    check("montagem: as duas decisões por HTTP dão 200", r1.status_code == 200 and r2.status_code == 200)
+    set_ml(ML_RESULTS[:1])
+    asyncio.run(main._run_vaccine_cycle())
+    return vaccines_path
+
+
+def run_state_read() -> None:
+    """VLB-05 / D-10 / D-12 / D-13: filtro ?state=, state e decision na lista e no detalhe."""
+    original_load, original_build = main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report
+    original_indexer = main.indexer_client.get_recent_alerts
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        seed_decided(tmp.name)
+
+        check("VaccineState == vaccine_decision.DERIVED_STATES",
+              typing.get_args(main.VaccineState) == vaccine_decision.DERIVED_STATES)
+
+        body = client.get("/api/vaccines", headers=HEADERS).json()
+        check("sem filtro: [vac-3eb8018acb1c, vac-5fe3861aa2a3] com states [proposed, rejected]",
+              [v["id"] for v in body["vaccines"]] == ["vac-3eb8018acb1c", "vac-5fe3861aa2a3"]
+              and [v["state"] for v in body["vaccines"]] == ["proposed", "rejected"])
+        check("sem filtro: decision None na proposed", body["vaccines"][0]["decision"] is None)
+
+        body = client.get("/api/vaccines?state=rejected", headers=HEADERS).json()
+        check("?state=rejected -> [vac-5fe3861aa2a3], total 1, state rejected",
+              [v["id"] for v in body["vaccines"]] == ["vac-5fe3861aa2a3"] and body["total"] == 1
+              and all(v["state"] == "rejected" for v in body["vaccines"]))
+        decision = body["vaccines"][0]["decision"]
+        check("?state=rejected: decision com reason 'Regra ruidosa' e decided_by_name Jeremy",
+              decision["reason"] == "Regra ruidosa" and decision["decided_by_name"] == "Jeremy"
+              and decision["decided_by"] == "analyst-jeremy")
+
+        body = client.get("/api/vaccines?state=proposed", headers=HEADERS).json()
+        check("?state=proposed -> [vac-3eb8018acb1c], total 1, decision None",
+              [v["id"] for v in body["vaccines"]] == ["vac-3eb8018acb1c"] and body["total"] == 1
+              and body["vaccines"][0]["state"] == "proposed" and body["vaccines"][0]["decision"] is None)
+
+        r = client.get("/api/vaccines?state=approved", headers=HEADERS)
+        body = r.json()
+        check("?state=approved (aprovada está substituída) -> vaccines [], total 0, reason None, available True",
+              r.status_code == 200 and body["vaccines"] == [] and body["total"] == 0
+              and body["reason"] is None and body["available"] is True)
+
+        body = client.get("/api/vaccines?state=approved&include_superseded=true", headers=HEADERS).json()
+        check("D-12: ?state=approved&include_superseded=true -> [vac-bd617cce8054] approved por Eddie, superseded_by vac-3eb8018acb1c",
+              [v["id"] for v in body["vaccines"]] == ["vac-bd617cce8054"]
+              and body["vaccines"][0]["state"] == "approved"
+              and body["vaccines"][0]["decision"]["decided_by_name"] == "Eddie"
+              and body["vaccines"][0]["superseded_by"] == "vac-3eb8018acb1c")
+
+        for bad in ("applied", "APPROVED", "", "proposed%3BDROP", "approved%27"):
+            r = client.get(f"/api/vaccines?state={bad}", headers=HEADERS)
+            check(f"?state={bad!r} -> 422", r.status_code == 422)
+
+        r = client.get("/api/vaccines/vac-bd617cce8054", headers=HEADERS)
+        vaccine = r.json()["vaccine"]
+        check("detalhe da aprovada substituída: approved, decision com exatamente DECISION_FIELDS, superseded_by",
+              r.status_code == 200 and vaccine["state"] == "approved"
+              and set(vaccine["decision"]) == set(vaccine_decision.DECISION_FIELDS)
+              and vaccine["superseded_by"] == "vac-3eb8018acb1c")
+        vaccine = client.get("/api/vaccines/vac-3eb8018acb1c", headers=HEADERS).json()["vaccine"]
+        check("detalhe da atual: proposed e decision None", vaccine["state"] == "proposed" and vaccine["decision"] is None)
+    finally:
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = original_load, original_build
+        main.indexer_client.get_recent_alerts = original_indexer
+        tmp.cleanup()
+
+
 def snapshot_store(store: VaccineStore, path: str) -> tuple:
     """Estado completo do store lido diretamente (não pela rota): linhas com payload,
     superseded_by e state, mais um SELECT COUNT(*) ao ficheiro."""
@@ -434,6 +523,8 @@ if __name__ == "__main__":
     run_history()
     print()
     run_guarantees()
+    print()
+    run_state_read()
     print()
     if failures:
         print(f"{len(failures)} verificação(ões) falharam:")
