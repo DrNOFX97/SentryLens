@@ -42,7 +42,7 @@ Detalhe completo: `.planning/milestones/v1.1-ROADMAP.md`
 
 - [x] **Phase 15: Store de decisões** - Tabela `vaccine_decisions` só de acréscimo e máquina de estados pura, sem tocar em `vaccines` (completed 2026-10-29)
 - [x] **Phase 16: API de decisão** - `POST /api/vaccines/{id}/decision`, estado e decisão no `GET`, filtro por estado, códigos de erro estáveis, nada é aplicado (completed 2026-10-30)
-- [ ] **Phase 17: Aba, testes e documentação** - Botões Aprovar/Rejeitar no detalhe, suite verde e docs a refletir o R12
+- [x] **Phase 17: Aba, testes e documentação** - Botões Aprovar/Rejeitar no detalhe, suite verde e docs a refletir o R12 (completed 2026-11-04)
 
 ## Phase Details
 
@@ -103,7 +103,7 @@ Plans:
   3. `run_all_tests.py` termina com código 0 numa execução completa, sem Wazuh, incluindo os testes novos.
   4. `DATA_MODEL.md`, `API.md`, `ROADMAP_STATUS.md` (R12 ✅), `README.md` e `CLAUDE.md` descrevem o R12 com contagens medidas.
 
-**Plans:** 6/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 **Wave 1**
