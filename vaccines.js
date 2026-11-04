@@ -177,6 +177,15 @@ function vacVerdictBadge(verdict) {
   return htmlT`<span class="vac-verdict vac-verdict-${String(verdict)}">${String(label)}</span>`;
 }
 
+// Estado em badge com texto (D-07): a cor nunca é a única pista. O modificador de classe só
+// aceita os três estados conhecidos (T-17-12); qualquer outro texto fica como veio, escapado
+// pelo htmlT, com a classe vac-state-unknown. Ausente ou não-string é o travessão.
+function vacStateBadge(state) {
+  if (typeof state !== "string" || state === "") return htmlT`${vacCell(null)}`;
+  const modifier = Object.prototype.hasOwnProperty.call(VAC_STATE_LABELS, state) ? state : "unknown";
+  return htmlT`<span class="vac-state vac-state-${modifier}">${vacLabel(VAC_STATE_LABELS, state)}</span>`;
+}
+
 // A condição fica em helpers: cada interpolação do template começa por vac*.
 function vacRowClass(vaccine) {
   let classes = vaccine.superseded_by === null || vaccine.superseded_by === undefined ? "" : " vac-row-superseded";
@@ -200,7 +209,7 @@ function vacRowsHtml(vaccines) {
     <td>${vacCell(origin.mitre_technique)}</td>
     <td>${vacVerdictBadge(vaccine.verdict)}</td>
     <td>${vacCell(vacSensors(vaccine.missing_sensors))}</td>
-    <td>${vacCell(VAC_STATE_LABELS[vaccine.state] || vaccine.state)}</td>
+    <td>${vacStateBadge(vaccine.state)}</td>
     <td>${vacCell(vacDate(vaccine.created_at))}</td>
   </tr>`;
   })}`;
@@ -495,7 +504,7 @@ function vacRenderDetailError(code) {
   vacRenderDecision();
 }
 
-// Linhas de texto do bloco Decisão (cada valor já escapado pelo htmlT).
+// Linhas do bloco Decisão: texto simples (escapado pelo htmlT) ou um htmlT já seguro (badge de estado).
 function vacShowDecisionLines(lines) {
   htmRender(document.getElementById("vac-decision-state"),
     htmlT`${lines.map((line) => htmlT`<span>${line}</span><br>`)}`);
@@ -508,13 +517,12 @@ function vacShowDecisionLines(lines) {
 function vacRenderDecision() {
   const form = document.getElementById("vac-decision-form");
   const view = slVacDecisionView(vacDetailVaccine, vacAnalysts, vacAnalystsError);
-  const proposed = "Estado: " + vacCell(vacLabel(VAC_STATE_LABELS, "proposed"));
+  const proposed = htmlT`Estado: ${vacStateBadge("proposed")}`;
   let showForm = false;
   switch (view.mode) {
     case "decided":
       vacShowDecisionLines([
-        "Estado: " + vacCell(vacLabel(VAC_STATE_LABELS, view.state)) + " · por " + vacCell(view.author)
-          + " · em " + vacCell(vacDate(view.decidedAt)),
+        htmlT`Estado: ${vacStateBadge(view.state)} · por ${vacCell(view.author)} · em ${vacCell(vacDate(view.decidedAt))}`,
         "Motivo: " + vacCell(view.reason),
       ]);
       break;

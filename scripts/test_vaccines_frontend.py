@@ -663,8 +663,10 @@ def run_states() -> None:
 
     # h) Phase 16: o backend já serve approved/rejected; o rótulo é da Phase 17. Um estado sem
     # rótulo desenha-se como o próprio texto (escapado pelo htmlT), nunca "undefined".
-    check("vacRowsHtml desenha o estado sem rótulo como o próprio texto (approved/rejected, nunca undefined)",
-          "vacCell(VAC_STATE_LABELS[vaccine.state] || vaccine.state)" in linhas)
+    # O badge de estado (17-03, D-07) substitui o texto simples; o estado sem rótulo continua a
+    # desenhar-se como o próprio texto, escapado (ver run_state_ui).
+    check("vacRowsHtml desenha o estado por vacStateBadge(vaccine.state) (badge com texto, nunca só cor)",
+          "vacStateBadge(vaccine.state)" in linhas)
 
 
 def run_detail() -> None:
@@ -1233,6 +1235,126 @@ def run_conflict() -> None:
           not any(x in js for x in ("setInterval", "setTimeout", "WebSocket")))
 
 
+# --- run_state_ui ----------------------------------------------------------
+
+_BADGE_NODE = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+const ctx = vm.createContext({
+  htmlT: (strings, ...values) => strings.reduce((out, s, i) => out + s + (i < values.length ? esc(values[i]) : ""), ""),
+});
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), ctx);
+const calls = JSON.parse(fs.readFileSync(0, "utf8"));
+process.stdout.write(JSON.stringify(calls.map((state) => ctx.vacStateBadge(state))));
+"""
+
+
+def node_state_badges(js: str, states):
+    """Corre o vacStateBadge REAL de vaccines.js em node:vm (só as declarações de que depende, htmlT
+    simulado com escape) e devolve o HTML por estado. None sem node ou se o node falhar."""
+    node = shutil.which("node")
+    if node is None:
+        return None
+    labels = re.search(r"^const VAC_STATE_LABELS = .*$", js, re.M)
+    if labels is None:
+        return None
+    partes = [labels.group(0)] + [function_body(js, n) for n in ("vacCell", "vacLabel", "vacStateBadge")]
+    if not all(partes):
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        origem = Path(tmp) / "badge.js"
+        origem.write_text("\n".join(partes), encoding="utf-8")
+        proc = subprocess.run([node, "-e", _BADGE_NODE, str(origem)], input=json.dumps(list(states)),
+                              capture_output=True, text=True, encoding="utf-8", timeout=60)
+    if proc.returncode != 0:
+        print(proc.stderr)
+        return None
+    return json.loads(proc.stdout)
+
+
+def css_rules(css: str) -> list[tuple[list[str], str]]:
+    """(seletores, corpo) de cada bloco `seletores { corpo }` sem chavetas dentro (chega para o que se procura)."""
+    sem_comentarios = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return [([x.strip() for x in m.group(1).split(",")], m.group(2))
+            for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", sem_comentarios)]
+
+
+def hidden_classes(html_block: str) -> set[str]:
+    """Classes dos elementos do bloco que têm o atributo hidden."""
+    classes: set[str] = set()
+    for tag in re.finditer(r"<\w+\b[^>]*\shidden(?=[\s>=/])[^>]*>", html_block):
+        found = re.search(r'class="([^"]*)"', tag.group(0))
+        if found:
+            classes.update(found.group(1).split())
+    return classes
+
+
+def run_state_ui() -> None:
+    """17-03 (D-07, D-08, D-10): badge de estado, estilos com tokens, filtro por estado, contadores e textos."""
+    files = served()
+    index_html = files["/index.html"][2]
+    js = files["/vaccines.js"][2]
+    css = files["/style.css"][2]
+
+    # a) badge de estado (D-07): texto + classe, nunca só cor
+    badge = function_body(js, "vacStateBadge")
+    check("vaccines.js define vacStateBadge com htmlT e hasOwnProperty sobre VAC_STATE_LABELS",
+          bool(badge) and "htmlT`" in badge and "hasOwnProperty" in badge and "VAC_STATE_LABELS" in badge)
+    check("vacRenderDecision mostra o estado por vacStateBadge (decided e proposed)",
+          function_body(js, "vacRenderDecision").count("vacStateBadge(") >= 2)
+    estados = ["proposed", "approved", "rejected", "xpto", None, "", 7, "<b>x</b>", "constructor"]
+    nomes = ["proposed", "approved", "rejected", "xpto", "none", "vazio", "num", "html", "ctor"]
+    html_estados = node_state_badges(js, estados)
+    check("vacStateBadge corre em node (vaccines.js real)", html_estados is not None)
+    if html_estados is not None:
+        por_estado = dict(zip(nomes, html_estados))
+        check("proposed -> 'vac-state vac-state-proposed' com o texto Proposta",
+              "vac-state vac-state-proposed" in por_estado["proposed"] and ">Proposta<" in por_estado["proposed"])
+        check("approved -> classe vac-state-approved e texto Aprovada",
+              "vac-state vac-state-approved" in por_estado["approved"] and ">Aprovada<" in por_estado["approved"])
+        check("rejected -> classe vac-state-rejected e texto Rejeitada",
+              "vac-state vac-state-rejected" in por_estado["rejected"] and ">Rejeitada<" in por_estado["rejected"])
+        check("estado desconhecido -> classe vac-state-unknown e o próprio texto",
+              "vac-state vac-state-unknown" in por_estado["xpto"] and ">xpto<" in por_estado["xpto"])
+        check("estado ausente, vazio ou não-string -> travessão, sem badge",
+              all(por_estado[k] == "—" for k in ("none", "vazio", "num")))
+        check("estado com HTML é escapado e a classe fica unknown (nunca injeta no atributo)",
+              "<b>" not in por_estado["html"] and "&lt;b&gt;" in por_estado["html"]
+              and "vac-state-unknown" in por_estado["html"])
+        check("uma chave herdada ('constructor') não vira modificador: classe unknown",
+              "vac-state-unknown" in por_estado["ctor"] and "vac-state-constructor" not in por_estado["ctor"])
+
+    # b) estilos só com tokens (D-07)
+    regras = css_rules(css)
+    partilhada = next((sels for sels, corpo in regras if ".vac-verdict" in sels and "display: inline-block" in corpo), [])
+    check("style.css põe .vac-state na regra partilhada dos badges (a de .vac-verdict)", ".vac-state" in partilhada)
+    for classe in ("vac-state-approved", "vac-state-rejected", "vac-decision", "vac-decision-final",
+                   "vac-decision-error", "vac-decision-form"):
+        corpo = next((c for sels, c in regras if f".{classe}" in sels), None)
+        check(f"style.css define .{classe} sem cores literais (só var(--...))",
+              corpo is not None and not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", corpo))
+    corpo = next((c for sels, c in regras if ".vac-state" in sels and ".vac-verdict" not in sels), None)
+    check("style.css define .vac-state (cor base) com var(--...)",
+          corpo is not None and "var(--" in corpo and not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", corpo))
+    check("style.css define o botão desativado da decisão (opacity e cursor not-allowed)",
+          any(".vac-decision-actions button:disabled" in sels and "not-allowed" in corpo and "opacity" in corpo
+              for sels, corpo in regras))
+    painel = index_html[index_html.index('id="tab-vaccines"'):index_html.index('id="tab-attack-registry"')]
+    classes = sorted(hidden_classes(painel))
+    check("há elementos com classe e hidden na aba Vaccines (o varrimento do [hidden] não é vazio)", len(classes) >= 1)
+    for classe in classes:
+        com_display = [c for sels, c in regras if f".{classe}" in sels and re.search(r"display\s*:\s*(?!none)", c)]
+        if com_display:
+            check(f".{classe} tem display em style.css e por isso a regra .{classe}[hidden] {{ display: none }}",
+                  any(f".{classe}[hidden]" in sels and re.search(r"display\s*:\s*none", c) for sels, c in regras))
+        else:
+            check(f".{classe} (hidden) não define display: a regra [hidden] do navegador chega", True)
+    check("o varrimento do [hidden] apanha classes sintéticas",
+          hidden_classes('<div class="a b" hidden></div><p class="c"></p><div class="d" hidden="">') == {"a", "b", "d"})
+
+
 if __name__ == "__main__":
     run_tracer()
     run_guards()
@@ -1245,6 +1367,7 @@ if __name__ == "__main__":
     run_decision_errors()
     run_decision_view()
     run_conflict()
+    run_state_ui()
     if failures:
         print(f"\n[FALHOU] {len(failures)} teste(s) falharam:")
         for f in failures:

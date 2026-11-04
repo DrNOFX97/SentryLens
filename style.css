@@ -97,7 +97,7 @@
    inc-status, atk-verdict, ...) ficam como aliases: partilham a forma daqui
    e só definem a cor. Sem maiúsculas forçadas. */
 .badge, .severity-badge, .agent-status, .health-badge, .rb-badge, .inc-status, .atk-verdict,
-.alib-risk, .alib-replayable, .vac-verdict, .mlm-badge, .mle-origin {
+.alib-risk, .alib-replayable, .vac-verdict, .vac-state, .mlm-badge, .mle-origin {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 10px;
@@ -1048,6 +1048,17 @@ tr.rb-stale td { font-style: italic; }
 .vac-error-state { text-align: center; padding: 30px 10px; font-size: var(--fs-sm); color: var(--sev-critical-fg); }
 .vac-not-applied { background: var(--sev-medium-bg); border-left: 4px solid var(--sev-medium); padding: 8px 12px; font-weight: 600; margin: 0 0 12px; }
 .vac-proposal { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+/* Estado da vaccine (R12): Proposta e desconhecido ficam neutros; o texto do badge diz sempre o estado. */
+.vac-state { background: var(--neutral-bg); color: var(--text); }
+.vac-state-approved { background: var(--sev-low-bg); }
+.vac-state-rejected { background: var(--sev-high-bg); }
+/* Bloco Decisão do detalhe: o form tem display próprio, por isso precisa da regra [hidden]. */
+.vac-decision { margin: 0 0 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-sunken); }
+.vac-decision-form { display: grid; gap: 8px; }
+.vac-decision-form[hidden] { display: none; }
+.vac-decision-final { font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 600; margin: 0; }
+.vac-decision-error { color: var(--sev-critical-fg); font-weight: 600; }
+.vac-decision-actions button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ===== Registo de modelos (Roadmap v2, R9) — ml_models.js ===== */
 .mlm-badge-active { background: var(--sev-low-bg); }
