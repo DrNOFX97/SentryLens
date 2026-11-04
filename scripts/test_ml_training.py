@@ -33,6 +33,7 @@ import inspect
 import json
 import os
 import re
+import shutil
 import statistics
 import sys
 import tempfile
@@ -52,6 +53,37 @@ from feature_extractor import (  # noqa: E402
     load_attack_log,
     vectorize,
 )
+
+# --- Temporário próprio por execução (17-05, D-15) --------------------------------
+#
+# Causa do flake que existiu aqui (docs/ROADMAP_STATUS.md, linha dos flakes): a
+# secção 13 compara as pastas `sentrylens-treino-*` do temporário ANTES e
+# DEPOIS de cada cenário, e `test_ml_models_api.py`/`test_ml_evaluation.py`, que
+# correm em paralelo no `run_all_tests.py`, criam e apagam pastas com o mesmo
+# prefixo no mesmo %TEMP% partilhado. A correcção isola o temporário DESTE
+# processo: `tempfile.tempdir` (e TMP/TEMP/TMPDIR, para subprocessos) apontam
+# para uma pasta própria, apagada no fim. `ml_training.TEMP_PREFIX` não se mexe:
+# é o prefixo real que a secção 13 tem de continuar a vigiar.
+TEMP_DO_SISTEMA = tempfile.gettempdir()
+_VARS_TEMP = ("TMP", "TEMP", "TMPDIR")
+_TEMPDIR_ANTES = tempfile.tempdir
+_VARS_ANTES = {v: os.environ.get(v) for v in _VARS_TEMP}
+TEMP_PROPRIO = tempfile.mkdtemp(prefix=f"test-ml-training-{os.getpid()}-")
+tempfile.tempdir = TEMP_PROPRIO
+for _v in _VARS_TEMP:
+    os.environ[_v] = TEMP_PROPRIO
+
+
+def _repor_temporario() -> None:
+    """Repõe o temporário do sistema e apaga a pasta própria (idempotente)."""
+    tempfile.tempdir = _TEMPDIR_ANTES
+    for v, antes in _VARS_ANTES.items():
+        if antes is None:
+            os.environ.pop(v, None)
+        else:
+            os.environ[v] = antes
+    shutil.rmtree(TEMP_PROPRIO, ignore_errors=True)
+
 
 FIXTURE_EVENTOS = SCRIPT_DIR / "sample_events_real.json"
 FIXTURE_LOG = SCRIPT_DIR / "sample_attack_log.jsonl"
@@ -1144,6 +1176,34 @@ def secao_limpeza_do_temporario() -> None:
     check(f"(e) a contagem final de sobras é a inicial ({len(antes)})",
           sobras_temporarias() == antes)
 
+    # Isolamento do temporário (17-05, D-15): prova que a correcção do flake
+    # funciona e que o glob continua a ver sobras reais.
+    def _mesmo_sitio(a, b) -> bool:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+    check("(f) o temporário deste teste é a pasta própria, não o do sistema",
+          _mesmo_sitio(tempfile.gettempdir(), TEMP_PROPRIO)
+          and not _mesmo_sitio(tempfile.gettempdir(), TEMP_DO_SISTEMA))
+
+    intruso = Path(TEMP_DO_SISTEMA) / f"{ml_training.TEMP_PREFIX}intruso-{os.getpid()}"
+    try:
+        intruso.mkdir()
+        visto = any(_mesmo_sitio(p, intruso) for p in sobras_temporarias())
+    finally:
+        shutil.rmtree(intruso, ignore_errors=True)
+    check("(g) uma pasta sentrylens-treino-* de outro processo no %TEMP% do sistema "
+          "já não é vista", not visto)
+
+    plantada = Path(TEMP_PROPRIO) / f"{ml_training.TEMP_PREFIX}plantada"
+    try:
+        plantada.mkdir()
+        vista = any(_mesmo_sitio(p, plantada) for p in sobras_temporarias())
+    finally:
+        shutil.rmtree(plantada, ignore_errors=True)
+    check("(h) uma sobra real na pasta própria continua a ser vista e, depois de "
+          "apagada, o glob volta ao valor de antes",
+          vista and sobras_temporarias() == antes)
+
 
 def _levanta_registro(*_args, **_kwargs):
     raise model_registry.ModelRegistryError("registry_unavailable")
@@ -1216,3 +1276,5 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         raise SystemExit(1)
+    finally:
+        _repor_temporario()
