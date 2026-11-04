@@ -1,6 +1,6 @@
 # Roadmap v2 — estado das fases (R0–R25)
 
-Estado de execução do R9 ao R11 em `.planning/` (GSD: `ROADMAP.md`, `STATE.md`, `REQUIREMENTS.md`); as restantes fases continuam a ser seguidas aqui.
+Estado de execução do R9 ao R12 em `.planning/` (GSD: `ROADMAP.md`, `STATE.md`, `REQUIREMENTS.md`); as restantes fases continuam a ser seguidas aqui.
 
 Plano de evolução do SentryLens de dashboard técnico para laboratório SOC de
 aprendizagem contínua (ataque → deteção → incidente → vaccine → replay →
@@ -26,8 +26,8 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R8 | MTTD / MTTR / métricas | ✅ | `soc_metrics.py` (puro) + `GET /api/metrics` + 3 painéis (`metrics.js`: MTTD / MTTR, Detection Coverage, Detection Rate); mediana/p90/média, cobertura por cenário e técnica MITRE, taxa de deteção por fonte, FN/FP; definições formais em `DATA_MODEL.md`; `IncidentStore.list_for_metrics` (leitura) |
 | R9 | ML Intelligence | ✅ | Isolation Forest + `feature_extractor` partilhado. Registo versionado `models/vN` + `ACTIVE`, avaliação por versão, SHA-256 antes de carregar o `.pkl`, `GET /api/ml/models`, abas Models e Evaluation, `export_raw_events.py`, 38 ficheiros de teste. Isto é o que o código faz, não o que está registado: primeiro ciclo real fechado a 2026-10-28: o modelo legado foi adotado como `v1` (`ACTIVE -> v1`, SHA-256 registado) e avaliado com 8 eventos processáveis (`small_sample: true`, 0% P/R/F1, inconclusivo). Falta treinar `v2` com mais ataques rotulados (decisão por tomar) e resolver o `InconsistentVersionWarning` (sklearn 1.5.2 do modelo vs 1.3.2 do venv) |
 | R10 | ML Learning Loop | ⬜ | |
-| R11 | Vaccine Engine | ✅ | `vaccine_engine.py` (puro: uma vaccine por ataque `not_detected`/`partial`, regra proposta, origem por referência, id determinístico `vac-` + 12 hex) + `vaccine_store.py` (SQLite, estado fixo `proposed`, append-only salvo `superseded_by`) + `vaccine_ingest.py` (loop de background no arranque, estabilização de 600 s) + `GET /api/vaccines[/{id}]` (só leitura, API key por rota) + aba Vaccines → Candidates (`vaccines.js`); propostas, nunca aplicadas no Wazuh e sem comandos; aprovar/rejeitar é o R12 |
-| R12 | Vaccine Lab | ⬜ | |
+| R11 | Vaccine Engine | ✅ | `vaccine_engine.py` (puro: uma vaccine por ataque `not_detected`/`partial`, regra proposta, origem por referência, id determinístico `vac-` + 12 hex) + `vaccine_store.py` (SQLite, estado fixo `proposed`, append-only salvo `superseded_by`) + `vaccine_ingest.py` (loop de background no arranque, estabilização de 600 s) + `GET /api/vaccines[/{id}]` (só leitura, API key por rota) + aba Vaccines → Candidates (`vaccines.js`); propostas, nunca aplicadas no Wazuh e sem comandos; aprovar/rejeitar entrou no R12 |
+| R12 | Vaccine Lab | ✅ | `vaccine_decision.py` (puro: transição `proposed -> approved \| rejected` final, códigos estáveis) + tabela `vaccine_decisions` só de acréscimo no `vaccine_store.py` (UNIQUE, triggers, estado derivado, `count_by_state`) + `POST /api/vaccines/{id}/decision` (API key por rota, contrato fechado, 404/409/422/503 estáveis) + `state`/`decision`/`state_counts` no GET + bloco Decisão, badge, filtro e contadores na aba Vaccines (`vaccines.js`); aprovada = aceite pelo analista, nunca aplicada no Wazuh (R21); autoria autodeclarada |
 | R13 | Attack Replay Lab | ⬜ | |
 | R14 | Security Regression Lab | ⬜ | |
 | R15 | Red vs Blue consolidado | 🟡 | Aba `redblue.js` + correlator |
@@ -39,7 +39,7 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 | R21 | Resposta automática | ⬜ | Por defeito simulação/aprovação, com audit log |
 | R22 | Auditoria / segurança | ⬜ | Ver `SECURITY.md` |
 | R23 | Observabilidade | ⬜ | |
-| R24 | Testes | 🟡 | 81 ficheiros standalone; sem pytest |
+| R24 | Testes | 🟡 | 84 ficheiros standalone (84/84 ficheiros passaram em run_all_tests.py, execução completa de 2026-11-04); sem pytest |
 | R25 | Documentação | 🟡 | Atualizar a cada fase |
 
 ## R0 — correções aplicadas
@@ -80,8 +80,8 @@ Legenda: ✅ feito · 🟡 parcial · ⬜ por fazer
 - Network SOC (R6): "PCAP/Evidence" é evidência de metadados das deteções (JSONL), nunca uma exportação PCAP/payload real — `network_monitor.py` só captura cabeçalhos tshark, não há payload para exportar (ruling explícito na spec, não uma lacuna por fazer); o JSONL de deteções cresce sem rotação/purga automática (mesma política — ou ausência dela — de `historico/` hoje); evidência só pagina "últimas N de um dia" (sem offset/paginação por página), suficiente para o laboratório mas não para consultar meses de histórico de uma vez; sem índice SQLite dedicado (ficou em JSONL simples, como os alertas antes de `history_index.py` — candidato a usar o mesmo padrão se o volume justificar).
 - Detection Engine (R7): painel Detections entregue (`detections.js`); `confidence` existe no tipo `DetectionEvent` mas nenhum dos 3 construtores o preenche ainda (`ml_score` do Isolation Forest não é uma probabilidade calibrada — inventar uma normalização seria enganador); `technique` por deteção individual também fica `None` (só existe ao nível da tentativa de ataque, em `redblue_correlator`); `GET /api/detections` não tem paginação por cursor (só `hours`/`limit`, mesmo nível de ambição que `/api/network/evidence` em R6); `incident_engine.py`/`redblue_correlator.py` continuam com os seus próprios shapes externos (evidência de incidente / "attempt" de correlação) em vez de `DetectionEvent` — decisão deliberada para não mudar contratos já consumidos pelo frontend/attack_registry.py nesta fase.
 - Métricas (R8): o fetch de alertas está limitado a 1000 (newest-first) — quando o teto é atingido (`alerts_truncated`), ataques antigos aparecem como não detetados e a taxa/MTTD/cobertura são limites inferiores (o painel avisa; o `/api/redblue/metrics` tem o mesmo limite). Corrigir de vez exige consultar o Indexer por intervalo de cada ataque. A taxa de FP só conta incidentes `NEW → CLOSED` com nota (a única verdade de base do laboratório) e só aparece com `METRICS_MIN_SAMPLE` (default 5) incidentes fechados; MTTD usa a deteção sinalizada mais cedo de qualquer fonte (um alerta correspondente mas não sinalizado por regra/ML não conta); sem tendência no tempo nem exportação para o relatório HTML (R19).
-- Vaccine Engine (R11): uma vaccine é só uma proposta (nunca aplicada, aprovada nem validada; escrever, aprovar e rejeitar é o R12). O id (`vac-` + 12 hex de sha256) deteta troca ou duplicação mas **não autentica**: quem edita o `attack_log` ou o ficheiro SQLite forja um id coerente. A7: a leitura não volta a correr `validate_vaccine`, uma linha adulterada no ficheiro seria servida. A8: as deteções de rede estão em memória e ficam vazias depois de um reinício, por isso um ataque com `network` esperado avaliado logo a seguir pode gerar uma proposta `network` falsa. A3: com alertas truncados (teto de 8000, `ATTACK_ALERTS_SIZE`, só no caminho dos ataques/vaccines; as métricas R8 e o Red vs Blue continuam a 1000) as vaccines gravam-se na mesma, sinalizado em `generator.alerts_truncated`. A5: o estado do gerador é em memória (`never_run` depois de reiniciar o backend). Espera mínima até uma vaccine aparecer: estabilização de 600 s depois do ataque, mais até um intervalo de 300 s do loop.
-- Flake de `run_all_tests.py`: `test_attack_log_ids.py` e `test_attack_targets.py` falham de forma intermitente quando a suite corre em paralelo (ThreadPoolExecutor com 4 workers em `run_all_tests.py`) e passam isolados; visto no 13-03. Na Phase 14 viu-se também `test_ml_training.py` falhar numa corrida completa em quatro (14-02; olha para `%TEMP%`, partilhado com os restantes testes em paralelo; isolado passa sempre). Na execução citada abaixo (14-04) não reproduziu: nenhuma das duas falhou. Causa por investigar (hipótese: recurso partilhado entre testes paralelos); não toca nas vaccines.
+- Vaccine Engine (R11): uma vaccine é só uma proposta (nunca aplicada, aprovada nem validada; aprovar e rejeitar entrou no R12, feito). O id (`vac-` + 12 hex de sha256) deteta troca ou duplicação mas **não autentica**: quem edita o `attack_log` ou o ficheiro SQLite forja um id coerente. A7: a leitura não volta a correr `validate_vaccine`, uma linha adulterada no ficheiro seria servida. A8: as deteções de rede estão em memória e ficam vazias depois de um reinício, por isso um ataque com `network` esperado avaliado logo a seguir pode gerar uma proposta `network` falsa. A3: com alertas truncados (teto de 8000, `ATTACK_ALERTS_SIZE`, só no caminho dos ataques/vaccines; as métricas R8 e o Red vs Blue continuam a 1000) as vaccines gravam-se na mesma, sinalizado em `generator.alerts_truncated`. A5: o estado do gerador é em memória (`never_run` depois de reiniciar o backend). Espera mínima até uma vaccine aparecer: estabilização de 600 s depois do ataque, mais até um intervalo de 300 s do loop.
+- Flake de `run_all_tests.py`: `test_attack_log_ids.py` e `test_attack_targets.py` falham de forma intermitente quando a suite corre em paralelo (ThreadPoolExecutor com 4 workers em `run_all_tests.py`) e passam isolados; visto no 13-03. Causa por investigar (hipótese: recurso partilhado entre testes paralelos); não toca nas vaccines. `test_ml_training.py` deixou de ser flake na Phase 17: a secção 13 comparava as pastas `sentrylens-treino-*` do `%TEMP%` partilhado e `test_ml_models_api.py`/`test_ml_evaluation.py` criavam-nas em paralelo; agora cada execução usa um temporário próprio (17-05). Falhou pela última vez no planeamento da Phase 17 (2026-10-30, `83/84`), antes da correção; também tinha falhado no 14-02.
 
 ## R9 — verificado por máquina / por verificar em humano
 
@@ -118,5 +118,24 @@ Enquanto esta lista não estiver vazia, o ✅ da tabela significa "o código est
 - Parar o backend e carregar em Atualizar: aparece o banner e "Sem ligação ao backend", nunca "Sem dados"
 - Abrir o detalhe com rato e por teclado (Tab, Enter, Espaço): aviso "Proposta — não aplicada no Wazuh", Origem, Propostas e Cadeia, sem links
 - Lançar um ataque que escape à deteção e ver a vaccine aparecer na aba depois da estabilização (cerca de 10 a 15 min)
+
+Enquanto esta lista não estiver vazia, o ✅ da tabela significa "o código está verificado por máquina", não "o analista viu".
+
+## R12 — verificado por máquina / por verificar em humano
+
+**Verificado por máquina (execução automatizada, esta sessão):**
+- Suite completa `run_all_tests.py` com código 0 numa única execução, sem o laboratório Wazuh: 84/84 ficheiros passaram em run_all_tests.py, execução completa de 2026-11-04
+- Flake de `test_ml_training.py` corrigido na causa (temporário próprio por execução): passa isolado e em três rondas seguidas com `test_ml_models_api.py` e `test_ml_evaluation.py` a correr ao lado
+- Testes do R12: `test_vaccine_decision.py`, `test_vaccine_decision_store.py`, `test_vaccine_decision_api.py`, `test_cors.py` (rota de decisão), `test_vaccines_api.py`, `test_vaccines_frontend.py` (decisão, erros, 409, estado), `test_ui_helpers.py` (helpers `slVac*`)
+- Tabela `vaccines` do R11 intacta byte a byte; `vaccine_decisions` só de acréscimo (triggers recusam UPDATE e DELETE)
+- Nada aplica nem executa: varrimento AST em `test_vaccine_decision_api.py` (nenhuma função de vaccines chama o Manager, o SSH ou subprocessos)
+- 409 `already_decided` e recusas (404/422/503) sem gravar nada
+- O corpo que o helper do frontend constrói é aceite pela rota real (`test_vaccines_frontend.py`)
+
+**Por verificar em humano (pendente de execução real no dashboard):**
+- Aprovar e rejeitar uma vaccine no browser (analista, motivo ao rejeitar, aviso por estado)
+- Provocar o 409 com dois separadores abertos na mesma vaccine e confirmar que o detalhe e a lista se refazem
+- Filtro Estado, contadores e badges nos dois temas (claro e escuro)
+- Decidir o item "Validation (R12)" da página Roadmap do dashboard: é a validação por dry-run (VLB-V2-01), fora deste marco, e continua a aparecer como planeado
 
 Enquanto esta lista não estiver vazia, o ✅ da tabela significa "o código está verificado por máquina", não "o analista viu".
