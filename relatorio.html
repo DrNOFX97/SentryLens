@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SentryLens — Relatório de Segurança</title>
+<style>
+  :root {
+    --navy-950: #0a1622;
+    --navy-800: #12283c;
+    --cyan-400: #2dd4e8;
+    --cyan-600: #0b7d92;
+    --cyan-700: #095e6f;
+    --ink-900: #1a2530;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0 16px 32px;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink-900);
+    background: #f4f7f9;
+  }
+  header {
+    background: var(--navy-950);
+    color: #ffffff;
+    padding: 32px 24px;
+    margin: 0 -16px 24px;
+    border-bottom: 4px solid var(--cyan-400);
+  }
+  header h1 {
+    margin: 0 0 8px;
+    color: var(--cyan-400);
+    font-size: 1.8rem;
+  }
+  header p {
+    margin: 4px 0;
+    color: #cfe8ee;
+    font-size: 0.95rem;
+  }
+  section.panel {
+    background: #ffffff;
+    border: 1px solid #d7e2e7;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    max-width: 1200px;
+  }
+  section.panel h2 {
+    margin-top: 0;
+    color: var(--cyan-600);
+    border-bottom: 2px solid var(--cyan-600);
+    padding-bottom: 8px;
+    font-size: 1.3rem;
+  }
+  .kpi-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .kpi-card {
+    background: var(--navy-800);
+    color: #ffffff;
+    border-radius: 6px;
+    padding: 14px 18px;
+    min-width: 140px;
+    flex: 1 1 140px;
+  }
+  .kpi-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--cyan-400);
+  }
+  .kpi-label {
+    font-size: 0.8rem;
+    color: #cfe8ee;
+    margin-top: 4px;
+  }
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+    font-size: 0.85rem;
+    overflow-x: auto;
+    display: block;
+  }
+  table.data-table th, table.data-table td {
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid #e0e8eb;
+    white-space: nowrap;
+  }
+  table.data-table th {
+    background: #eef5f7;
+    color: var(--cyan-700);
+    position: sticky;
+    top: 0;
+  }
+  p.empty {
+    color: #6b7c85;
+    font-style: italic;
+  }
+  p.note {
+    color: #6b7c85;
+    font-size: 0.85rem;
+    margin-top: 12px;
+  }
+  footer {
+    text-align: center;
+    color: #8393a0;
+    font-size: 0.8rem;
+    margin-top: 32px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>SentryLens — Relatório de Segurança</h1>
+    <p>Gerado em: 2026-10-27 21:28:13</p>
+    <p>Janela temporal: últimas 168 horas</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>KPIs</h2>
+      <div class="kpi-grid"><p class="empty">Estatísticas indisponíveis.</p></div>
+    </section>
+
+    <section class="panel">
+      <h2>Top eventos</h2>
+      <p class="empty">Dados indisponíveis.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Alertas</h2>
+      <p class="empty">Dados indisponíveis.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Agentes</h2>
+      <table class="data-table"><thead><tr><th>Nome</th><th>IP</th><th>Estado</th><th>SO</th></tr></thead><tbody><tr><td>fnuno</td><td>127.0.0.1</td><td>active</td><td>Ubuntu</td></tr><tr><td>DIOGO</td><td>192.168.1.84</td><td>active</td><td>Microsoft Windows 11 Pro</td></tr><tr><td>FARENSE1910</td><td>192.168.1.230</td><td>active</td><td>Microsoft Windows 11 Pro</td></tr></tbody></table>
+    </section>
+
+    <section class="panel">
+      <h2>Sistema</h2>
+      <div class="kpi-grid"><div class="kpi-card"><div class="kpi-value">26.6%</div><div class="kpi-label">CPU</div></div><div class="kpi-card"><div class="kpi-value">88.2%</div><div class="kpi-label">RAM</div></div></div><table class="data-table"><thead><tr><th>Disco</th><th>Uso</th></tr></thead><tbody><tr><td>C:\</td><td>86.4%</td></tr><tr><td>D:\</td><td>75.7%</td></tr><tr><td>E:\</td><td>0.3%</td></tr></tbody></table>
+    </section>
+
+    <!-- sem dados de conformidade para este período -->
+  </main>
+
+  <footer>
+    <p>SentryLens — relatório gerado automaticamente, sem dependência do backend estar ativo para ser reaberto.</p>
+  </footer>
+</body>
+</html>
