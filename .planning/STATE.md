@@ -5,16 +5,16 @@ milestone_name: R12 Vaccine Lab
 current_phase: 17
 current_phase_name: Aba, testes e documentação
 status: executing
-stopped_at: Completed 17-02-PLAN.md
-last_updated: "2026-10-30T16:58:53.088Z"
+stopped_at: Completed 17-03-PLAN.md
+last_updated: "2026-11-04T12:35:39.516Z"
 last_activity: 2026-10-30
 last_activity_desc: Phase 17 execution started
-state_head: c3632f845762f4d38137381d6263d32d9d2bf965
+state_head: ba0affd511f32f8efb4fd58bb95ca2445c8ed29a
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 67
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 ## Current Position
 
 Phase: 17 (Aba, testes e documentação) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-10-30 — Phase 17 execution started
 
@@ -56,6 +56,7 @@ Progress: [███████░░░] 67%
 | Phase 17 P01 | 25min | 2 tasks | 5 files |
 | Phase 17 P04 | 15min | 2 tasks | 2 files |
 | Phase 17 P06 | 15 min | 1 tasks | 2 files |
+| Phase 17 P03 | 20 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,7 @@ Recent decisions affecting current work:
 - [Phase 17]: 17-04: aprovada documentada como aceite pelo analista, nada aplicado no Wazuh (R21); autoria autodeclarada tratada como limite conhecido
 - [Phase 17]: 17-02: bloco Decisão decidido por função pura slVacDecisionView (7 chaves); erros que podem ter gravado refazem detalhe e lista só por GET, nunca novo POST
 - [Phase 17]: 17-06: incidents_unavailable e VAC_GENERIC_ERROR servem leitura e decisão; invalid_analyst_id do D-11 não existe no backend, segue-se invalid_author
+- [Phase 17]: 17-03: estado em badge com texto (unknown para o resto); contadores por kpiRender/slVacStateCounts com — sem amostra; ?state= só se em VAC_STATES
 
 ### Pending Todos
 
@@ -102,10 +104,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-30T16:58:52.952Z
-Stopped at: Completed 17-02-PLAN.md
+Last session: 2026-11-04T12:35:39.363Z
+Stopped at: Completed 17-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Executar os planos que faltam da Fase 17 (17-03 e 17-05): `/gsd-execute-phase 17`.
+- Executar o plano que falta da Fase 17 (17-05): `/gsd-execute-phase 17`.
