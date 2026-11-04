@@ -103,7 +103,7 @@ Plans:
   3. `run_all_tests.py` termina com código 0 numa execução completa, sem Wazuh, incluindo os testes novos.
   4. `DATA_MODEL.md`, `API.md`, `ROADMAP_STATUS.md` (R12 ✅), `README.md` e `CLAUDE.md` descrevem o R12 com contagens medidas.
 
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans executed
 
 Plans:
 **Wave 1**
@@ -120,7 +120,7 @@ Plans:
 - [x] 17-03-PLAN.md — Badge de estado e estilos com tokens, filtro Estado, contadores das vaccines atuais (`kpiRender`, "—" sem amostra), textos da aba sem "só leitura" (VLB-06, VLB-07)
 
 **Wave 5**
-- [ ] 17-05-PLAN.md — Flake de `test_ml_training.py` corrigido (temporário próprio por execução); suite completa com código 0 em duas execuções seguidas, sem escolher tentativas; contagem com proveniência em `README.md`, `ROADMAP_STATUS.md` (R12 ✅) e `CLAUDE.md` (VLB-07)
+- [x] 17-05-PLAN.md — Flake de `test_ml_training.py` corrigido (temporário próprio por execução); suite completa com código 0 em duas execuções seguidas, sem escolher tentativas; contagem com proveniência em `README.md`, `ROADMAP_STATUS.md` (R12 ✅) e `CLAUDE.md` (VLB-07)
 
 ## Progress
 
