@@ -5,7 +5,7 @@ milestone_name: R12 Vaccine Lab
 current_phase: 17
 current_phase_name: Aba, testes e documentação
 status: executing
-stopped_at: Completed 17-06-PLAN.md
+stopped_at: Completed 17-02-PLAN.md
 last_updated: "2026-10-30T16:58:53.088Z"
 last_activity: 2026-10-30
 last_activity_desc: Phase 17 execution started
@@ -14,7 +14,7 @@ progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 67
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 ## Current Position
 
 Phase: 17 (Aba, testes e documentação) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-10-30 — Phase 17 execution started
 
@@ -77,6 +77,7 @@ Recent decisions affecting current work:
 - [Phase 16]: 16-03: o varrimento AST do fecho local segue referências a nomes e proíbe acesso por atributo a manager_client/vm_ssh_client/subprocess; allow_methods do CORS fixado por teste sem mudar main.py
 - [Phase 17]: 17-01: secção Decisão como markup estático; validação local analista, escolha, motivo; motivo conta pontos de código; só analistas com active 1/true
 - [Phase 17]: 17-04: aprovada documentada como aceite pelo analista, nada aplicado no Wazuh (R21); autoria autodeclarada tratada como limite conhecido
+- [Phase 17]: 17-02: bloco Decisão decidido por função pura slVacDecisionView (7 chaves); erros que podem ter gravado refazem detalhe e lista só por GET, nunca novo POST
 - [Phase 17]: 17-06: incidents_unavailable e VAC_GENERIC_ERROR servem leitura e decisão; invalid_analyst_id do D-11 não existe no backend, segue-se invalid_author
 
 ### Pending Todos
@@ -102,9 +103,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-30T16:58:52.952Z
-Stopped at: Completed 17-06-PLAN.md
+Stopped at: Completed 17-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Planear a primeira fase: `/gsd-plan-phase 15` (ou discuti-la antes com `/gsd-discuss-phase 15`).
+- Executar os planos que faltam da Fase 17 (17-03 e 17-05): `/gsd-execute-phase 17`.
