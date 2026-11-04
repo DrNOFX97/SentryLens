@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import typing
 from http.server import HTTPServer
 from pathlib import Path
 
@@ -1353,6 +1354,117 @@ def run_state_ui() -> None:
             check(f".{classe} (hidden) não define display: a regra [hidden] do navegador chega", True)
     check("o varrimento do [hidden] apanha classes sintéticas",
           hidden_classes('<div class="a b" hidden></div><p class="c"></p><div class="d" hidden="">') == {"a", "b", "d"})
+
+    # c) filtro por estado (D-08): igual ao conjunto da API
+    ui_js = files["/ui_helpers.js"][2]
+    inicio = index_html.find('id="vaccines-panel"')
+    fila = index_html.find('class="filter-row"', inicio)
+    aviso = index_html.find('id="vac-notice"')
+    bloco = index_html[fila:aviso] if fila != -1 and aviso != -1 else ""
+    check("a filter-row tem label[for=vac-state-filter] e select#vac-state-filter",
+          'for="vac-state-filter"' in bloco and re.search(r'<select[^>]*id="vac-state-filter"', bloco) is not None)
+    seletor = re.search(r'<select[^>]*id="vac-state-filter"[^>]*>(.*?)</select>', bloco, re.S)
+    opcoes = re.findall(r'<option\s+value="([^"]*)"\s*>(.*?)</option>', seletor.group(1), re.S) if seletor else []
+    check("as options do filtro de estado são, por ordem, Todos, Proposta, Aprovada e Rejeitada",
+          [(v, t.strip()) for v, t in opcoes]
+          == [("", "Todos"), ("proposed", "Proposta"), ("approved", "Aprovada"), ("rejected", "Rejeitada")])
+    estados_api = set(typing.get_args(main.VaccineState))
+    check("os values não vazios do filtro são exatamente typing.get_args(main.VaccineState)",
+          {v for v, _ in opcoes if v} == estados_api and len(estados_api) == 3)
+    lista_js = re.search(r"^const VAC_STATES = \[([^\]]*)\];", js, re.M)
+    estados_js = set(re.findall(r'"([^"]+)"', lista_js.group(1))) if lista_js else set()
+    check("VAC_STATES em vaccines.js é exatamente o conjunto de main.VaccineState", estados_js == estados_api)
+    corpo = function_body(js, "vacBuildQuery")
+    check('vacBuildQuery só acrescenta state se VAC_STATES.includes(...) (params.set("state")',
+          "VAC_STATES.includes(" in corpo and 'params.set("state"' in corpo and "vac-state-filter" in corpo)
+    check('"vac-state-filter" está na lista de ids que pedem a lista de novo (evento change)',
+          re.search(r'for \(const id of \[[^\]]*"vac-state-filter"[^\]]*\]\) \{\s*document\.getElementById\(id\)'
+                    r'\.addEventListener\("change", vacRefresh\)', js) is not None)
+
+    # d) a rota real aceita o que o filtro envia e recusa o resto
+    caminhos = ("/api/vaccines?state=approved", "/api/vaccines?state=rejected", "/api/vaccines?state=proposed",
+                "/api/vaccines?state=proposed&include_superseded=true", "/api/vaccines?state=xpto")
+    _, respostas = real_api_keys(caminhos)
+    extra = respostas["extra"]
+
+    def ids_do_estado(caminho):
+        codigo, corpo_json = extra[caminho]
+        return codigo, [v["id"] for v in corpo_json.get("vaccines", [])]
+
+    check("rota real: ?state=approved -> só a vaccine C", ids_do_estado(caminhos[0]) == (200, [ID_C]))
+    check("rota real: ?state=rejected -> só a vaccine B", ids_do_estado(caminhos[1]) == (200, [ID_B]))
+    check("rota real: ?state=proposed -> [] (a A está substituída)", ids_do_estado(caminhos[2]) == (200, []))
+    check("rota real: ?state=proposed&include_superseded=true -> só a vaccine A",
+          ids_do_estado(caminhos[3]) == (200, [ID_A]))
+    check("rota real: ?state=xpto -> 422", extra[caminhos[4]][0] == 422)
+
+    # e) contadores (D-08): três cartões kpi dentro do painel, antes da filter-row
+    posicao = index_html.find('id="vac-counts"')
+    check("#vac-counts é uma .kpi-grid dentro de #vaccines-panel, antes da filter-row",
+          re.search(r'<div\s+class="kpi-grid"\s+id="vac-counts"', index_html) is not None
+          and inicio != -1 and inicio < posicao < fila)
+    zona = index_html[posicao:fila] if posicao != -1 and fila != -1 else ""
+    rotulos = {"proposed": "Propostas", "approved": "Aprovadas", "rejected": "Rejeitadas"}
+    for estado, rotulo in rotulos.items():
+        cartao = re.search(r'<div\s+class="card"\s+id="vac-count-' + estado + r'"\s*>\s*<h3>(.*?)</h3>\s*'
+                           r'<div\s+class="value">(.*?)</div>', zona, re.S)
+        check(f"#vac-count-{estado} é um cartão com o rótulo {rotulo} e o valor inicial —",
+              cartao is not None and cartao.group(1).strip() == rotulo and cartao.group(2).strip() == "—")
+    check("os contadores têm a nota de que contam as vaccines atuais, independentemente dos filtros",
+          "vaccines atuais" in zona and "independente dos filtros" in zona)
+    check("a nota dos contadores é um panel-note e os h3 não levam emojis",
+          'class="panel-note"' in zona and re.search(r"[\U0001F300-\U0001FAFF☀-➿]", zona) is None)
+    corpo = function_body(js, "vacRenderCounts")
+    check("vacRenderCounts usa slVacStateCounts( e kpiRender( e os três ids #vac-count-*",
+          "slVacStateCounts(" in corpo and "kpiRender(" in corpo
+          and all(f"vac-count-{e}" in corpo or e in corpo for e in rotulos))
+    check("os cartões não são clicáveis (sem data-action no markup nem listener nos contadores)",
+          "data-action" not in zona and re.search(r'getElementById\("vac-count[^"]*"\)\.addEventListener', js) is None
+          and "addEventListener" not in corpo)
+    corpo = function_body(js, "vacRefresh")
+    check("vacRefresh passa envelope.state_counts a vacRenderCounts (também com reason no_data)",
+          "vacRenderCounts(envelope.state_counts)" in corpo)
+    erro = corpo[corpo.find("catch (err)"):corpo.find("finally")]
+    check("o caminho de erro de vacRefresh desenha os contadores com null (—, nunca 0)",
+          "vacRenderCounts(null)" in erro)
+    check("kpi.js carrega antes de vaccines.js no index.html",
+          index_html.index('<script src="kpi.js"></script>') < index_html.index('<script src="vaccines.js"></script>'))
+
+    # f) os contadores sobre dados reais: slVacStateCounts (node, ui_helpers.js real)
+    real_counts = (respostas["lista_decidida"] or {}).get("state_counts")
+    resultado = node_ui_helpers([["slVacStateCounts", [real_counts]]])
+    check("o state_counts real depois das decisões (C aprovada, B rejeitada, A substituída) é {0, 1, 1}",
+          real_counts == {"proposed": 0, "approved": 1, "rejected": 1}
+          and resultado is not None and resultado[0] == {"proposed": 0, "approved": 1, "rejected": 1})
+    original = main.vaccine_store
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        main.vaccine_store = VaccineStore(os.path.join(tmp.name, "nao_existe.sqlite3"))
+        vazio = client.get("/api/vaccines", headers=HEADERS)
+    finally:
+        main.vaccine_store = original
+        tmp.cleanup()
+    corpo_vazio = vazio.json() if vazio.status_code == 200 else {}
+    resultado = node_ui_helpers([["slVacStateCounts", [corpo_vazio.get("state_counts", "ausente")]]])
+    check("store inexistente: 200, reason no_data, state_counts null e os três contadores —(null), nunca 0",
+          vazio.status_code == 200 and corpo_vazio.get("reason") == "no_data" and corpo_vazio.get("state_counts") is None
+          and resultado is not None and resultado[0] == {"proposed": None, "approved": None, "rejected": None})
+    check("slVacStateCounts está definido no ui_helpers.js servido", "function slVacStateCounts(" in ui_js)
+
+    # g) textos fixos (D-10): ninguém diz que é só leitura
+    nota = re.search(r'id="vaccines-panel">.*?<p class="panel-note">(.*?)</p>', index_html, re.S)
+    texto = " ".join(nota.group(1).split()) if nota else ""
+    check("o panel-note do cabeçalho diz que se pode aprovar ou rejeitar e que nada é aplicado no Wazuh",
+          "aprovar ou rejeitar" in texto and ("não aplicada no Wazuh" in texto or "nunca é aplicada no Wazuh" in texto
+                                              or "nenhuma vaccine é aplicada no Wazuh" in texto))
+    check("o panel-note do cabeçalho não diz 'Só leitura' nem 'todas em estado proposta'",
+          bool(texto) and "Só leitura" not in texto and "todas em estado proposta" not in texto)
+    check("o panel-note diz que a decisão é final e que aprovada é só aceite pelo analista",
+          "final" in texto and "aceite pelo analista" in texto)
+    check("a aba Vaccines não diz 'Só leitura' em lado nenhum do index.html", "Só leitura" not in painel)
+    topo = "\n".join(js.splitlines()[:15])
+    check("o comentário de topo de vaccines.js não diz 'Só leitura' e diz que o analista pode aprovar",
+          "Só leitura" not in topo and "aprovar" in topo and "Wazuh" in topo)
 
 
 if __name__ == "__main__":

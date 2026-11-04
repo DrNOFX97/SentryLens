@@ -488,6 +488,19 @@ function slVacErrorFollowUp(code) {
   return "none";
 }
 
+// Contadores das vaccines atuais por estado (D-08), a partir de envelope.state_counts. Cada chave
+// é um inteiro >= 0 ou null: sem amostra, ausente ou inválido é null (o ecrã desenha —), nunca 0;
+// um 0 só passa quando o servidor o mandou com amostra. A forma é sempre {proposed, approved, rejected}.
+function slVacStateCounts(stateCounts) {
+  const plain = stateCounts !== null && typeof stateCounts === "object" && !Array.isArray(stateCounts);
+  const pick = (key) => {
+    if (!plain || !Object.prototype.hasOwnProperty.call(stateCounts, key)) return null;
+    const value = stateCounts[key];
+    return Number.isInteger(value) && value >= 0 ? value : null;
+  };
+  return { proposed: pick("proposed"), approved: pick("approved"), rejected: pick("rejected") };
+}
+
 // Liga o Tab preso a qualquer .modal visível. Só corre no browser (guarda por typeof document).
 function slInstallModalFocusTrap() {
   document.addEventListener("keydown", (ev) => {

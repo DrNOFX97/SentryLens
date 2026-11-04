@@ -1,22 +1,23 @@
-// Aba "Vaccines" (Roadmap v2, R11). Carregado depois de app.js: reutiliza os
-// seus globais (API_BASE, API_KEY, htmlT/htmRender de html.js, renderPanelError) e nunca os
-// redeclara. Leitura por GET a /api/vaccines com o cabeçalho X-API-Key; a única
-// escrita é a decisão do analista (vacDecide). Nenhuma ação altera o Wazuh
-// (as vaccines são regras PROPOSTAS, nunca aplicadas).
+// Aba "Vaccines" (Roadmap v2, R11/R12). Carregado depois de app.js: reutiliza os seus globais
+// (API_BASE, API_KEY, htmlT/htmRender de html.js, renderPanelError) e nunca os redeclara. Lê por GET
+// de /api/vaccines com o cabeçalho X-API-Key e tem uma única escrita: o POST da decisão (vacDecide),
+// em que o analista pode aprovar ou rejeitar uma vaccine proposta. A decisão é final; aprovada
+// significa só aceite pelo analista e nada é aplicado no Wazuh (as vaccines são regras PROPOSTAS).
 //
-// Todos os identificadores de topo começam por vac ou VAC_: os scripts
-// clássicos partilham um só escopo global e um nome repetido rebenta o
-// script inteiro. Todo o texto dinâmico é interpolado em htmlT (escapado por
-// omissão) e desenhado com htmRender; nunca se atribui HTML à mão. O backend nunca envia texto de erro
-// para o ecrã: o campo detail só serve de chave de lookup em VAC_ERROR_TEXT
-// e nunca entra no DOM.
+// Todos os identificadores de topo começam por vac ou VAC_: os scripts clássicos partilham um só
+// escopo global e um nome repetido rebenta o script inteiro. Todo o texto dinâmico é interpolado
+// em htmlT (escapado por omissão) e desenhado com htmRender; nunca se atribui HTML à mão. O backend
+// nunca envia texto de erro para o ecrã: o campo detail só serve de chave de lookup em
+// VAC_ERROR_TEXT e nunca entra no DOM.
 //
-// Ciclo de vida: carrega a cada passagem a ativa (aba e separador visíveis),
-// sem polling e sem canal em tempo real; pedidos concorrentes são ignorados.
+// Ciclo de vida: carrega a cada passagem a ativa (aba e separador visíveis), sem polling e sem canal
+// em tempo real; um refresco pedido durante outro fica em fila e faz uma só volta extra.
 
 const VAC_VERDICT_LABELS = { not_detected: "Não detetado", partial: "Parcial" };
 const VAC_SENSOR_LABELS = { rule: "Regra", ml: "ML", network: "Rede" };
 const VAC_STATE_LABELS = { proposed: "Proposta", approved: "Aprovada", rejected: "Rejeitada" };
+// Estados que o filtro pode enviar como ?state= (iguais a main.VaccineState; a rota recusa o resto com 422).
+const VAC_STATES = ["proposed", "approved", "rejected"];
 const VAC_EXPECTED_SOURCE_LABELS = { log: "attack log", scenario_default: "omissão do cenário (Attack Library)" };
 
 // Mesmo formato que a rota de detalhe aceita (a rota volta a validar).
@@ -249,6 +250,15 @@ function vacRenderError(code) {
   document.getElementById("vac-notice").textContent = "";
 }
 
+// Contadores das vaccines atuais por estado (D-08). Vêm do envelope e não dependem dos filtros;
+// sem amostra, erro ou valor inválido o cartão mostra — (kpiRender), nunca 0.
+function vacRenderCounts(stateCounts) {
+  const view = slVacStateCounts(stateCounts);
+  kpiRender(document.getElementById("vac-count-proposed"), { label: "Propostas", value: view.proposed });
+  kpiRender(document.getElementById("vac-count-approved"), { label: "Aprovadas", value: view.approved });
+  kpiRender(document.getElementById("vac-count-rejected"), { label: "Rejeitadas", value: view.rejected });
+}
+
 // Há quanto tempo, em texto simples (vai para textContent).
 function vacAgo(iso, nowMs) {
   const ms = Date.parse(iso);
@@ -305,11 +315,13 @@ function vacRenderGenerator(generator) {
 function vacBuildQuery() {
   const attackId = document.getElementById("vac-attack-filter").value.trim();
   const technique = document.getElementById("vac-technique-filter").value;
+  const state = document.getElementById("vac-state-filter").value;
   const superseded = document.getElementById("vac-superseded-filter").checked;
   if (attackId !== "" && !VAC_ATTACK_ID_RE.test(attackId)) return null;
   const params = new URLSearchParams();
   if (attackId !== "") params.set("attack_id", attackId);
   if (VAC_TECHNIQUE_RE.test(technique)) params.set("technique", technique);
+  if (VAC_STATES.includes(state)) params.set("state", state);
   if (superseded) params.set("include_superseded", "true");
   const text = params.toString();
   return text ? "?" + text : "";
@@ -365,8 +377,10 @@ async function vacRefresh() {
     vacRenderList(envelope);
     vacAddTechniques(envelope.vaccines || []);
     vacRenderGenerator(envelope.generator);
+    vacRenderCounts(envelope.state_counts);
   } catch (err) {
     vacRenderError(err.message);
+    vacRenderCounts(null);
     const line = document.getElementById("vac-generator");
     line.textContent = "";
     line.classList.remove("vac-generator-error");
@@ -693,7 +707,7 @@ document.getElementById("vac-body").addEventListener("keydown", (event) => {
   }
 });
 
-for (const id of ["vac-attack-filter", "vac-technique-filter", "vac-superseded-filter"]) {
+for (const id of ["vac-attack-filter", "vac-technique-filter", "vac-state-filter", "vac-superseded-filter"]) {
   document.getElementById(id).addEventListener("change", vacRefresh);
 }
 document.getElementById("vac-refresh-btn").addEventListener("click", vacRefresh);

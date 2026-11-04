@@ -52,7 +52,8 @@ function makeCtx(fetchImpl) {
     renderPanelError: () => {},
   });
   vm.runInContext('const API_BASE = "http://x:1"; const API_KEY = "k";', ctx);
-  for (const f of ["api.js", "state.js", "html.js", "ml_models.js", "ml_evaluation.js"]) {
+  // ui_helpers.js e kpi.js carregam antes de vaccines.js no index.html (contadores de estado).
+  for (const f of ["api.js", "state.js", "html.js", "ui_helpers.js", "kpi.js", "ml_models.js", "ml_evaluation.js"]) {
     vm.runInContext(read(f), ctx, { filename: f });
   }
   return { ctx, els };

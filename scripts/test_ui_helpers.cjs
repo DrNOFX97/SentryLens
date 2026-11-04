@@ -243,4 +243,22 @@ check("slVacErrorFollowUp: vazio, null, undefined e número -> none; um código 
   ["", null, undefined, 42, "xpto"].every((c) => fu(c) === "none"));
 check("slVacErrorFollowUp: 'toString' não usa o protótipo", fu("toString") === "none" && fu("constructor") === "none");
 
+// slVacStateCounts: contadores das vaccines atuais; sem amostra ou inválido é null (o ecrã desenha —), nunca 0.
+const sc = (v) => JSON.stringify(ctx.slVacStateCounts(v));
+const NULLS = JSON.stringify({ proposed: null, approved: null, rejected: null });
+check("slVacStateCounts: {proposed: 0, approved: 2, rejected: 1} -> o mesmo (o 0 com amostra é 0)",
+  sc({ proposed: 0, approved: 2, rejected: 1 }) === JSON.stringify({ proposed: 0, approved: 2, rejected: 1 }));
+check("slVacStateCounts: null, undefined, texto, número e lista -> tudo null",
+  [null, undefined, "x", 7, []].every((v) => sc(v) === NULLS));
+check("slVacStateCounts: negativo, fracionário e texto numérico -> null em cada chave",
+  sc({ proposed: -1, approved: 1.5, rejected: "3" }) === NULLS);
+check("slVacStateCounts: NaN, Infinity e null por chave -> null",
+  sc({ proposed: NaN, approved: Infinity, rejected: null }) === NULLS);
+check("slVacStateCounts: chave em falta -> null só nessa chave",
+  sc({ proposed: 3, rejected: 0 }) === JSON.stringify({ proposed: 3, approved: null, rejected: 0 }));
+check("slVacStateCounts: o resultado tem sempre exatamente as 3 chaves, por ordem, e ignora as extra",
+  [null, {}, { proposed: 1, approved: 1, rejected: 1, extra: 9 }, []].every(
+    (v) => JSON.stringify(Object.keys(ctx.slVacStateCounts(v))) === '["proposed","approved","rejected"]'));
+check("slVacStateCounts: chaves herdadas (toString) não contam", sc(Object.create({ proposed: 5 })) === NULLS);
+
 finish();

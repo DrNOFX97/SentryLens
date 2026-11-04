@@ -1409,15 +1409,29 @@
         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-syringe"/></svg> Vaccines — candidatas</h2>
         <p class="panel-note">
           Regras de deteção PROPOSTAS a partir de ataques não detetados ou só parcialmente detetados no
-          Red vs Blue, geradas pelo backend em segundo plano. Só leitura: nenhuma é aplicada no Wazuh
-          (todas em estado proposta).
+          Red vs Blue, geradas pelo backend em segundo plano. No detalhe, um analista da Equipa SOC pode
+          aprovar ou rejeitar cada proposta atual; a decisão é final e fica registada com autor, data e
+          motivo. Aprovada significa só aceite pelo analista: nenhuma vaccine é aplicada no Wazuh.
         </p>
+        <div class="kpi-grid" id="vac-counts" role="group" aria-label="Vaccines atuais por estado">
+          <div class="card" id="vac-count-proposed"><h3>Propostas</h3><div class="value">—</div></div>
+          <div class="card" id="vac-count-approved"><h3>Aprovadas</h3><div class="value">—</div></div>
+          <div class="card" id="vac-count-rejected"><h3>Rejeitadas</h3><div class="value">—</div></div>
+        </div>
+        <p class="panel-note">Contagem das vaccines atuais (sem as substituídas), independente dos filtros da tabela.</p>
         <div class="filter-row">
           <label for="vac-attack-filter">Ataque (id):</label>
           <input type="text" id="vac-attack-filter" inputmode="numeric" maxlength="9" placeholder="todos">
           <label for="vac-technique-filter">Técnica MITRE:</label>
           <select id="vac-technique-filter">
             <option value="">Todas</option>
+          </select>
+          <label for="vac-state-filter">Estado:</label>
+          <select id="vac-state-filter">
+            <option value="">Todos</option>
+            <option value="proposed">Proposta</option>
+            <option value="approved">Aprovada</option>
+            <option value="rejected">Rejeitada</option>
           </select>
           <label><input type="checkbox" id="vac-superseded-filter"> Incluir substituídas</label>
           <button type="button" id="vac-refresh-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Atualizar</button>
