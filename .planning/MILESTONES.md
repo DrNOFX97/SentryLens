@@ -1,5 +1,24 @@
 # Milestones
 
+## v1.2 R12 Vaccine Lab (Shipped: 2026-11-04)
+
+**Phases completed:** 3 phases, 12 plans, 9 tasks
+
+**Key accomplishments:**
+- Uma vaccine proposta pode ser aprovada ou rejeitada (com motivo) pelo store: a decisao fica numa tabela `vaccine_decisions` so de acrescimo no mesmo `vaccines.sqlite3`, a leitura devolve `state` derivado e o bloco `decision`, e a tabela `vaccines` do R11 fica intacta byte a byte.
+- A decisão é final e a corrida está fechada: quatro códigos de recusa distintos não gravam nada, uma vaccine aprovada continua aprovada depois de substituída pelo gerador, e a verificação e o INSERT vivem na mesma transação BEGIN IMMEDIATE, provado pela ordem das instruções e por concorrência real.
+- `list_vaccines(state=...)` filtra pelo estado derivado (proposed, approved, rejected) com e sem a tabela de decisões, e o próprio ficheiro SQLite prova que recusa editar, apagar, duplicar ou gravar fora do contrato uma decisão, com a tabela `vaccines` do R11 igual byte a byte.
+- POST /api/vaccines/{id}/decision: API key por rota, corpo fechado lido à mão com teto de 8192 bytes, analista validado no incident_store, decisão por decide_vaccine e resposta com o estado derivado e o aviso "aceite pelo analista, não aplicada no Wazuh".
+- GET /api/vaccines ganha `?state=` validado como Literal (422 fora de proposed/approved/rejected) e `state_counts` das vaccines atuais, calculado por uma leitura nova só de leitura no store e `None` sem amostra, nunca 0.
+- Tracer ponta a ponta da decisão: o analista aprova ou rejeita uma vaccine no detalhe, com validação local por `slVacDecisionBody` e `POST` real, sem handlers inline e com o corpo do helper provado contra a rota real.
+- O bloco Decisão mostra só de leitura uma vaccine decidida (autor, data, motivo), explica porque não há botões, repõe-se ao mudar de vaccine e, depois de um 409 ou de qualquer erro em que o servidor pode ter gravado, refaz o detalhe e a lista para o estado real aparecer.
+- O estado de cada vaccine passa a ver-se em badge com texto na tabela e no bloco Decisão, filtra-se por Proposta/Aprovada/Rejeitada, três contadores das vaccines atuais mostram — quando não há amostra, e a aba deixa de dizer "só leitura".
+- O contrato do R12 que as Phases 15 e 16 fixaram (tabela `vaccine_decisions` só de acréscimo, estado derivado, `state_counts` e `POST /api/vaccines/{id}/decision` com todos os códigos e status) está descrito em `docs/DATA_MODEL.md` e `docs/API.md`, verificado por script contra o código.
+- O flake de `test_ml_training.py` foi corrigido na causa (temporário próprio por execução), a suite completa passou duas vezes seguidas com código 0 e `84/84`, e README, ROADMAP_STATUS e CLAUDE.md descrevem o R12 com a contagem medida e a sua proveniência.
+- Cada erro da decisão aparece pela frase do código estável: 34 chaves em `VAC_ERROR_TEXT`, uma frase PT-PT acionável por código da rota, da validação local e do transporte, provada contra as recusas reais da rota de decisão.
+
+---
+
 ## v1.1 R11 Vaccine Engine (Shipped: 2026-10-29)
 
 **Phases completed:** 3 phases, 10 plans, 16 tasks

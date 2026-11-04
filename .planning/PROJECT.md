@@ -4,15 +4,6 @@
 
 SentryLens é um laboratório SOC de aprendizagem do CET (curso de cibersegurança): ingere alertas do Wazuh (Manager API 55000, Indexer API 9200), classifica-os, correlaciona ataques lançados (Red vs Blue) com deteções de regra, ML e rede, gere incidentes e expõe tudo num dashboard estático. Backend FastAPI em `scripts/`, frontend estático na raiz, mais um analisador de logs offline (`log_analyzer.py`, Fase 1) que partilha a classificação de Event IDs.
 
-## Current Milestone: v1.2 R12 Vaccine Lab
-
-**Goal:** Um analista aprova ou rejeita uma vaccine proposta, com autor, motivo e auditoria só de acréscimo; aprovar nunca aplica nada no Wazuh.
-
-**Target features:**
-- Registo de decisões só de acréscimo (`vaccine_decisions`), sem alterar a tabela `vaccines` do R11
-- `POST /api/vaccines/{id}/decision` e estado/decisão no `GET`, com códigos de erro estáveis
-- Botões Aprovar/Rejeitar no detalhe da aba Vaccines, testes sem Wazuh e documentação
-
 ## Core Value
 
 Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
@@ -34,27 +25,28 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 - ✓ R10 ML Learning Loop: treino e ativação por HTTP (`POST /api/ml/train`, `/activate`) com as quatro protecções de D-01, compare-and-set no `ACTIVE`, comparação vN vs vN-1 e feature stats no dashboard — v1.0
 - ✓ R11 Vaccine Engine: uma vaccine proposta por ataque `not_detected`/`partial` (`vaccine_engine.py`, store SQLite com estado fixo `proposed`, loop de geração no backend), `GET /api/vaccines[/{id}]` só de leitura com API key, aba Vaccines (`vaccines.js`); nunca aplicada no Wazuh e sem comandos executáveis — v1.1
 
+- ✓ R12 Vaccine Lab: aprovar/rejeitar uma vaccine por `POST /api/vaccines/{id}/decision` com autor, motivo e registo só de acréscimo (`vaccine_decisions`), estado derivado, botões no detalhe da aba Vaccines; aprovar nunca aplica nada no Wazuh — v1.2
+
 ### Active
 
-- [ ] R12 Vaccine Lab (ver Current Milestone; requisitos em REQUIREMENTS.md)
 - [ ] Primeiro ciclo de treino real: lançar ataques, exportar alertas na mesma janela, treinar `v1` e avaliar com dataset rotulável
 - [ ] Verificação humana pendente do R9/R10 no dashboard (badges, aviso de reinício após `adopt`, avaliação rotulada)
 
 ### Out of Scope
 
 - Calibrar o `confidence` das deteções (R7) — dívida conhecida, não é pré-requisito do R9
-- Aplicar vaccines no Wazuh (R21), replay (R13) e regressão (R14); aprovar/rejeitar por HTTP é o R12 (v1.2)
+- Aplicar vaccines no Wazuh (R21), replay (R13) e regressão (R14); o R12 só decide (aprovar/rejeitar), não aplica
 - Recolher métricas ML novas além das já existentes (`/api/ml-anomalies`) — o R9 só liga a avaliação à versão e mostra-a
 
 ## Current State
 
-v1.1 (R11) entregue a 2026-10-29: 3 fases, 10 planos, suite `run_all_tests.py` 81/81. Ciclo real validado de ponta a ponta: o ataque 14 (`blank_password_check`, T1110) gerou a vaccine `vac-a09c1541972a`. `scripts/models/` tem `v1` adotado (`ACTIVE -> v1`) e uma avaliação inconclusiva (8 eventos, `small_sample`); falta treinar `v2` com mais ataques rotulados. Pendentes: verificações humanas do R9/R10 e o caso de vaccine substituída na aba Vaccines.
+v1.2 (R12) entregue a 2026-11-04: 3 fases, 12 planos, suite `run_all_tests.py` 84/84 (duas execuções completas seguidas, exit 0). O analista aprova ou rejeita vaccines no dashboard; a decisão é final, com autor autodeclarado (só há uma API key) e nada é aplicado no Wazuh. UAT de browser 4/4. `scripts/models/` tem `v1` adotado e uma avaliação inconclusiva (8 eventos, `small_sample`); falta treinar `v2` com mais ataques rotulados. Pendentes: verificações humanas do R9/R10 e o caso de vaccine substituída com dados reais.
 
 ## Context
 
 - Projeto de curso (CET), laboratório em VirtualBox: Wazuh-Manager (Ubuntu), alvo Windows 11, Kali atacante.
 - A fonte de verdade de arquitetura, endpoints e troubleshooting é `README.md`; `CLAUDE.md` guia o trabalho; o estado do Roadmap v2 (R0–R25) está em `docs/ROADMAP_STATUS.md`.
-- 33 ficheiros de teste standalone em `scripts/` (sem pytest), todos sem o Wazuh ligado (tudo mockado). `python run_all_tests.py` corre-os.
+- 84 ficheiros de teste standalone em `scripts/` (sem pytest), todos sem o Wazuh ligado (tudo mockado). `python run_all_tests.py` corre-os.
 - Hoje existe um só modelo (2 `.pkl` de 14 de setembro, sem metadados) e um relatório avulso `ml_training_report.json` (26 de setembro) que não está ligado a nenhum modelo; avaliação sobre 35 eventos (20 ataques).
 - Desenho do R9 aprovado em conversa a 2026-10-09; o spec em `docs/superpowers/specs/` ainda por escrever.
 - O processo anterior (R2–R8) usou specs/planos em `docs/superpowers/` e execução inline; o GSD é introduzido a partir do R9.
@@ -80,6 +72,9 @@ v1.1 (R11) entregue a 2026-10-29: 3 fases, 10 planos, suite `run_all_tests.py` 8
 | Uma vaccine só propõe: nunca aplicada no Wazuh, sem comandos executáveis, estado fixo `proposed` imposto pelo próprio SQLite | A escrita por HTTP (aprovar/rejeitar) é o R12; o R11 só prova a lacuna e a proposta | ✓ Good (v1.1) |
 | Id da vaccine = `vac-` + 12 hex de sha256 de `<attack_id>:<sensores em falta>` | Deteta troca/duplicação e dá ids estáveis; não autentica | ✓ Good (v1.1) |
 | Tetos de alertas truncados forçam o veredito `unknown`, nunca `not_detected` | Nunca propor uma regra sobre amostra incompleta; `ATTACK_ALERTS_SIZE` subiu para 8000 (paliativo) | ⚠️ Revisit — truncagem por ataque, não por lote |
+| As decisões vivem numa tabela nova só de acréscimo (`vaccine_decisions`); `vaccines` fica imutável com `state='proposed'` | O estado atual deriva da última decisão; o ficheiro SQLite recusa editar/apagar | ✓ Good (v1.2) |
+| Aprovar não aplica nada no Wazuh; autoria autodeclarada (analista da Equipa SOC), não autenticada | Aplicar é o R21; só existe uma API key, por isso qualquer analista decide e fica registado | ✓ Good (v1.2) — limite conhecido |
+| A decisão é final (sem reverter) | Reabrir exige o seu próprio registo de auditoria (VLB-V2-03) | — Pending |
 
 ## Evolution
 
@@ -99,4 +94,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-29 after starting v1.2 milestone*
+*Last updated: 2026-11-04 after v1.2 milestone*
