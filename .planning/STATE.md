@@ -4,17 +4,17 @@ milestone: v1.3
 milestone_name: R16 MITRE ATT&CK
 current_phase: 18
 current_phase_name: Técnica e tática por alerta
-status: executing
-stopped_at: Completed 18-02-PLAN.md
-last_updated: "2026-11-09T12:37:20.000Z"
+status: verifying
+stopped_at: Completed 18-03-PLAN.md
+last_updated: "2026-11-09T12:44:42.411Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 18 execution started
-state_head: f6edc18e20efd0c99575645fe0c583a01fe1c5b1
+state_head: f96b13fb8a9c59725cf2354b09e3284b252ad6de
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-11-09)
 
 Phase: 18 (Técnica e tática por alerta) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-09 — Phase 18 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -49,6 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 18 P01 | 10min | 3 tasks | 5 files |
 | Phase 18 P02 | 8min | 2 tasks | 2 files |
+| Phase 18 P03 | 25min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,7 @@ Recent decisions affecting current work:
 - [Phase 18]: ATT&CK fixado na v18.1 (14 taticas Enterprise com Defense Evasion); tabela como lista de {id,name,tactics} em mitre_techniques.yaml
 - [Phase 18]: lateral_movement_schtasks (T1053) passa a mitre_tactic Execution; coerencia cenario->tabela e teste, cobertura e regra do carregador
 - [Phase 18]: 18-02: technique_id nos 8 Event IDs inequivocos de CRITICAL_EVENTS; vazio = chave ausente; restantes 23 sem tecnica (na duvida fica vazio)
+- [Phase 18]: 18-03: resolve_alert_techniques substitui (wazuh > catalogo > []); rule.mitre.id so com lixo cai no catalogo; limites 32 elementos e 9 caracteres
 
 ### Pending Todos
 
@@ -91,8 +93,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-09T12:37:19.966Z
-Stopped at: Completed 18-02-PLAN.md
+Last session: 2026-11-09T12:44:42.379Z
+Stopped at: Completed 18-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

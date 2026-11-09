@@ -73,7 +73,7 @@ Detalhe completo: `.planning/milestones/v1.2-ROADMAP.md`
   3. Para um alerta com `rule.mitre.id`, o resolvedor puro devolve essas técnicas com origem `wazuh`; sem `rule.mitre`, devolve a do catálogo pelo Event ID com origem `catalog`; sem nenhuma das duas, devolve lista vazia — nunca uma técnica inventada.
   4. `GET /api/detections` passa a trazer, nas deteções de regra, `technique` (primeira técnica resolvida ou `null`), `techniques` e `technique_source`; todos os campos que já existiam mantêm nome, tipo e significado (provado contra o contrato anterior).
 
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 Plans:
 **Wave 1**
@@ -81,7 +81,7 @@ Plans:
 - [x] 18-02-PLAN.md — `technique_id` nas 8 entradas inequívocas de `CRITICAL_EVENTS`, extração partilhada `wazuh_win_fields`/`catalog_technique_id`, provas de que `classify_alert()` e o `log_analyzer.py` não mudam (MITRE-01; onda 1, em paralelo)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 18-03-PLAN.md — Resolvedor `resolve_alert_techniques` (wazuh > catálogo > vazio, endurecido) e campos aditivos `techniques`/`technique_source` no `DetectionEvent` e em `GET /api/detections`, com prova do contrato anterior (MITRE-03, MITRE-04; onda 2)
+- [x] 18-03-PLAN.md — Resolvedor `resolve_alert_techniques` (wazuh > catálogo > vazio, endurecido) e campos aditivos `techniques`/`technique_source` no `DetectionEvent` e em `GET /api/detections`, com prova do contrato anterior (MITRE-03, MITRE-04; onda 2)
 
 ### Phase 19: API de cobertura MITRE
 
@@ -122,6 +122,6 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 18. Técnica e tática por alerta | 2/3 | Planned | - |
+| 18. Técnica e tática por alerta | 3/3 | Planned | - |
 | 19. API de cobertura MITRE | 0/? | Not started | - |
 | 20. Matriz MITRE, testes e documentação | 0/? | Not started | - |
