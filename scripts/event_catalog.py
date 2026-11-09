@@ -6,6 +6,10 @@ agora reaproveitada aqui para que o dashboard fale a mesma linguagem em toda
 a stack: análise de ficheiro estático (Fase 1) e análise ao vivo via Wazuh
 (Fase 2) classificam os eventos exatamente da mesma forma. Cada evento inclui
 agora também uma categoria, para permitir agrupar e filtrar alertas por tipo.
+
+Cada evento pode ter `technique_id` (técnica MITRE inequívoca, usada só como
+fallback quando o alerta Wazuh não traz `rule.mitre`); a chave está ausente
+quando não há técnica clara.
 """
 
 import re
@@ -14,25 +18,32 @@ CRITICAL_EVENTS: dict[int, dict[str, str]] = {
     # MITRE: Brute Force: cada logon falhado é uma tentativa de adivinhar credenciais
     4625: {"name": "Failed Logon", "severity": "high", "category": "autenticacao", "technique_id": "T1110"},
     4672: {"name": "Special Privileges Assigned", "severity": "high", "category": "atividade_privilegiada"},
-    4698: {"name": "Scheduled Task Created", "severity": "high", "category": "tarefas_agendadas"},
+    # MITRE: Scheduled Task: o evento é a própria criação da tarefa agendada
+    4698: {"name": "Scheduled Task Created", "severity": "high", "category": "tarefas_agendadas", "technique_id": "T1053.005"},
     4699: {"name": "Scheduled Task Deleted", "severity": "medium", "category": "tarefas_agendadas"},
     4700: {"name": "Scheduled Task Disabled", "severity": "low", "category": "tarefas_agendadas"},
     4701: {"name": "Scheduled Task Updated", "severity": "medium", "category": "tarefas_agendadas"},
     4702: {"name": "Scheduled Task Renamed", "severity": "low", "category": "tarefas_agendadas"},
     4703: {"name": "Scheduled Task Enabled", "severity": "low", "category": "tarefas_agendadas"},
     4704: {"name": "User Right Assigned", "severity": "high", "category": "politica_seguranca"},
-    4720: {"name": "User Account Created", "severity": "medium", "category": "ciclo_de_vida"},
+    # MITRE: Local Account: o evento é a própria criação da conta
+    4720: {"name": "User Account Created", "severity": "medium", "category": "ciclo_de_vida", "technique_id": "T1136.001"},
     4722: {"name": "User Account Enabled", "severity": "low", "category": "ciclo_de_vida"},
     4723: {"name": "Password Change Attempt", "severity": "low", "category": "ciclo_de_vida"},
     4724: {"name": "Password Reset Attempt", "severity": "medium", "category": "ciclo_de_vida"},
-    4726: {"name": "User Account Deleted", "severity": "high", "category": "ciclo_de_vida"},
-    4728: {"name": "Member Added to Global Group", "severity": "high", "category": "gestao_de_grupos"},
-    4732: {"name": "Member Added to Local Group", "severity": "medium", "category": "gestao_de_grupos"},
-    4756: {"name": "Member Added to Universal Group", "severity": "high", "category": "gestao_de_grupos"},
+    # MITRE: Account Access Removal: apagar a conta remove o acesso de quem a usava
+    4726: {"name": "User Account Deleted", "severity": "high", "category": "ciclo_de_vida", "technique_id": "T1531"},
+    # MITRE: Account Manipulation: entrar num grupo global muda os privilégios da conta
+    4728: {"name": "Member Added to Global Group", "severity": "high", "category": "gestao_de_grupos", "technique_id": "T1098"},
+    # MITRE: Account Manipulation: entrar num grupo local muda os privilégios da conta
+    4732: {"name": "Member Added to Local Group", "severity": "medium", "category": "gestao_de_grupos", "technique_id": "T1098"},
+    # MITRE: Account Manipulation: entrar num grupo universal muda os privilégios da conta
+    4756: {"name": "Member Added to Universal Group", "severity": "high", "category": "gestao_de_grupos", "technique_id": "T1098"},
     4738: {"name": "User Account Changed", "severity": "medium", "category": "ciclo_de_vida"},
     4797: {"name": "Blank Password Query Attempt", "severity": "medium", "category": "autenticacao"},
     4713: {"name": "Kerberos Policy Changed", "severity": "high", "category": "politica_seguranca"},
-    4719: {"name": "Security Policy Changed", "severity": "high", "category": "politica_seguranca"},
+    # MITRE: Disable Windows Event Logging: o evento é a alteração da política de auditoria
+    4719: {"name": "Security Policy Changed", "severity": "high", "category": "politica_seguranca", "technique_id": "T1562.002"},
     5140: {"name": "Network Share Accessed", "severity": "low", "category": "acesso_rede"},
     5145: {"name": "Network Share Permission Checked", "severity": "low", "category": "acesso_rede"},
     4725: {"name": "User Account Disabled", "severity": "medium", "category": "ciclo_de_vida"},
