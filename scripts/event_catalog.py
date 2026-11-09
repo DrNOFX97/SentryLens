@@ -11,7 +11,8 @@ agora também uma categoria, para permitir agrupar e filtrar alertas por tipo.
 import re
 
 CRITICAL_EVENTS: dict[int, dict[str, str]] = {
-    4625: {"name": "Failed Logon", "severity": "high", "category": "autenticacao"},
+    # MITRE: Brute Force: cada logon falhado é uma tentativa de adivinhar credenciais
+    4625: {"name": "Failed Logon", "severity": "high", "category": "autenticacao", "technique_id": "T1110"},
     4672: {"name": "Special Privileges Assigned", "severity": "high", "category": "atividade_privilegiada"},
     4698: {"name": "Scheduled Task Created", "severity": "high", "category": "tarefas_agendadas"},
     4699: {"name": "Scheduled Task Deleted", "severity": "medium", "category": "tarefas_agendadas"},
@@ -176,16 +177,43 @@ def classify_alert(
     }
 
 
+def catalog_technique_id(win_event_id: object, channel: object = None) -> str | None:
+    """Técnica MITRE do catálogo para um Event ID, ou None. É o fallback do
+    resolvedor MITRE quando o alerta não traz rule.mitre (D-00a): só devolve
+    mapeamentos inequívocos (D-01) e nunca inventa. Eventos do canal do
+    Defender não têm técnica (D-02), tal como classify_alert nunca os deixa
+    cair em CRITICAL_EVENTS."""
+    if isinstance(channel, str) and channel.casefold() == DEFENDER_CHANNEL.casefold():
+        return None
+    if not isinstance(win_event_id, int) or isinstance(win_event_id, bool):
+        return None
+    info = CRITICAL_EVENTS.get(win_event_id)
+    if info is None:
+        return None
+    return info.get("technique_id")
+
+
+def wazuh_win_fields(raw: object) -> tuple[int | None, object, object]:
+    """Extração única do Event ID, canal e eventdata de um alerta cru do Wazuh
+    (data.win.system.eventID, data.win.system.channel, data.win.eventdata).
+    Usada por classify_wazuh_alert e pelo resolvedor MITRE. Alerta malformado
+    devolve (None, None, None); nunca levanta exceção."""
+    try:
+        win = raw.get("data", {}).get("win", {})
+        system = win.get("system", {})
+        raw_id = system.get("eventID")
+        win_event_id = int(raw_id) if raw_id is not None else None
+        return win_event_id, system.get("channel"), win.get("eventdata")
+    except (AttributeError, ValueError, TypeError):
+        return None, None, None
+
+
 def classify_wazuh_alert(raw: dict) -> dict[str, str]:
     """classify_alert para um alerta bruto do Wazuh: lê data.win.system.eventID,
     data.win.system.channel e data.win.eventdata. Alerta malformado ou de
     origem não Windows devolve o mesmo que um Event ID desconhecido, nunca
     levanta exceção."""
     try:
-        win = raw.get("data", {}).get("win", {})
-        system = win.get("system", {})
-        raw_id = system.get("eventID")
-        win_event_id = int(raw_id) if raw_id is not None else None
-        return classify_alert(win_event_id, system.get("channel"), win.get("eventdata"))
+        return classify_alert(*wazuh_win_fields(raw))
     except (AttributeError, ValueError, TypeError):
         return classify_alert(None)
