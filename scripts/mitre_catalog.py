@@ -28,11 +28,16 @@ import yaml
 
 from attack_library import MITRE_RE as TECHNIQUE_RE
 from attack_scenarios import SCENARIOS
-from event_catalog import CRITICAL_EVENTS
+from event_catalog import CRITICAL_EVENTS, catalog_technique_id, wazuh_win_fields
 
 ATTACK_VERSION = "v18.1"
 DEFAULT_PATH = Path(__file__).parent / "mitre_techniques.yaml"
 PATH_ENV_VAR = "MITRE_TECHNIQUES_PATH"
+
+# Origem de cada técnica resolvida num alerta (vocabulário de technique_source).
+SOURCE_WAZUH = "wazuh"
+SOURCE_CATALOG = "catalog"
+TECHNIQUE_SOURCES = (SOURCE_WAZUH, SOURCE_CATALOG)
 
 # As 14 táticas Enterprise da v18.1, na ordem da matriz.
 ENTERPRISE_TACTICS = (
@@ -234,3 +239,52 @@ def tactics_for(technique_id, table: dict | None = None) -> list[str]:
         return []
     entry = table.get(technique_id) or table.get(parent)
     return list(entry["tactics"]) if entry else []
+
+
+def _wazuh_technique_ids(raw) -> list[str]:
+    """Ids de técnica de rule.mitre.id do alerta cru, só os bem formados, sem
+    duplicados e pela ordem do Wazuh (D-06). Nunca levanta. NUNCA lê a lista de
+    táticas do Wazuh (D-09): não emparelha com os ids."""
+    if not isinstance(raw, dict):
+        return []
+    rule = raw.get("rule")
+    mitre = rule.get("mitre") if isinstance(rule, dict) else None
+    ids = mitre.get("id") if isinstance(mitre, dict) else None
+    if isinstance(ids, str):
+        ids = [ids]
+    if not isinstance(ids, list):
+        return []
+    found: list[str] = []
+    for value in ids:
+        if isinstance(value, str) and TECHNIQUE_RE.fullmatch(value) and value not in found:
+            found.append(value)
+    return found
+
+
+def resolve_alert_techniques(raw, table: dict | None = None) -> list[dict]:
+    """Técnicas MITRE de um alerta cru do Wazuh: lista de
+    {"id", "source", "tactics"}.
+
+    Precedência (D-00a), que SUBSTITUI e não une: se rule.mitre.id tem ids
+    válidos, são esses (source "wazuh"); senão a técnica do catálogo de Event
+    IDs (source "catalog"; nunca para o canal do Defender); senão []. Nunca
+    inventa uma técnica.
+
+    O id é devolvido exatamente como veio (D-04: "T1078.002" fica
+    "T1078.002"); as táticas vêm SEMPRE da tabela via tactics_for (própria ->
+    pai -> []). Uma técnica sem entrada nem pai fica com tactics [] (D-09).
+    Nunca levanta sobre dados do alerta; cada item e cada lista de táticas são
+    objetos novos (nunca partilham estado com a cache da tabela)."""
+    if table is None:
+        table = load_mitre_techniques()
+    wazuh_ids = _wazuh_technique_ids(raw)
+    if wazuh_ids:
+        return [
+            {"id": tid, "source": SOURCE_WAZUH, "tactics": tactics_for(tid, table)}
+            for tid in wazuh_ids
+        ]
+    event_id, channel, _ = wazuh_win_fields(raw)
+    tid = catalog_technique_id(event_id, channel)
+    if tid:
+        return [{"id": tid, "source": SOURCE_CATALOG, "tactics": tactics_for(tid, table)}]
+    return []

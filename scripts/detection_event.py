@@ -12,11 +12,17 @@ Ver docs/superpowers/specs/2026-10-07-r7-detection-engine-design.md.
 formas próprias (evidência de incidente, "attempt" de correlação) — este
 módulo é a base de construção interna partilhada (ruling 3/4 da spec), não
 um novo contrato externo que os substitua.
+
+A técnica MITRE de uma deteção de regra vem de rule.mitre do alerta primeiro e
+do catálogo de Event IDs como fallback (mitre_catalog.resolve_alert_techniques).
+A única leitura de ficheiro é a da tabela MITRE já em cache desde o arranque
+(a mesma exceção que attack_registry.py documenta para a Attack Library).
 """
 
 from typing import Literal, TypedDict
 
 from event_catalog import classify_wazuh_alert
+from mitre_catalog import resolve_alert_techniques
 from redblue_correlator import _parse_timestamp
 
 Source = Literal["rule", "ml", "network"]
@@ -34,7 +40,9 @@ class DetectionEvent(TypedDict):
     severity: Severity
     asset: str | None
     ts: str  # ISO-8601 com fuso
-    technique: str | None  # sempre None nos 3 construtores por agora (ver spec, ruling 2)
+    technique: str | None  # regra: 1.ª técnica resolvida (D-06) ou None; ML/rede: sempre None
+    techniques: list[dict]  # itens {id, source, tactics}; [] em ML/rede
+    technique_source: str | None  # "wazuh" | "catalog" | None
     confidence: float | None  # sempre None nos 3 construtores por agora (ver spec, ruling 2)
     ref: object  # apontador para o dado original, nunca cópia
     label: str
@@ -45,11 +53,14 @@ def _make(
     source: Source, severity: Severity, asset: str | None, ts: str, label: str, *,
     technique: str | None = None, confidence: float | None = None,
     ref: object = None, description: str | None = None,
+    techniques: list[dict] | None = None, technique_source: str | None = None,
 ) -> DetectionEvent:
     return {
         "source": source, "severity": severity, "asset": asset, "ts": ts,
         "technique": technique, "confidence": confidence, "ref": ref,
         "label": label, "description": description,
+        "techniques": techniques if techniques is not None else [],
+        "technique_source": technique_source,
     }
 
 
@@ -66,10 +77,14 @@ def from_rule_alert(raw: dict) -> DetectionEvent | None:
     if ts is None or not asset:
         return None
     classification = classify_wazuh_alert(raw)
+    techniques = resolve_alert_techniques(raw)
     return _make(
         "rule", classification["severity"], asset, ts.isoformat(),
         classification["friendly_name"],
         ref=raw, description=classification.get("recommendation"),
+        technique=techniques[0]["id"] if techniques else None,
+        techniques=techniques,
+        technique_source=techniques[0]["source"] if techniques else None,
     )
 
 

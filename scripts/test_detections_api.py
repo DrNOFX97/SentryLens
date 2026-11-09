@@ -36,11 +36,14 @@ def check(label: str, condition: bool) -> None:
 ASSET = "192.168.1.5"
 
 
-def alert(event_id: int, ts: str, user: str = "jsilva", ip: str = "203.0.113.50") -> dict:
+def alert(event_id: int, ts: str, user: str = "jsilva", ip: str = "203.0.113.50", mitre=None) -> dict:
+    rule = {"id": "1", "description": "x", "level": 5}
+    if mitre is not None:
+        rule["mitre"] = mitre
     return {
         "@timestamp": ts,
         "agent": {"name": "WIN-PC01", "ip": ASSET},
-        "rule": {"id": "1", "description": "x", "level": 5},
+        "rule": rule,
         "data": {"win": {"system": {"eventID": str(event_id)}, "eventdata": {"targetUserName": user, "ipAddress": ip}}},
         "full_log": "x",
     }
@@ -99,6 +102,28 @@ def run() -> None:
         body["events"] == sorted(body["events"], key=lambda e: e["ts"], reverse=True),
     )
     check("sources só tem rule/ml/network", set(body["sources"].keys()) == {"rule", "ml", "network"})
+
+    # --- técnica por origem (R16, Phase 18) ---
+    tech_alerts = [
+        alert(4625, "2026-09-03T10:00:00Z"),
+        alert(4624, "2026-09-03T10:01:00Z", mitre={"id": ["T1078"], "tactic": ["Initial Access"]}),
+        alert(4624, "2026-09-03T10:02:00Z"),
+    ]
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=tech_alerts)
+    tech_body = client.get("/api/detections").json()
+    rule_events = {e["ts"]: e for e in tech_body["events"] if e["source"] == "rule"}
+    e_cat = rule_events.get("2026-09-03T10:00:00+00:00")
+    e_waz = rule_events.get("2026-09-03T10:01:00+00:00")
+    e_none = rule_events.get("2026-09-03T10:02:00+00:00")
+    check("3 deteções de regra encontradas pelo ts", None not in (e_cat, e_waz, e_none))
+    check("4625 sem mitre: technique T1110 / catalog",
+          e_cat["technique"] == "T1110" and e_cat["technique_source"] == "catalog")
+    check("4625 sem mitre: tactics da tabela", e_cat["techniques"][0]["tactics"] == ["Credential Access"])
+    check("4624 com mitre: technique T1078 / wazuh",
+          e_waz["technique"] == "T1078" and e_waz["technique_source"] == "wazuh")
+    check("4624 sem mitre: technique None, source None, techniques []",
+          e_none["technique"] is None and e_none["technique_source"] is None and e_none["techniques"] == [])
+    main.indexer_client.get_recent_alerts = AsyncMock(return_value=MOCK_ALERTS)
 
     # --- limit capa o nº de eventos devolvidos e marca truncated ---
     resp_limit = client.get("/api/detections", params={"limit": 1})

@@ -27,13 +27,19 @@ def check(label: str, condition: bool) -> None:
         failures.append(label)
 
 
-def raw_alert(alert_id, ts, ip=ASSET, event_id=None) -> dict:
+WAZUH_TACTICS_REAL = ["Defense Evasion", "Persistence", "Privilege Escalation", "Initial Access", "Lateral Movement"]
+T1078_TACTICS = ["Initial Access", "Persistence", "Privilege Escalation", "Defense Evasion"]
+
+
+def raw_alert(alert_id, ts, ip=ASSET, event_id=None, mitre=None) -> dict:
     alert = {
         "_id": alert_id, "@timestamp": ts,
         "agent": {"name": "FARENSE1910", "ip": ip}, "rule": {"id": "60122", "level": 5},
     }
     if event_id is not None:
         alert["data"] = {"win": {"system": {"eventID": str(event_id)}}}
+    if mitre is not None:
+        alert["rule"]["mitre"] = mitre
     return alert
 
 
@@ -45,10 +51,28 @@ def run_from_rule_alert() -> None:
     check("ts normalizado com fuso (Z -> +00:00)", e["ts"] == "2026-10-06T10:00:00+00:00")
     check("ref é o alerta bruto, não cópia", e["ref"] is not None and e["ref"].get("_id") == "a1")
     check("label é o nome amigável do Event ID", e["label"] == "Failed Logon")
-    check("technique fica None (ruling 2, R7)", e["technique"] is None)
+    check("4625 sem rule.mitre: technique T1110 pelo catálogo", e["technique"] == "T1110")
+    check("4625 sem rule.mitre: technique_source catalog", e["technique_source"] == "catalog")
+    check(
+        "4625 sem rule.mitre: techniques com a tática da tabela",
+        e["techniques"] == [{"id": "T1110", "source": "catalog", "tactics": ["Credential Access"]}],
+    )
     check("confidence fica None (ruling 2, R7)", e["confidence"] is None)
+    w = from_rule_alert(raw_alert(
+        "a3", "2026-10-06T10:00:00Z", event_id=HIGH,
+        mitre={"id": ["T1078", "T1021"], "tactic": WAZUH_TACTICS_REAL}))
+    check("rule.mitre: technique é a 1.ª (T1078)", w["technique"] == "T1078")
+    check("rule.mitre: technique_source wazuh", w["technique_source"] == "wazuh")
+    check("rule.mitre substitui o catálogo (sem T1110)", [t["id"] for t in w["techniques"]] == ["T1078", "T1021"])
+    check("táticas de T1078 vêm da tabela", w["techniques"][0]["tactics"] == T1078_TACTICS)
+    check("táticas de T1021 vêm da tabela", w["techniques"][1]["tactics"] == ["Lateral Movement"])
+    check("com rule.mitre o 4625 mantém severity high", w["severity"] == "high")
+    check("com rule.mitre o 4625 mantém label Failed Logon", w["label"] == "Failed Logon")
     sem_event_id = from_rule_alert(raw_alert("a2", "2026-10-06T10:00:00Z"))
     check("alerta sem Event ID Windows é info", sem_event_id["severity"] == "info")
+    check("sem Event ID e sem rule.mitre: technique None", sem_event_id["technique"] is None)
+    check("sem Event ID e sem rule.mitre: technique_source None", sem_event_id["technique_source"] is None)
+    check("sem Event ID e sem rule.mitre: techniques []", sem_event_id["techniques"] == [])
     for label, bad in [
         ("sem timestamp", raw_alert("x", None)),
         ("com timestamp inválido", raw_alert("x", "ontem")),
