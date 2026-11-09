@@ -9,6 +9,7 @@ Correr (a partir de scripts/):
     python test_mitre_catalog.py
 """
 
+import ast
 import os
 import subprocess
 import sys
@@ -20,10 +21,37 @@ os.environ.setdefault("SENTRYLENS_API_KEY", "test-key-mitre-catalog")
 
 import yaml
 
+import attack_scenarios
 import main
 import mitre_catalog as mc
 
 main.app.router.on_startup.clear()
+
+# D-10: técnicas vistas em rule.mitre nos snapshots do lab. Escritas aqui de
+# propósito: scripts/snapshots/ está no .gitignore e o teste não o lê.
+D10_OBSERVED = ("T1078", "T1021", "T1550.002", "T1078.002", "T1484", "T1531")
+# D-01: técnicas do catálogo de Event IDs (independente do estado de event_catalog.py).
+D01_CATALOG = ("T1110", "T1053.005", "T1136.001", "T1098", "T1562.002", "T1531")
+# D-05: conteúdo da tabela fixado por literal (ATT&CK Enterprise v18.1).
+EXPECTED_TABLE = {
+    "T1021": ["Lateral Movement"],
+    "T1053": ["Execution", "Persistence", "Privilege Escalation"],
+    "T1053.005": ["Execution", "Persistence", "Privilege Escalation"],
+    "T1078": ["Initial Access", "Persistence", "Privilege Escalation", "Defense Evasion"],
+    "T1078.002": ["Initial Access", "Persistence", "Privilege Escalation", "Defense Evasion"],
+    "T1098": ["Persistence", "Privilege Escalation"],
+    "T1110": ["Credential Access"],
+    "T1110.003": ["Credential Access"],
+    "T1135": ["Discovery"],
+    "T1136": ["Persistence"],
+    "T1136.001": ["Persistence"],
+    "T1484": ["Privilege Escalation", "Defense Evasion"],
+    "T1531": ["Impact"],
+    "T1550": ["Defense Evasion", "Lateral Movement"],
+    "T1550.002": ["Defense Evasion", "Lateral Movement"],
+    "T1562": ["Defense Evasion"],
+    "T1562.002": ["Defense Evasion"],
+}
 
 failures: list[str] = []
 
@@ -187,9 +215,66 @@ def run_validation() -> None:
     check("import main com cópia válida da tabela: código 0", good.returncode == 0)
 
 
+def scenario_tactic_problems(scenarios, table) -> list[str]:
+    """D-07: cenários cuja mitre_tactic não é uma das táticas que a tabela
+    lista para a sua técnica (ou para o pai)."""
+    problems = []
+    for name, scenario in scenarios.items():
+        allowed = mc.tactics_for(scenario.mitre_technique, table)
+        if scenario.mitre_tactic not in allowed:
+            problems.append(f"{name}: '{scenario.mitre_tactic}' não está em {allowed} para {scenario.mitre_technique}")
+    return problems
+
+
+def run_completeness_and_coherence() -> None:
+    table = mc.load_mitre_techniques(use_cache=False)
+
+    for technique in D10_OBSERVED:
+        check(f"D-10: {technique} tem entrada própria", technique in table)
+    for technique in D01_CATALOG:
+        check(f"D-01: {technique} tem entrada própria", technique in table)
+
+    actual = {tid: list(e["tactics"]) for tid, e in table.items()}
+    check("D-05: a tabela real é igual às 17 linhas literais", actual == EXPECTED_TABLE)
+
+    for tid, e in table.items():
+        if "." not in tid:
+            continue
+        parent = mc.parent_of(tid)
+        check(f"{tid}: o pai {parent} tem entrada própria", parent in table)
+        check(f"{tid}: táticas contidas nas do pai",
+              parent in table and set(e["tactics"]) <= set(table[parent]["tactics"]))
+
+    all_tactics = {t for e in table.values() for t in e["tactics"]}
+    check("todas as táticas da tabela estão em ENTERPRISE_TACTICS", all_tactics <= set(mc.ENTERPRISE_TACTICS))
+    check("'Defense Evasion' está em ENTERPRISE_TACTICS (vocabulário v18.1)", "Defense Evasion" in mc.ENTERPRISE_TACTICS)
+
+    # D-07: coerência cenário -> tabela
+    check("D-07: os cenários reais declaram táticas que a tabela lista",
+          scenario_tactic_problems(attack_scenarios.SCENARIOS, table) == [])
+    fake = {"fake": SimpleNamespace(mitre_technique="T1053", mitre_tactic="Lateral Movement")}
+    check("D-07: tática errada para T1053 é detetada", len(scenario_tactic_problems(fake, table)) == 1)
+    fake = {"fake": SimpleNamespace(mitre_technique="T1110.003", mitre_tactic="Credential Access")}
+    check("D-07: tática pelo pai (T1110.003) é aceite", scenario_tactic_problems(fake, table) == [])
+
+    # D-08: o módulo só abre a tabela, em leitura.
+    tree = ast.parse(Path(mc.__file__).read_text(encoding="utf-8"))
+    opens = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "open"]
+    check("D-08: mitre_catalog.py tem exatamente 1 chamada a open()", len(opens) == 1)
+
+    def is_write_mode(call: ast.Call) -> bool:
+        modes = [a for a in call.args[1:2]] + [k.value for k in call.keywords if k.arg == "mode"]
+        return any(isinstance(m, ast.Constant) and isinstance(m.value, str) and set(m.value) & set("wax+")
+                   for m in modes)
+
+    check("D-08: nenhum open() em modo de escrita", not any(is_write_mode(c) for c in opens))
+
+
 def run() -> None:
     run_tracer()
     run_validation()
+    run_completeness_and_coherence()
 
 
 run()
