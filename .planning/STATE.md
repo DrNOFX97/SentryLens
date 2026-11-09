@@ -5,16 +5,16 @@ milestone_name: R16 MITRE ATT&CK
 current_phase: 18
 current_phase_name: Técnica e tática por alerta
 status: executing
-stopped_at: Completed 18-01-PLAN.md
-last_updated: "2026-11-09T12:32:39.079Z"
+stopped_at: Completed 18-02-PLAN.md
+last_updated: "2026-11-09T12:37:20.000Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 18 execution started
-state_head: 9553cc2a4ddc18c53ef164700e54cadbcf96e524
+state_head: f6edc18e20efd0c99575645fe0c583a01fe1c5b1
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-09)
 ## Current Position
 
 Phase: 18 (Técnica e tática por alerta) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-11-09 — Phase 18 execution started
 
@@ -48,6 +48,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 18 P01 | 10min | 3 tasks | 5 files |
+| Phase 18 P02 | 8min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,7 @@ Recent decisions affecting current work:
 - [Phase 18]: Exceção à convenção 'README atualizado a cada sessão': contagem de testes (84→86), docs/API.md e docs/DATA_MODEL.md só mudam na Fase 20 (DOC-01), para não descreverem um R16 incompleto. Aviso do plan-checker aceite. Tabela MITRE fixada em ATT&CK v18.1 (14 táticas, D-11); v19+ (15 táticas, Stealth/Defense Impairment) seria decisão nova. — Plan-checker 18: 0 bloqueios, 1 aviso; decisão do orquestrador 2026-11-09
 - [Phase 18]: ATT&CK fixado na v18.1 (14 taticas Enterprise com Defense Evasion); tabela como lista de {id,name,tactics} em mitre_techniques.yaml
 - [Phase 18]: lateral_movement_schtasks (T1053) passa a mitre_tactic Execution; coerencia cenario->tabela e teste, cobertura e regra do carregador
+- [Phase 18]: 18-02: technique_id nos 8 Event IDs inequivocos de CRITICAL_EVENTS; vazio = chave ausente; restantes 23 sem tecnica (na duvida fica vazio)
 
 ### Pending Todos
 
@@ -89,8 +91,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-09T12:32:39.051Z
-Stopped at: Completed 18-01-PLAN.md
+Last session: 2026-11-09T12:37:19.966Z
+Stopped at: Completed 18-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
