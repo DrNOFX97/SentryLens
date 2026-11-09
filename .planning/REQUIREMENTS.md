@@ -10,7 +10,7 @@
 ### Técnica por alerta
 
 - [ ] **MITRE-01**: Cada entrada de `CRITICAL_EVENTS` em `scripts/event_catalog.py` pode ter `technique_id`, vazio quando não há técnica clara (ex.: 4625→T1110, 4698→T1053.005); `classify_alert()` e o `log_analyzer.py` (Fase 1) continuam a funcionar sem alterações de comportamento.
-- [ ] **MITRE-02**: Uma tabela técnica→tática versionada (ficheiro de dados no repo) cobre as técnicas do catálogo, dos cenários de `attack_scenarios.py` e as já vistas em `rule.mitre`; é validada no arranque de forma fail-fast (formato `Tnnnn` / `Tnnnn.nnn`, tática pertencente às táticas Enterprise), como o `attack_library.yaml`.
+- [x] **MITRE-02**: Uma tabela técnica→tática versionada (ficheiro de dados no repo) cobre as técnicas do catálogo, dos cenários de `attack_scenarios.py` e as já vistas em `rule.mitre`; é validada no arranque de forma fail-fast (formato `Tnnnn` / `Tnnnn.nnn`, tática pertencente às táticas Enterprise), como o `attack_library.yaml`.
 - [ ] **MITRE-03**: Uma função pura devolve as técnicas de um alerta cru — `rule.mitre.id` primeiro, catálogo por Event ID como fallback, vazio quando nenhum existe — cada uma com origem `wazuh` | `catalog`; nunca inventa uma técnica.
 - [ ] **MITRE-04**: O `DetectionEvent` de regra passa a ter `technique` (primeira técnica resolvida, ou `None`) e ganha de forma aditiva `techniques` (lista) e `technique_source`; nenhum campo existente de `GET /api/detections` muda de nome, tipo ou significado.
 
@@ -56,7 +56,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | MITRE-01 | Phase 18 | Pending |
-| MITRE-02 | Phase 18 | Pending |
+| MITRE-02 | Phase 18 | Complete |
 | MITRE-03 | Phase 18 | Pending |
 | MITRE-04 | Phase 18 | Pending |
 | API-01 | Phase 19 | Pending |

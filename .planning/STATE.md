@@ -5,16 +5,16 @@ milestone_name: R16 MITRE ATT&CK
 current_phase: 18
 current_phase_name: Técnica e tática por alerta
 status: executing
-stopped_at: Phase 18 context gathered
-last_updated: "2026-11-09T12:22:40.614Z"
+stopped_at: Completed 18-01-PLAN.md
+last_updated: "2026-11-09T12:32:39.079Z"
 last_activity: 2026-11-09
-last_activity_desc: Roadmap do v1.3 criado (Phases 18-20, 10/10 requisitos mapeados)
-state_head: ac80decce3dd65a38f84d3601a6c3b94e0621fb1
+last_activity_desc: Phase 18 execution started
+state_head: 9553cc2a4ddc18c53ef164700e54cadbcf96e524
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-11-09)
 
 ## Current Position
 
-Phase: 18 (Técnica e tática por alerta) — READY TO EXECUTE
-Plan: —
+Phase: 18 (Técnica e tática por alerta) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-11-09 — Roadmap do v1.3 criado (Phases 18-20, 10/10 requisitos mapeados)
+Last activity: 2026-11-09 — Phase 18 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -47,6 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
+| Phase 18 P01 | 10min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,8 @@ Recent decisions affecting current work:
 - [R12 carry-over]: aprovar uma vaccine não aplica nada no Wazuh (R21); autoria autodeclarada (só há uma API key). Detalhe das decisões de fase do v1.2 em `.planning/milestones/v1.2-phases/`.
 - [R11 carry-over]: `ATTACK_ALERTS_SIZE=8000` é paliativo; truncagem por ataque (não por lote) por decidir — relevante para `alerts_truncated` da rota de cobertura.
 - [Phase 18]: Exceção à convenção 'README atualizado a cada sessão': contagem de testes (84→86), docs/API.md e docs/DATA_MODEL.md só mudam na Fase 20 (DOC-01), para não descreverem um R16 incompleto. Aviso do plan-checker aceite. Tabela MITRE fixada em ATT&CK v18.1 (14 táticas, D-11); v19+ (15 táticas, Stealth/Defense Impairment) seria decisão nova. — Plan-checker 18: 0 bloqueios, 1 aviso; decisão do orquestrador 2026-11-09
+- [Phase 18]: ATT&CK fixado na v18.1 (14 taticas Enterprise com Defense Evasion); tabela como lista de {id,name,tactics} em mitre_techniques.yaml
+- [Phase 18]: lateral_movement_schtasks (T1053) passa a mitre_tactic Execution; coerencia cenario->tabela e teste, cobertura e regra do carregador
 
 ### Pending Todos
 
@@ -86,9 +89,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-09T11:48:53.704Z
-Stopped at: Phase 18 context gathered
-Resume file: .planning/phases/18-t-cnica-e-t-tica-por-alerta/18-CONTEXT.md
+Last session: 2026-11-09T12:32:39.051Z
+Stopped at: Completed 18-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
