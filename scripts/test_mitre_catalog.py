@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +25,7 @@ import yaml
 import attack_scenarios
 import main
 import mitre_catalog as mc
+from event_catalog import DEFENDER_CHANNEL
 
 main.app.router.on_startup.clear()
 
@@ -271,10 +273,111 @@ def run_completeness_and_coherence() -> None:
     check("D-08: nenhum open() em modo de escrita", not any(is_write_mode(c) for c in opens))
 
 
+def alerta(event_id=None, mitre=None, channel=None) -> dict:
+    """Alerta cru mínimo para o resolvedor."""
+    raw: dict = {"rule": {"id": "1"}}
+    if mitre is not None:
+        raw["rule"]["mitre"] = mitre
+    if event_id is not None:
+        system: dict = {"eventID": str(event_id)}
+        if channel is not None:
+            system["channel"] = channel
+        raw["data"] = {"win": {"system": system}}
+    return raw
+
+
+def ids_of(result) -> list[str]:
+    return [t["id"] for t in result]
+
+
+def run_resolver() -> None:
+    T1078_TACTICS = ["Initial Access", "Persistence", "Privilege Escalation", "Defense Evasion"]
+    resolve = mc.resolve_alert_techniques
+
+    # precedência (D-00a)
+    check("D-00a: rule.mitre válido substitui o catálogo (4625 + T1078)",
+          resolve(alerta(4625, {"id": ["T1078"]})) == [{"id": "T1078", "source": "wazuh", "tactics": T1078_TACTICS}])
+    check("D-00a: sem rule.mitre, o catálogo (4625 -> T1110)",
+          resolve(alerta(4625)) == [{"id": "T1110", "source": "catalog", "tactics": ["Credential Access"]}])
+    check("sem nada -> []", resolve(alerta()) == [])
+    check("4624 sem mitre -> [] (nunca inventa)", resolve(alerta(4624)) == [])
+
+    # formas de id
+    check("id str vale como lista de um", resolve(alerta(None, {"id": "T1078"})) == [
+        {"id": "T1078", "source": "wazuh", "tactics": T1078_TACTICS}])
+    check("D-06: ordem do Wazuh", ids_of(resolve(alerta(None, {"id": ["T1021", "T1078"]}))) == ["T1021", "T1078"])
+    check("D-06: sem duplicados", ids_of(resolve(alerta(None, {"id": ["T1078", "T1078", "T1021"]}))) == ["T1078", "T1021"])
+
+    # D-04
+    r = resolve(alerta(None, {"id": ["T1078.002"]}))
+    check("D-04: sub-técnica devolvida exatamente como veio", ids_of(r) == ["T1078.002"] and r[0]["tactics"] == T1078_TACTICS)
+    r = resolve(alerta(None, {"id": ["T1110.001"]}))
+    check("D-04: sub-técnica sem linha herda as táticas do pai",
+          ids_of(r) == ["T1110.001"] and r[0]["tactics"] == ["Credential Access"])
+
+    # D-09
+    check("D-09: técnica sem entrada nem pai fica com tactics []",
+          resolve(alerta(None, {"id": ["T1059"]})) == [{"id": "T1059", "source": "wazuh", "tactics": []}])
+    check("D-09: rule.mitre.tactic nunca é lido",
+          resolve(alerta(None, {"id": ["T1531"], "tactic": ["Lateral Movement"]}))[0]["tactics"] == ["Impact"])
+
+    # lixo filtrado
+    lixo = [1078, None, {"x": 1}, ["T1078"], "t1078", "T1078 ", "T1078\n", "T10780", "T1078.1", "<script>", "", "T1021"]
+    check("lixo filtrado: só T1021 sobrevive", ids_of(resolve(alerta(None, {"id": lixo}))) == ["T1021"])
+    check("só lixo em rule.mitre.id cai no catálogo",
+          ids_of(resolve(alerta(4625, {"id": ["lixo", 7]}))) == ["T1110"]
+          and resolve(alerta(4625, {"id": ["lixo", 7]}))[0]["source"] == "catalog")
+    check("só lixo e sem Event ID -> []", resolve(alerta(None, {"id": ["lixo"]})) == [])
+
+    # tipos
+    for label, value in [("None", None), ("str", "lixo"), ("int", 42), ("lista", [])]:
+        check(f"raw {label} -> [] sem levantar", resolve(value) == [])
+    check("rule que não é dict -> []", resolve({"rule": "x"}) == [])
+    check("mitre que não é dict -> []", resolve({"rule": {"mitre": "x"}}) == [])
+    check("mitre.id dict -> sem técnica do Wazuh", resolve({"rule": {"mitre": {"id": {"a": 1}}}}) == [])
+    check("mitre.id int -> sem técnica do Wazuh", resolve({"rule": {"mitre": {"id": 1078}}}) == [])
+    check("mitre.id int cai no catálogo quando há Event ID",
+          ids_of(resolve(alerta(4625, {"id": 1078}))) == ["T1110"])
+
+    # tamanho
+    grande = resolve(alerta(None, {"id": ["T%04d" % n for n in range(1000, 1100)]}))
+    check("MAX_ALERT_TECHNIQUES limita o resultado a 32", len(grande) == mc.MAX_ALERT_TECHNIQUES == 32)
+    check("são os 32 primeiros", ids_of(grande) == ["T%04d" % n for n in range(1000, 1032)])
+    check("só os primeiros 32 elementos são inspecionados",
+          ids_of(resolve(alerta(None, {"id": ["T1078"] * 100000 + ["T1021"]}))) == ["T1078"])
+    inicio = time.perf_counter()
+    enorme = resolve(alerta(None, {"id": ["T" + "1" * 1000000]}))
+    check("string de 1 milhão de caracteres -> [] em menos de 1 s",
+          enorme == [] and time.perf_counter() - inicio < 1.0)
+
+    # Defender (D-02)
+    check("D-02: canal do Defender nunca recebe técnica do catálogo",
+          resolve(alerta(4625, channel=DEFENDER_CHANNEL)) == [])
+
+    # isolamento da cache (T-18-14)
+    primeira = resolve(alerta(4625))
+    primeira[0]["tactics"].append("Impact")
+    primeira[0]["extra"] = 1
+    check("mutar a resposta não afeta a seguinte", resolve(alerta(4625)) == [
+        {"id": "T1110", "source": "catalog", "tactics": ["Credential Access"]}])
+    check("mutar a resposta não afeta tactics_for", mc.tactics_for("T1110") == ["Credential Access"])
+
+    # tabela injetada
+    injetada = {"T1078": {"id": "T1078", "name": "x", "tactics": ("Initial Access",)}}
+    check("tabela injetada",
+          resolve(alerta(None, {"id": ["T1078"]}), table=injetada)[0]["tactics"] == ["Initial Access"])
+
+    # a chave 'tactic' do Wazuh não é lida (AST)
+    tree = ast.parse(Path(mc.__file__).read_text(encoding="utf-8"))
+    check("nenhuma constante str 'tactic' em mitre_catalog.py",
+          not [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "tactic"])
+
+
 def run() -> None:
     run_tracer()
     run_validation()
     run_completeness_and_coherence()
+    run_resolver()
 
 
 run()

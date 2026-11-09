@@ -39,6 +39,12 @@ SOURCE_WAZUH = "wazuh"
 SOURCE_CATALOG = "catalog"
 TECHNIQUE_SOURCES = (SOURCE_WAZUH, SOURCE_CATALOG)
 
+# Limites sobre rule.mitre.id (entrada não confiável vinda do Indexer): as
+# regras do lab trazem 1-2 ids, por isso 32 elementos inspecionados chega e
+# sobra; T1234.567 tem 9 caracteres, e o tamanho verifica-se antes da regex.
+MAX_ALERT_TECHNIQUES = 32
+MAX_TECHNIQUE_ID_LENGTH = 9
+
 # As 14 táticas Enterprise da v18.1, na ordem da matriz.
 ENTERPRISE_TACTICS = (
     "Reconnaissance",
@@ -255,8 +261,13 @@ def _wazuh_technique_ids(raw) -> list[str]:
     if not isinstance(ids, list):
         return []
     found: list[str] = []
-    for value in ids:
-        if isinstance(value, str) and TECHNIQUE_RE.fullmatch(value) and value not in found:
+    for value in ids[:MAX_ALERT_TECHNIQUES]:
+        if (
+            isinstance(value, str)
+            and len(value) <= MAX_TECHNIQUE_ID_LENGTH
+            and TECHNIQUE_RE.fullmatch(value)
+            and value not in found
+        ):
             found.append(value)
     return found
 
