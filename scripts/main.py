@@ -77,6 +77,7 @@ from history_store import (
 from incident_engine import available_transitions, parse_timestamp as incident_engine_parse
 from incident_store import IncidentNotFound, IncidentStore, InvalidTransition
 from lifecycle import build_lifecycle_report
+from mitre_catalog import load_mitre_techniques
 from network_detections import detect_network_anomalies
 from network_monitor import NetworkConnectionManager, PACKET_BUFFER_MAX, network_poll_loop
 from network_soc import build_evidence_report, summarize_detections, summarize_packets
@@ -144,6 +145,11 @@ ATTACK_LOG_PATH = os.getenv("ATTACK_LOG_PATH", os.path.join(os.path.dirname(__fi
 # impede o processo de arrancar em vez de servir uma biblioteca corrompida
 # (ver attack_library.py e docs/superpowers/specs/2026-10-07-r5-attack-library-design.md).
 load_attack_library()
+
+# Tabela técnica->tática MITRE (R16, scripts/mitre_techniques.yaml). Validação
+# fail-fast e síncrona no arranque, como a Attack Library: uma tabela inválida
+# impede o processo de arrancar em vez de servir táticas erradas (ver mitre_catalog.py).
+load_mitre_techniques()
 
 # SSH para a VM Wazuh (Fase 11, Onda 2) — só usado pela captura de rede via
 # tshark. Funcionalidade opcional: sem VM_SSH_HOST definido,

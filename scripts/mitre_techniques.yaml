@@ -1,0 +1,92 @@
+# Tabela tecnica -> taticas MITRE (R16, Phase 18) - dados VERSIONADOS, so leitura.
+#
+# Fixada no MITRE ATT&CK Enterprise v18.1: a ultima versao com as 14 taticas
+# Enterprise, incluindo "Defense Evasion" (a v19+ trocou-a por "Stealth" e
+# acrescentou "Defense Impairment"). "Defense Evasion" e tambem o vocabulario que
+# o Wazuh do laboratorio envia em rule.mitre.tactic. Mudar de versao e uma
+# decisao nova, nao um ajuste a este ficheiro.
+#
+# Formato: lista de entradas {id, name, tactics}. Campos obrigatorios, contrato
+# fechado (um campo desconhecido, p. ex. "tactic:" em vez de "tactics:", e erro):
+#   id      - Txxxx ou Txxxx.xxx
+#   name    - nome da tecnica (texto, ate 128 caracteres)
+#   tactics - lista NAO vazia, sem repeticoes, das 14 taticas Enterprise; e a
+#             lista COMPLETA da tecnica (nunca uma "tatica principal").
+# Uma lista (e nao um mapa) para que um id repetido nao seja engolido em silencio.
+#
+# A tatica de um alerta e de um ataque vem SEMPRE daqui. Uma sub-tecnica sem
+# entrada propria herda as taticas do pai (Txxxx). Uma tecnica sem entrada nem
+# pai fica sem tatica (lista vazia), nunca inventada.
+#
+# O validador (mitre_catalog.py) bloqueia o arranque do backend se esta tabela
+# for invalida ou se faltar uma tecnica declarada em attack_scenarios.SCENARIOS
+# ou em event_catalog.CRITICAL_EVENTS. Acrescentar uma tecnica aqui exige tambem
+# mudar a lista literal EXPECTED_TABLE em test_mitre_catalog.py.
+
+- id: "T1021"
+  name: "Remote Services"
+  tactics: ["Lateral Movement"]
+
+- id: "T1053"
+  name: "Scheduled Task/Job"
+  tactics: ["Execution", "Persistence", "Privilege Escalation"]
+
+- id: "T1053.005"
+  name: "Scheduled Task"
+  tactics: ["Execution", "Persistence", "Privilege Escalation"]
+
+- id: "T1078"
+  name: "Valid Accounts"
+  tactics: ["Initial Access", "Persistence", "Privilege Escalation", "Defense Evasion"]
+
+- id: "T1078.002"
+  name: "Domain Accounts"
+  tactics: ["Initial Access", "Persistence", "Privilege Escalation", "Defense Evasion"]
+
+- id: "T1098"
+  name: "Account Manipulation"
+  tactics: ["Persistence", "Privilege Escalation"]
+
+- id: "T1110"
+  name: "Brute Force"
+  tactics: ["Credential Access"]
+
+- id: "T1110.003"
+  name: "Password Spraying"
+  tactics: ["Credential Access"]
+
+- id: "T1135"
+  name: "Network Share Discovery"
+  tactics: ["Discovery"]
+
+- id: "T1136"
+  name: "Create Account"
+  tactics: ["Persistence"]
+
+- id: "T1136.001"
+  name: "Local Account"
+  tactics: ["Persistence"]
+
+- id: "T1484"
+  name: "Domain or Tenant Policy Modification"
+  tactics: ["Privilege Escalation", "Defense Evasion"]
+
+- id: "T1531"
+  name: "Account Access Removal"
+  tactics: ["Impact"]
+
+- id: "T1550"
+  name: "Use Alternate Authentication Material"
+  tactics: ["Defense Evasion", "Lateral Movement"]
+
+- id: "T1550.002"
+  name: "Pass the Hash"
+  tactics: ["Defense Evasion", "Lateral Movement"]
+
+- id: "T1562"
+  name: "Impair Defenses"
+  tactics: ["Defense Evasion"]
+
+- id: "T1562.002"
+  name: "Disable Windows Event Logging"
+  tactics: ["Defense Evasion"]
