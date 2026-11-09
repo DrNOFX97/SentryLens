@@ -1,20 +1,16 @@
 ---
 gsd_state_version: "1.0"
-milestone: v1.2
-status: Awaiting next milestone
-stopped_at: context exhaustion at 77% (2026-11-05)
-last_updated: "2026-11-05T15:18:09.301Z"
-last_activity: 2026-11-04
-last_activity_desc: Milestone v1.2 completed and archived
-state_head: 670fa777eea5e5169717ce1f33f61ca0333c3619
+milestone: v1.3
+milestone_name: R16 MITRE ATT&CK
+status: planning
+last_updated: "2026-11-09T11:35:28.714Z"
+last_activity: 2026-11-09
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
-milestone_name: R12 Vaccine Lab
-current_phase: 17
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-10-29)
 
 ## Current Position
 
-Phase: Milestone v1.2 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-11-04 — Milestone v1.2 completed and archived
+Status: Defining requirements
+Last activity: 2026-11-09 — Milestone v1.3 started
 
 ## Performance Metrics
 

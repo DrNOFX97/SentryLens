@@ -1,28 +1,12 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v1.2 — R12 Vaccine Lab",
-  "phases": [
-    {
-      "number": "15",
-      "name": "Store de decisões",
-      "status": "complete"
-    },
-    {
-      "number": "16",
-      "name": "API de decisão",
-      "status": "complete"
-    },
-    {
-      "number": "17",
-      "name": "Aba, testes e documentação",
-      "status": "complete"
-    }
-  ],
+  "milestone": "v1.3",
+  "phases": [],
   "next": {
-    "command": "/gsd:progress",
-    "label": "Show progress",
-    "reason": "Unsure of state — showing progress"
+    "command": "/gsd:discuss-phase",
+    "label": "Discuss the first phase",
+    "reason": "Project initialized — plan your first phase"
   },
-  "updated_at": "2026-11-04T14:10:18.596Z"
+  "updated_at": "2026-11-09T11:35:28.718Z"
 }

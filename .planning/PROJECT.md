@@ -8,6 +8,19 @@ SentryLens é um laboratório SOC de aprendizagem do CET (curso de ciberseguran�
 
 Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
 
+## Current Milestone: v1.3 R16 MITRE ATT&CK
+
+**Goal:** Cada alerta passa a ter técnica e tática MITRE com origem conhecida, e o dashboard mostra que técnicas foram lançadas, vistas e detetadas.
+
+**Target features:**
+- `technique_id` por entrada em `event_catalog.py` (vazio quando não há técnica clara), usado só como fallback quando o alerta não traz `rule.mitre`
+- Técnica por alerta com origem (`wazuh` | `catalog`); `DetectionEvent.technique` preenchido sem quebrar contratos
+- Tabela técnica→tática versionada para o subconjunto do lab (o `rule.mitre` do Wazuh traz listas de ids e táticas sem emparelhamento)
+- `GET /api/mitre/coverage` (API key por rota, só leitura): por técnica, alertas vistos, ataques lançados (attack_registry) e detetados; "Sem dados" sem amostra
+- Aba com matriz táticas × técnicas em 3 estados e % de deteção por tática
+
+**Origem:** Fase 10 de `docs/plans/2026-11-09-arquitetura-fases-10-19.md`, remapeada para o R16 (import bloqueado por conflitos — numeração, PostgreSQL, contrato de API).
+
 ## Requirements
 
 ### Validated
@@ -29,6 +42,7 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 
 ### Active
 
+- [ ] R16 MITRE ATT&CK: técnica/tática por alerta, `GET /api/mitre/coverage` e matriz no dashboard (v1.3, ver REQUIREMENTS.md)
 - [ ] Primeiro ciclo de treino real: lançar ataques, exportar alertas na mesma janela, treinar `v1` e avaliar com dataset rotulável
 - [ ] Verificação humana pendente do R9/R10 no dashboard (badges, aviso de reinício após `adopt`, avaliação rotulada)
 
@@ -37,6 +51,9 @@ Medir de forma honesta, com dados reais, quão bem o laboratório deteta e respo
 - Calibrar o `confidence` das deteções (R7) — dívida conhecida, não é pré-requisito do R9
 - Aplicar vaccines no Wazuh (R21), replay (R13) e regressão (R14); o R12 só decide (aprovar/rejeitar), não aplica
 - Recolher métricas ML novas além das já existentes (`/api/ml-anomalies`) — o R9 só liga a avaliação à versão e mostra-a
+- Caldera (operações automáticas e `caldera_runs`) — não está instalado no lab; spike futuro no R13/R15. No v1.3 os "ataques lançados" vêm do `attack_log`/attack_registry
+- PostgreSQL — o estado próprio fica em SQLite/JSONL (decisão do Roadmap v2; os stores do R3/R11/R12 dependem de CHECK/triggers SQLite)
+- Login com utilizador/palavra-passe, JWT e casos (Fases 12–13 do plano de 2026-11-09) — mudam o contrato da API e duplicam o R3/R8; só se pedidos explicitamente
 
 ## Current State
 
@@ -75,6 +92,8 @@ v1.2 (R12) entregue a 2026-11-04: 3 fases, 12 planos, suite `run_all_tests.py` 8
 | As decisões vivem numa tabela nova só de acréscimo (`vaccine_decisions`); `vaccines` fica imutável com `state='proposed'` | O estado atual deriva da última decisão; o ficheiro SQLite recusa editar/apagar | ✓ Good (v1.2) |
 | Aprovar não aplica nada no Wazuh; autoria autodeclarada (analista da Equipa SOC), não autenticada | Aplicar é o R21; só existe uma API key, por isso qualquer analista decide e fica registado | ✓ Good (v1.2) — limite conhecido |
 | A decisão é final (sem reverter) | Reabrir exige o seu próprio registo de auditoria (VLB-V2-03) | — Pending |
+| Técnica MITRE: `rule.mitre` do alerta Wazuh primeiro, `event_catalog.py` como fallback, origem sempre marcada | 664/1000 alertas do snapshot R9 já trazem `rule.mitre`; o catálogo cobre os Event IDs sem regra mapeada; nunca forçar um mapeamento | — Pending (v1.3) |
+| Plano externo "fases 10–19" importado só em parte (Fase 10 → R16) | Numeração colide com fases entregues, PostgreSQL e sessão JWT contrariam decisões e contratos existentes | ✓ Good (2026-11-09) |
 
 ## Evolution
 
@@ -94,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-11-04 after v1.2 milestone*
+*Last updated: 2026-11-09 — milestone v1.3 R16 MITRE ATT&CK iniciado*
