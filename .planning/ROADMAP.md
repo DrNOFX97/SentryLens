@@ -56,7 +56,7 @@ Detalhe completo: `.planning/milestones/v1.2-ROADMAP.md`
 
 **Testes:** cada fase traz os seus próprios testes standalone (padrão do projeto, sem pytest, sem Wazuh); o TST-01 fecha na Phase 20 com a suite completa verde.
 
-- [ ] **Phase 18: Técnica e tática por alerta** - `technique_id` no catálogo, tabela técnica→tática versionada com validação fail-fast, resolvedor puro com origem e campos aditivos no `DetectionEvent`
+- [x] **Phase 18: Técnica e tática por alerta** - `technique_id` no catálogo, tabela técnica→tática versionada com validação fail-fast, resolvedor puro com origem e campos aditivos no `DetectionEvent` (completed 2026-11-09)
 - [ ] **Phase 19: API de cobertura MITRE** - `GET /api/mitre/coverage` só de leitura, por técnica e por tática, com fontes isoladas, truncagem e secção "sem tática"
 - [ ] **Phase 20: Matriz MITRE, testes e documentação** - Aba com a matriz táticas × técnicas em 3 estados e detalhe por célula, suite verde e docs a refletir o R16
 
@@ -73,7 +73,7 @@ Detalhe completo: `.planning/milestones/v1.2-ROADMAP.md`
   3. Para um alerta com `rule.mitre.id`, o resolvedor puro devolve essas técnicas com origem `wazuh`; sem `rule.mitre`, devolve a do catálogo pelo Event ID com origem `catalog`; sem nenhuma das duas, devolve lista vazia — nunca uma técnica inventada.
   4. `GET /api/detections` passa a trazer, nas deteções de regra, `technique` (primeira técnica resolvida ou `null`), `techniques` e `technique_source`; todos os campos que já existiam mantêm nome, tipo e significado (provado contra o contrato anterior).
 
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -122,6 +122,6 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 18. Técnica e tática por alerta | 3/3 | Planned | - |
+| 18. Técnica e tática por alerta | 3/3 | Planned | 2026-11-09 |
 | 19. API de cobertura MITRE | 0/? | Not started | - |
 | 20. Matriz MITRE, testes e documentação | 0/? | Not started | - |
