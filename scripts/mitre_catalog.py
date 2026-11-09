@@ -81,11 +81,21 @@ def validate_technique_entry(position: int, entry) -> list[str]:
     for field in ENTRY_FIELDS:
         if field not in entry:
             problems.append(f"{label}: campo obrigatório em falta '{field}'")
+    for field in entry:
+        if field not in ENTRY_FIELDS:
+            problems.append(f"{label}: campo desconhecido '{field}' (permitidos: {', '.join(ENTRY_FIELDS)})")
 
     if "id" in entry and (
         not isinstance(raw_id, str) or not TECHNIQUE_RE.fullmatch(raw_id)
     ):
         problems.append(f"{label}: id em formato inválido (esperado Txxxx ou Txxxx.xxx)")
+
+    if "name" in entry:
+        name = entry["name"]
+        if not isinstance(name, str) or not name.strip():
+            problems.append(f"{label}: name tem de ser texto não vazio")
+        elif len(name) > NAME_MAX_LENGTH:
+            problems.append(f"{label}: name passa o limite de {NAME_MAX_LENGTH} caracteres")
 
     if "tactics" in entry:
         tactics = entry["tactics"]
@@ -94,9 +104,37 @@ def validate_technique_entry(position: int, entry) -> list[str]:
         else:
             for tactic in tactics:
                 if not isinstance(tactic, str) or tactic not in ENTERPRISE_TACTICS:
-                    problems.append(f"{label}: tática fora das 14 Enterprise: {tactic!r}")
+                    problems.append(f"{label}: tactics com tática fora das 14 Enterprise: {tactic!r}")
             if all(isinstance(t, str) for t in tactics) and len(set(tactics)) != len(tactics):
                 problems.append(f"{label}: tactics tem uma tática repetida")
+
+    return problems
+
+
+def _coverage_problems(table: dict, scenarios, catalog) -> list[str]:
+    """D-11: toda a técnica declarada em cenários e no catálogo de eventos tem
+    de estar em formato válido e ter táticas na tabela (própria ou do pai).
+    A coerência da tática declarada pelos cenários é do teste (D-07)."""
+    problems: list[str] = []
+
+    def covered(technique) -> bool:
+        return bool(tactics_for(technique, table))
+
+    for name, scenario in scenarios.items():
+        technique = getattr(scenario, "mitre_technique", None)
+        if not isinstance(technique, str) or not TECHNIQUE_RE.fullmatch(technique):
+            problems.append(f"cenário '{name}': mitre_technique {technique!r} em formato inválido")
+        elif not covered(technique):
+            problems.append(f"cenário '{name}': mitre_technique {technique} sem táticas na tabela (nem do pai)")
+
+    for event_id, info in catalog.items():
+        if not isinstance(info, dict) or "technique_id" not in info:
+            continue
+        technique = info["technique_id"]
+        if not isinstance(technique, str) or not TECHNIQUE_RE.fullmatch(technique):
+            problems.append(f"Event ID {event_id}: technique_id {technique!r} em formato inválido")
+        elif not covered(technique):
+            problems.append(f"Event ID {event_id}: technique_id {technique} sem táticas na tabela (nem do pai)")
 
     return problems
 
@@ -137,6 +175,15 @@ def load_mitre_techniques(
     for position, entry in enumerate(raw, start=1):
         problems.extend(validate_technique_entry(position, entry))
 
+    seen: set[str] = set()
+    for position, entry in enumerate(raw, start=1):
+        entry_id = entry.get("id") if isinstance(entry, dict) else None
+        if not isinstance(entry_id, str):
+            continue
+        if entry_id in seen:
+            problems.append(f"entrada #{position} ({entry_id}): id duplicado")
+        seen.add(entry_id)
+
     if problems:
         raise ValueError(problems)
 
@@ -147,6 +194,14 @@ def load_mitre_techniques(
             "name": entry["name"],
             "tactics": tuple(entry["tactics"]),
         }
+
+    problems.extend(_coverage_problems(
+        table,
+        SCENARIOS if scenarios is None else scenarios,
+        CRITICAL_EVENTS if catalog is None else catalog,
+    ))
+    if problems:
+        raise ValueError(problems)
 
     if use_cache and not injected:
         _cache = table
