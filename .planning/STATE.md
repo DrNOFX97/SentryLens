@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v1.3
 milestone_name: R16 MITRE ATT&CK
 status: planning
-last_updated: "2026-11-09T11:35:28.714Z"
+last_updated: "2026-11-09T12:00:00.000Z"
 last_activity: 2026-11-09
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,40 +17,31 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-29)
+See: .planning/PROJECT.md (updated 2026-11-09)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** Phase 17 — Aba, testes e documentação
+**Current focus:** Phase 18 — Técnica e tática por alerta
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 18 of 20 (v1.3: fase 1 de 3) — Técnica e tática por alerta
 Plan: —
-Status: Defining requirements
-Last activity: 2026-11-09 — Milestone v1.3 started
+Status: Ready to plan
+Last activity: 2026-11-09 — Roadmap do v1.3 criado (Phases 18-20, 10/10 requisitos mapeados)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed (v1.2): 0
-- v1.1 (referência): 10 planos em 3 fases; v1.0: 17 planos em 5 fases
+- Total plans completed (v1.3): 0
+- Referência: v1.2 12 planos em 3 fases; v1.1 10 planos em 3 fases; v1.0 17 planos em 5 fases
 
 *Updated after each plan completion*
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
-| Phase 15 P01 | 25min | 3 tasks | 5 files |
-| Phase 15 P02 | 15min | 2 tasks | 1 files |
-| Phase 15 P03 | 20min | 2 tasks | 2 files |
-| Phase 16 P01 | 10 min | 2 tasks | 3 files |
-| Phase 16 P02 | 15 min | 2 tasks | 5 files |
-| Phase 16 P03 | 8 min | 2 tasks | 2 files |
-| Phase 17 P01 | 25min | 2 tasks | 5 files |
-| Phase 17 P04 | 15min | 2 tasks | 2 files |
-| Phase 17 P06 | 15 min | 1 tasks | 2 files |
-| Phase 17 P03 | 20 min | 2 tasks | 7 files |
-| Phase 17 P05 | 25min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -59,23 +50,13 @@ Last activity: 2026-11-09 — Milestone v1.3 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [v1.2 roadmap]: 3 fases em fatias verticais (store de decisões → API → dashboard+docs); numeração continua (15, 16, 17).
-- [R12]: as decisões vivem numa tabela nova só de acréscimo (`vaccine_decisions`); a tabela `vaccines` do R11 não muda (estado fixo `proposed`, triggers intactos); o estado atual é derivado da última decisão.
-- [R12]: aprovar não aplica nada no Wazuh (aplicar é R21); qualquer analista pode decidir (só há uma API key) e o autor fica registado.
-- [R11 carry-over]: `ATTACK_ALERTS_SIZE=8000` é paliativo; truncagem por ataque (não por lote) por decidir.
-- [Phase 15]: DDL de vaccine_decisions confirmado pelo utilizador; VaccineDecisionError nao deriva de ValueError; ordem fixa de validacao antes de tocar no disco
-- [Phase 16]: Phase 16-01: teto do corpo 8192 bytes, excedido dá 422 invalid_body (não 413)
-- [Phase 16]: Phase 16-01: vaccine_id mal formado dá 422 invalid_vaccine_id por handler de RequestValidationError só da rota de decisão
-- [Phase 16]: Phase 16-01: autoria da decisão autodeclarada (analyst_id no corpo, validado no incident_store), não autenticada
-- [Phase 16]: 16-02: state_counts (envelope) e count_by_state (store); zeros explícitos com amostra, None sem amostra
-- [Phase 16]: 16-02: count_by_state corre depois de list_vaccines no mesmo try; estado desconhecido no ficheiro dá ValueError e 503
-- [Phase 16]: 16-03: o varrimento AST do fecho local segue referências a nomes e proíbe acesso por atributo a manager_client/vm_ssh_client/subprocess; allow_methods do CORS fixado por teste sem mudar main.py
-- [Phase 17]: 17-01: secção Decisão como markup estático; validação local analista, escolha, motivo; motivo conta pontos de código; só analistas com active 1/true
-- [Phase 17]: 17-04: aprovada documentada como aceite pelo analista, nada aplicado no Wazuh (R21); autoria autodeclarada tratada como limite conhecido
-- [Phase 17]: 17-02: bloco Decisão decidido por função pura slVacDecisionView (7 chaves); erros que podem ter gravado refazem detalhe e lista só por GET, nunca novo POST
-- [Phase 17]: 17-06: incidents_unavailable e VAC_GENERIC_ERROR servem leitura e decisão; invalid_analyst_id do D-11 não existe no backend, segue-se invalid_author
-- [Phase 17]: 17-03: estado em badge com texto (unknown para o resto); contadores por kpiRender/slVacStateCounts com — sem amostra; ?state= só se em VAC_STATES
-- [Phase 17]: 17-05: flake de test_ml_training corrigido com temporario proprio no modulo de teste; contagem 84/84 escrita com proveniencia em README, ROADMAP_STATUS e CLAUDE.md
+- [v1.3 roadmap]: 3 fases em fatias verticais (técnica/tática por alerta → API de cobertura → aba+testes+docs); numeração continua (18, 19, 20). Cada fase traz os seus testes; TST-01 e DOC-01 fecham na Phase 20.
+- [R16]: técnica MITRE vem de `rule.mitre` do alerta Wazuh primeiro e de `event_catalog.py` (`technique_id`) só como fallback; origem sempre marcada (`wazuh` | `catalog`); nunca forçar nem inventar um mapeamento.
+- [R16]: o `rule.mitre` do Wazuh traz listas `id[]` e `tactic[]` sem emparelhamento, por isso a tática vem de uma tabela técnica→tática versionada no repo (ficheiro, não base de dados), validada fail-fast no arranque como o `attack_library.yaml`.
+- [R16]: o `DetectionEvent` só ganha campos de forma aditiva (`techniques`, `technique_source`; `technique` deixa de ser sempre `None`); nenhum campo de `GET /api/detections` muda.
+- [R16]: "ataques lançados" vêm do `attack_log`/attack_registry; o Caldera fica fora (não está instalado no lab).
+- [R12 carry-over]: aprovar uma vaccine não aplica nada no Wazuh (R21); autoria autodeclarada (só há uma API key). Detalhe das decisões de fase do v1.2 em `.planning/milestones/v1.2-phases/`.
+- [R11 carry-over]: `ATTACK_ALERTS_SIZE=8000` é paliativo; truncagem por ataque (não por lote) por decidir — relevante para `alerts_truncated` da rota de cobertura.
 
 ### Pending Todos
 
@@ -99,10 +80,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T15:18:09.279Z
-Stopped at: context exhaustion at 77% (2026-11-05)
+Last session: 2026-11-09
+Stopped at: roadmap do v1.3 escrito (ROADMAP.md, STATE.md, rastreabilidade em REQUIREMENTS.md); por aprovar e fazer commit
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Rever o roadmap do v1.3 e depois `/gsd-discuss-phase 18` (ou `/gsd-plan-phase 18`)

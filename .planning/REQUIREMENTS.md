@@ -27,7 +27,7 @@
 ### Testes e documentação
 
 - [ ] **TST-01**: Testes standalone (padrão do projeto, sem pytest) cobrem a resolução de técnicas, a validação da tabela, a rota (incluindo fontes em baixo e truncagem) e o contrato estático do frontend/`ui_helpers`; `python run_all_tests.py` termina verde.
-- [ ] **DOC-01**: `README.md`, `CLAUDE.md`, `docs/DATA_MODEL.md`, `docs/ROADMAP_STATUS.md` e a página Roadmap v2 do Notion refletem o R16 entregue.
+- [ ] **DOC-01**: `README.md`, `CLAUDE.md`, `docs/API.md`, `docs/DATA_MODEL.md`, `docs/ROADMAP_STATUS.md` e a página Roadmap v2 do Notion refletem o R16 entregue.
 
 ## v2 Requirements
 
@@ -55,22 +55,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MITRE-01 | — | Pending |
-| MITRE-02 | — | Pending |
-| MITRE-03 | — | Pending |
-| MITRE-04 | — | Pending |
-| API-01 | — | Pending |
-| API-02 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| TST-01 | — | Pending |
-| DOC-01 | — | Pending |
+| MITRE-01 | Phase 18 | Pending |
+| MITRE-02 | Phase 18 | Pending |
+| MITRE-03 | Phase 18 | Pending |
+| MITRE-04 | Phase 18 | Pending |
+| API-01 | Phase 19 | Pending |
+| API-02 | Phase 19 | Pending |
+| UI-01 | Phase 20 | Pending |
+| UI-02 | Phase 20 | Pending |
+| TST-01 | Phase 20 | Pending |
+| DOC-01 | Phase 20 | Pending |
 
 **Coverage:**
 - v1 requirements: 10 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 10 ⚠️
+- Mapped to phases: 10 (Phase 18: 4, Phase 19: 2, Phase 20: 4)
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-11-09*
-*Last updated: 2026-11-09 after initial definition*
+*Last updated: 2026-11-09 after roadmap creation (Phases 18-20)*
