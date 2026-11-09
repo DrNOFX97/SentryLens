@@ -216,7 +216,7 @@ SCENARIOS: dict[str, Scenario] = {
         description="Pós-comprometimento: cria tarefa agendada via SMB (gera 4672 + 4698).",
         tool="netexec",
         event_ids=[4672, 4698],
-        mitre_tactic="Lateral Movement",
+        mitre_tactic="Execution",  # T1053 so tem Execution/Persistence/Privilege Escalation; /sc once = Execution (tabela: mitre_techniques.yaml, D-07)
         mitre_technique="T1053",
         build_command=_lateral_movement_schtasks_command,
     ),
