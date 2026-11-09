@@ -12,12 +12,14 @@ Correr (a partir de scripts/):
 
 import sys
 
-from detection_event import from_ml_anomaly, from_network_detection, from_rule_alert
+from detection_event import DetectionEvent, from_ml_anomaly, from_network_detection, from_rule_alert
 
 failures: list[str] = []
 
 # Event IDs de event_catalog.py: 4625=high, 4720=medium, 4722=low; sem Event ID = info
 HIGH, MEDIUM, LOW = 4625, 4720, 4722
+# As 9 anotações de DetectionEvent antes da Phase 18 (R16).
+OLD_DETECTION_KEYS = {"source", "severity", "asset", "ts", "technique", "confidence", "ref", "label", "description"}
 ASSET = "192.168.1.169"
 
 
@@ -96,6 +98,8 @@ def run_from_network_detection() -> None:
     check("deteção de rede vira DetectionEvent source=network", n is not None and n["source"] == "network")
     check("asset = dst_ip", n["asset"] == ASSET)
     check("port_scan tem severidade medium", n["severity"] == "medium")
+    check("rede: techniques [] e technique_source None", n["techniques"] == [] and n["technique_source"] is None)
+    check("rede: technique None", n["technique"] is None)
     check("label == type", n["label"] == "port_scan")
     check("ref é a deteção bruta, não cópia", n["ref"] is det)
     spike = from_network_detection(
@@ -127,6 +131,7 @@ def run_from_ml_anomaly() -> None:
     check("ref é o próprio resultado, não cópia", e["ref"] is not None and e["ref"].get("agent_ip") == ASSET)
     check("description menciona o ml_score em bruto", "ml_score=-0.3" in (e["description"] or ""))
     check("technique fica None (ruling 2, R7)", e["technique"] is None)
+    check("ML: techniques [] e technique_source None", e["techniques"] == [] and e["technique_source"] is None)
     check("confidence fica None (ruling 2, R7) — ml_score NÃO é uma probabilidade calibrada", e["confidence"] is None)
 
     nao_anomalo = from_ml_anomaly(ml_result(is_anomaly=False))
@@ -144,10 +149,22 @@ def run_from_ml_anomaly() -> None:
         check(f"resultado ML {label} -> None sem lançar", from_ml_anomaly(bad) is None)
 
 
+def run_annotations() -> None:
+    check("anotações = as 9 antigas + techniques + technique_source",
+          set(DetectionEvent.__annotations__) == OLD_DETECTION_KEYS | {"techniques", "technique_source"})
+    regra = from_rule_alert(raw_alert("a1", "2026-10-06T10:00:00Z", event_id=HIGH))
+    ml = from_ml_anomaly(ml_result())
+    rede = from_network_detection({"type": "port_scan", "src_ip": "192.168.1.170", "dst_ip": ASSET,
+                                   "timestamp": "2026-10-06T10:00:05+00:00", "detail": {}})
+    for nome, ev in [("regra", regra), ("ml", ml), ("rede", rede)]:
+        check(f"chaves do evento {nome} == anotações do DetectionEvent", set(ev) == set(DetectionEvent.__annotations__))
+
+
 def run() -> None:
     run_from_rule_alert()
     run_from_network_detection()
     run_from_ml_anomaly()
+    run_annotations()
 
     print()
     if failures:

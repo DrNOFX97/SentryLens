@@ -17,6 +17,7 @@ os.environ.setdefault("SENTRYLENS_API_KEY", "chave-de-teste-nao-usar-em-producao
 
 from fastapi.testclient import TestClient
 
+import event_catalog
 import main
 import ml_anomalies
 from feature_extractor import extract_features, vectorize
@@ -34,6 +35,10 @@ def check(label: str, condition: bool) -> None:
 
 
 ASSET = "192.168.1.5"
+
+# Contrato de R7 (chaves de cada evento) e as chaves aditivas de R16 (Phase 18).
+OLD_EVENT_KEYS = {"source", "severity", "asset", "ts", "technique", "confidence", "label", "description"}
+NEW_EVENT_KEYS = {"techniques", "technique_source"}
 
 
 def alert(event_id: int, ts: str, user: str = "jsilva", ip: str = "203.0.113.50", mitre=None) -> dict:
@@ -93,10 +98,40 @@ def run() -> None:
     check("total == soma das 3 fontes", body["total"] == sum(s["count"] for s in body["sources"].values()))
     check("events tem pelo menos 1 por fonte com dados", len(body["events"]) > 0)
     check("nenhum evento expõe 'ref' (dado bruto)", all("ref" not in e for e in body["events"]))
+    check("envelope com as 5 chaves de sempre",
+          set(body) == {"window_hours", "sources", "total", "truncated", "events"})
     check(
-        "cada evento tem source/severity/asset/ts/label",
-        all({"source", "severity", "asset", "ts", "label", "technique", "confidence", "description"} <= e.keys() for e in body["events"]),
+        "cada evento tem exatamente as chaves antigas mais techniques/technique_source",
+        all(set(e) == OLD_EVENT_KEYS | NEW_EVENT_KEYS for e in body["events"]),
     )
+    check(
+        "technique é str ou None e techniques é lista de {id, source, tactics}",
+        all(
+            (e["technique"] is None or isinstance(e["technique"], str))
+            and isinstance(e["techniques"], list)
+            and all(
+                set(t) == {"id", "source", "tactics"}
+                and isinstance(t["tactics"], list) and all(isinstance(x, str) for x in t["tactics"])
+                for t in e["techniques"]
+            )
+            for e in body["events"]
+        ),
+    )
+    check("technique_source é wazuh, catalog ou None",
+          all(e["technique_source"] in ("wazuh", "catalog", None) for e in body["events"]))
+    check("technique == id da 1.ª técnica (ou None) e todos os itens com a origem do evento",
+          all(
+              e["technique"] == (e["techniques"][0]["id"] if e["techniques"] else None)
+              and all(t["source"] == e["technique_source"] for t in e["techniques"])
+              for e in body["events"]
+          ))
+    check("eventos ml e network sem técnica (aditivo, nada inventado)",
+          all(e["techniques"] == [] and e["technique_source"] is None
+              for e in body["events"] if e["source"] in ("ml", "network")))
+    e4625 = next((e for e in body["events"] if e["source"] == "rule" and e["label"] == "Failed Logon"), None)
+    check("o 4625 continua high / Failed Logon / confidence None / recomendação do catálogo",
+          e4625 is not None and e4625["severity"] == "high" and e4625["confidence"] is None
+          and e4625["description"] == event_catalog.RECOMMENDATIONS[4625])
     check(
         "events ordenados por ts, mais recente primeiro",
         body["events"] == sorted(body["events"], key=lambda e: e["ts"], reverse=True),
