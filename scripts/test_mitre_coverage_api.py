@@ -144,8 +144,67 @@ def run_tracer() -> None:
         main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved
 
 
+def run_mix() -> None:
+    """Caso misto pela rota com o attack_registry real (sem mockar o registry)."""
+    saved = (main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+            attacks = [
+                {"id": 1, "scenario": "brute_force_rdp", "target": ASSET, "timestamp": ts(3000),
+                 "status": "launched", "technique": "T1110", "tool": "hydra"},
+                {"id": 2, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(2000),
+                 "status": "launched", "technique": "T1087", "tool": "netexec"},
+                {"id": 3, "scenario": "lateral_movement_schtasks", "target": ASSET, "timestamp": ts(1000),
+                 "status": "launched", "technique": "T1053", "tool": "psexec"},
+                {"id": 4, "scenario": "account_lockout_spray", "target": OTHER, "timestamp": ts(500),
+                 "status": "launched"},
+                {"id": 5, "scenario": "brute_force_rdp", "target": ASSET, "timestamp": ts(200 * 3600),
+                 "status": "launched", "technique": "T1110", "tool": "hydra"},
+            ]
+            ml_results = [ml_row(2980, 4625, True, True), ml_row(970, 4672, True, False)]
+            alerts = [alert_mitre(["T1110"], 2990), alert_event(4625, 2985), alert_event(4624, 2980),
+                      alert_mitre(["T1059"], 100)]
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+
+            body = client.get("/api/mitre/coverage").json()
+            rows = {t["id"]: t for t in body["techniques"] + body["unmapped"]}
+            by_tactic = {t["tactic"]: t for t in body["tactics"]}
+
+            check("mix: T1110 detetado, rate 100.0 (o ataque de 200 h fica fora da janela)",
+                  rows["T1110"]["attacks"]["launched"] == 1 and rows["T1110"]["rate"] == 100.0)
+            check("mix: T1053 parcial, rate 0.0",
+                  rows["T1053"]["attacks"]["partial"] == 1 and rows["T1053"]["rate"] == 0.0)
+            check("mix: T1110.003 (técnica do cenário) não detetado, rate 0.0",
+                  rows["T1110.003"]["attacks"]["not_detected"] == 1 and rows["T1110.003"]["rate"] == 0.0)
+            check("mix: ids de unmapped = T1059 (alerta) e T1087 (técnica do log fora da tabela)",
+                  [u["id"] for u in body["unmapped"]] == ["T1059", "T1087"])
+            check("mix: T1087 em unmapped com o ataque e tactics []",
+                  rows["T1087"]["attacks"]["not_detected"] == 1 and rows["T1087"]["tactics"] == [])
+            check("mix: Credential Access launched 2 e rate 50.0",
+                  by_tactic["Credential Access"]["attacks"]["launched"] == 2
+                  and by_tactic["Credential Access"]["rate"] == 50.0)
+            check("mix: T1053 conta em Execution, Persistence e Privilege Escalation (launched 1, rate 0.0)",
+                  all(by_tactic[n]["attacks"]["launched"] == 1 and by_tactic[n]["rate"] == 0.0
+                      for n in ("Execution", "Persistence", "Privilege Escalation")))
+            check("mix: Discovery sem ataques com tática -> rate None", by_tactic["Discovery"]["rate"] is None)
+            check("mix: totals.attacks 4 lançados (1 detected, 1 partial, 2 not_detected, 0 unknown)",
+                  body["totals"]["attacks"] == {"launched": 4, "detected": 1, "partial": 1,
+                                                "not_detected": 2, "unknown": 0})
+            check("mix: totals.rate 25.0", body["totals"]["rate"] == 25.0)
+
+            wide = client.get("/api/mitre/coverage?hours=720").json()
+            wide_rows = {t["id"]: t for t in wide["techniques"] + wide["unmapped"]}
+            check("mix: com hours=720 o ataque de 200 h conta (5 lançados, T1110 com 2)",
+                  wide["totals"]["attacks"]["launched"] == 5 and wide_rows["T1110"]["attacks"]["launched"] == 2
+                  and wide["window_hours"] == 720)
+    finally:
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved
+
+
 if __name__ == "__main__":
     run_tracer()
+    run_mix()
     if failures:
         print(f"\n{len(failures)} caso(s) falharam:")
         for label in failures:

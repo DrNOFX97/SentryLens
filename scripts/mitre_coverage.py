@@ -78,14 +78,31 @@ def _add_attack(counts: dict, verdict: str) -> None:
 
 
 def _correlation_block(correlation) -> dict | None:
+    """Correlação do attack_registry, para explicar vereditos `unknown`. O
+    código só passa se estiver na allowlist; qualquer outro valor (ou
+    indisponível sem código) vira `correlation_unavailable`, para nunca
+    expor texto de exceção. None se não foi passada."""
     if correlation is None:
         return None
     available = bool(correlation.get("available"))
+    if available:
+        reason = None
+    else:
+        code = correlation.get("error_code")
+        reason = code if code in CORRELATION_REASONS else CORRELATION_FALLBACK_REASON
     return {
         "available": available,
-        "reason": None if available else CORRELATION_FALLBACK_REASON,
+        "reason": reason,
         "alerts_truncated": bool(correlation.get("alerts_truncated")),
     }
+
+
+def _verdict_of(attack) -> str:
+    """Veredito do ataque; ausente ou fora de VERDICTS conta como unknown
+    (nunca como detetado, nunca descartado)."""
+    actual = attack.get("actual") if isinstance(attack, dict) else None
+    verdict = actual.get("verdict") if isinstance(actual, dict) else None
+    return verdict if verdict in VERDICTS else "unknown"
 
 
 def build_mitre_coverage_report(
@@ -99,8 +116,9 @@ def build_mitre_coverage_report(
 ) -> dict:
     """Cobertura MITRE por técnica e por tática (ver docstring do módulo).
 
-    raw_alerts: alertas crus do Indexer (lista) — fonte de alertas.
-    attacks: ataques do attack_registry já filtrados pela janela (lista).
+    raw_alerts: alertas crus do Indexer (lista); None = fonte em baixo.
+    attacks: ataques do attack_registry já filtrados pela janela (lista);
+        None = fonte em baixo.
     table: tabela de técnicas (`load_mitre_techniques()`).
     """
     rows: dict[str, dict] = {
@@ -108,9 +126,12 @@ def build_mitre_coverage_report(
         for tid in table
     }
 
+    # Fonte de alertas em baixo (None): nada é contado e as contagens saem
+    # null, nunca 0 (D-08).
+    alerts_up = raw_alerts is not None
     with_technique = 0
     without_technique = 0
-    for raw in raw_alerts:
+    for raw in raw_alerts if alerts_up else ():
         items = resolve_alert_techniques(raw, table)
         if not items:
             without_technique += 1
@@ -122,11 +143,13 @@ def build_mitre_coverage_report(
             row["alerts"]["total"] += 1
             row["alerts"][item["source"]] += 1
 
+    # Fonte de ataques em baixo (None): idem para ataques e taxas.
+    attacks_up = attacks is not None
     unique = _new_attack_counts()
     by_tactic = {tactic: _new_attack_counts() for tactic in ENTERPRISE_TACTICS}
-    for attack in attacks:
+    for attack in attacks if attacks_up else ():
         tid = attack["mitre_technique"]
-        verdict = attack["actual"]["verdict"]
+        verdict = _verdict_of(attack)
         row = rows.setdefault(
             tid, {"alerts": _new_alert_counts(), "attacks": _new_attack_counts()})
         _add_attack(row["attacks"], verdict)
@@ -144,9 +167,9 @@ def build_mitre_coverage_report(
             "name": table[tid]["name"] if tid in table else None,
             "parent": parent if parent != tid else None,
             "tactics": tactics_for(tid, table),
-            "alerts": dict(row["alerts"]),
-            "attacks": dict(row["attacks"]),
-            "rate": detection_rate(row["attacks"]),
+            "alerts": dict(row["alerts"]) if alerts_up else None,
+            "attacks": dict(row["attacks"]) if attacks_up else None,
+            "rate": detection_rate(row["attacks"]) if attacks_up else None,
         }
         (techniques if entry["tactics"] else unmapped).append(entry)
 
@@ -154,8 +177,8 @@ def build_mitre_coverage_report(
         {
             "tactic": tactic,
             "technique_ids": [t["id"] for t in techniques if tactic in t["tactics"]],
-            "attacks": dict(by_tactic[tactic]),
-            "rate": detection_rate(by_tactic[tactic]),
+            "attacks": dict(by_tactic[tactic]) if attacks_up else None,
+            "rate": detection_rate(by_tactic[tactic]) if attacks_up else None,
         }
         for tactic in ENTERPRISE_TACTICS
     ]
@@ -164,19 +187,22 @@ def build_mitre_coverage_report(
         "window_hours": hours,
         "attack_version": ATTACK_VERSION,
         "sources": {
-            "alerts": {"available": True, "reason": None},
-            "attacks": {"available": True, "reason": None,
-                        "correlation": _correlation_block(correlation)},
+            "alerts": (
+                {"available": True, "reason": None} if alerts_up
+                else {"available": False, "reason": SOURCE_UNAVAILABLE}),
+            "attacks": (
+                {"available": True, "reason": None,
+                 "correlation": _correlation_block(correlation)} if attacks_up
+                else {"available": False, "reason": SOURCE_UNAVAILABLE, "correlation": None}),
         },
-        "alerts_truncated": bool(alerts_truncated),
+        # Sem pedido ao Indexer não há truncagem a afirmar: None, nunca False.
+        "alerts_truncated": bool(alerts_truncated) if alerts_up else None,
         "totals": {
-            "alerts": {
-                "fetched": len(raw_alerts),
-                "with_technique": with_technique,
-                "without_technique": without_technique,
-            },
-            "attacks": dict(unique),
-            "rate": detection_rate(unique),
+            "alerts": (
+                {"fetched": len(raw_alerts), "with_technique": with_technique,
+                 "without_technique": without_technique} if alerts_up else None),
+            "attacks": dict(unique) if attacks_up else None,
+            "rate": detection_rate(unique) if attacks_up else None,
         },
         "tactics": tactics,
         "techniques": techniques,
