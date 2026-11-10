@@ -16,8 +16,8 @@
 
 ### API
 
-- [ ] **API-01**: `GET /api/mitre/coverage` (API key por rota, só leitura) devolve por técnica: táticas, alertas vistos (com contagem por origem), ataques lançados (attack_registry), detetados e taxa; e por tática a % de ataques detetados, `null` sem ataques.
-- [ ] **API-02**: Fontes isoladas na rota (`source_unavailable`, nunca 500 por uma fonte em baixo); `alerts_truncated` quando o Indexer atinge o teto; técnicas sem tática conhecida aparecem numa secção "sem tática" em vez de serem descartadas.
+- [x] **API-01**: `GET /api/mitre/coverage` (API key por rota, só leitura) devolve por técnica: táticas, alertas vistos (com contagem por origem), ataques lançados (attack_registry), detetados e taxa; e por tática a % de ataques detetados, `null` sem ataques.
+- [x] **API-02**: Fontes isoladas na rota (`source_unavailable`, nunca 500 por uma fonte em baixo); `alerts_truncated` quando o Indexer atinge o teto; técnicas sem tática conhecida aparecem numa secção "sem tática" em vez de serem descartadas.
 
 ### Dashboard
 
@@ -59,8 +59,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MITRE-02 | Phase 18 | Complete |
 | MITRE-03 | Phase 18 | Complete |
 | MITRE-04 | Phase 18 | Complete |
-| API-01 | Phase 19 | Pending |
-| API-02 | Phase 19 | Pending |
+| API-01 | Phase 19 | Complete |
+| API-02 | Phase 19 | Complete |
 | UI-01 | Phase 20 | Pending |
 | UI-02 | Phase 20 | Pending |
 | TST-01 | Phase 20 | Pending |

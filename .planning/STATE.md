@@ -4,17 +4,17 @@ milestone: v1.3
 milestone_name: R16 MITRE ATT&CK
 current_phase: 19
 current_phase_name: API de cobertura MITRE
-status: executing
-stopped_at: Completed 19-01-PLAN.md
-last_updated: "2026-11-10T10:04:55.353Z"
+status: verifying
+stopped_at: Completed 19-02-PLAN.md
+last_updated: "2026-11-10T10:09:53.091Z"
 last_activity: 2026-11-10
 last_activity_desc: Phase 19 execution started
-state_head: 017af33712ed25bc784bce1120bc56862ac2bfca
+state_head: 5f5303cd2c94c00e3d60ee24783d0ceb8633aa35
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
   percent: 33
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-11-09)
 
 Phase: 19 (API de cobertura MITRE) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-10 — Phase 19 execution started
 
 Progress: [███░░░░░░░] 33%
@@ -51,6 +51,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 18 P02 | 8min | 2 tasks | 2 files |
 | Phase 18 P03 | 25min | 3 tasks | 5 files |
 | Phase 19 P01 | 14 min | 2 tasks | 4 files |
+| Phase 19 P02 | 10min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,7 @@ Recent decisions affecting current work:
 - [Phase 18]: 18-03: resolve_alert_techniques substitui (wazuh > catalogo > []); rule.mitre.id so com lixo cai no catalogo; limites 32 elementos e 9 caracteres
 - [Phase 19]: 19-01: dois pedidos ao Indexer por chamada (fonte de alertas propria + _build_attack_registry) em vez de mudar a assinatura do registry (D-09)
 - [Phase 19]: 19-01: rate em % com 1 casa decimal; null sem denominador; unknown fora do denominador; alerts_truncated null com a fonte de alertas em baixo
+- [Phase 19]: 19-02: cada fonte da rota /api/mitre/coverage isolada por try/except Exception; HTTPException do log de ataques vira source_unavailable, nunca 500
 
 ### Pending Todos
 
@@ -96,8 +98,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-10T10:04:55.293Z
-Stopped at: Completed 19-01-PLAN.md
+Last session: 2026-11-10T10:09:53.024Z
+Stopped at: Completed 19-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

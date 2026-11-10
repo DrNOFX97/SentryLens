@@ -94,14 +94,14 @@ Plans:
   3. Com o Indexer ou o registo de ataques indisponível, a rota responde com `source_unavailable` para essa fonte e o resto dos dados, nunca 500; quando o Indexer atinge o teto de alertas, `alerts_truncated` vem a `true`.
   4. Uma técnica vista num alerta sem tática conhecida na tabela aparece numa secção "sem tática" com as suas contagens, em vez de ser descartada.
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans executed
 
 Plans:
 **Wave 1**
 - [x] 19-01-PLAN.md — `mitre_coverage.py` puro (`build_mitre_coverage_report`: linhas por id exato, alertas por origem, vereditos e taxa com `unknown` fora do denominador, táticas multi-valor, `unmapped[]`, fonte `None` -> `null`) + rota `GET /api/mitre/coverage` com API key por rota + testes puros e da rota com o attack_registry real (API-01, API-02; onda 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 19-02-PLAN.md — Fontes isoladas na rota (Indexer em baixo, log ilegível, registry a falhar, as duas em baixo; `source_unavailable`, nunca 500, sem texto de exceção), `alerts_truncated` no teto de 8000, janela, só GET/sem efeitos secundários, suite 88/88 (API-01, API-02; onda 2)
+- [x] 19-02-PLAN.md — Fontes isoladas na rota (Indexer em baixo, log ilegível, registry a falhar, as duas em baixo; `source_unavailable`, nunca 500, sem texto de exceção), `alerts_truncated` no teto de 8000, janela, só GET/sem efeitos secundários, suite 88/88 (API-01, API-02; onda 2)
 
 ### Phase 20: Matriz MITRE, testes e documentação
 
@@ -130,5 +130,5 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 18. Técnica e tática por alerta | 3/3 | Planned | 2026-11-09 |
-| 19. API de cobertura MITRE | 1/2 | Planned | - |
+| 19. API de cobertura MITRE | 2/2 | Planned | - |
 | 20. Matriz MITRE, testes e documentação | 0/? | Not started | - |
