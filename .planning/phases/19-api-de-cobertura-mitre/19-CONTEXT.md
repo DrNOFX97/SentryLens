@@ -19,12 +19,12 @@ Requisitos: API-01, API-02.
 
 ### Já decididos (Fase 18 e marco — não reabrir)
 - **D-00a:** Técnica do alerta: `rule.mitre.id` primeiro (origem `wazuh`), `technique_id` do catálogo como fallback (origem `catalog`), lista vazia sem nenhum (Fase 18, D-00a). A rota usa `mitre_catalog.resolve_alert_techniques`, não reimplementa.
-- **D-00b:** Sub-técnica e pai casam pelo pai para cruzar ataques com alertas (Fase 18, D-04); a tática vem sempre da tabela via `tactics_for` (D-07); `attack_log.jsonl` nunca é reescrito (D-08).
+- **D-00b:** Sub-técnica herda a tática do pai (Fase 18, D-04); "detetado" não é cruzado por pai (ver D-02 emendado); a tática vem sempre da tabela via `tactics_for` (D-07); `attack_log.jsonl` nunca é reescrito (D-08).
 - **D-00c:** Sem dados é `null`/`Sem dados`, nunca `0`. Rota só `GET`, `dependencies=_REQUIRE_API_KEY` na própria rota. Sem PostgreSQL, sem tabela nova.
 
 ### Que técnicas aparecem em `techniques[]`
 - **D-01:** `techniques[]` traz **todas as técnicas da tabela** (com contagens reais, incluindo zero ataques e zero alertas) **mais** qualquer técnica vista num alerta ou ataque que não esteja na tabela. A Fase 20 desenha a matriz (e o estado "não executada") só a partir desta resposta, sem ler a tabela por outra via.
-- **D-02:** Cada id exato tem **linha própria** (`T1110` e `T1110.003` são duas linhas, com contagens exatas do que foi visto/lançado nesse id). O cruzamento ataque↔alerta usa o pai (`parent_of`) apenas para decidir "detetado"; as contagens por linha não se somam entre pai e filhas.
+- **D-02:** Cada id exato tem **linha própria** (`T1110` e `T1110.003` são duas linhas, com contagens exatas do que foi visto/lançado nesse id). "Detetado" vem só do veredito `detected` do `attack_registry` (D-04), sem cruzamento extra por técnica; `parent_of` serve apenas para herdar a tática e para o campo `parent` da linha. As contagens por linha não se somam entre pai e filhas. *(Emendado em 2026-11-10 por decisão do utilizador: a versão anterior fazia o pai decidir "detetado", em tensão com D-04.)*
 - **D-03:** Técnica sem tática (sem entrada própria nem pai na tabela) **não** fica em `techniques[]`: vai para `unmapped[]` com as mesmas contagens, para a secção "sem tática" nunca descartar nada (API-02).
 
 ### Definição de "detetado" e da taxa
