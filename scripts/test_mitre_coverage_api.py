@@ -7,8 +7,10 @@ Correr (a partir de scripts/):
     python test_mitre_coverage_api.py
 """
 
+import hashlib
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -260,10 +262,237 @@ def run_indexer_down() -> None:
         main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved
 
 
+def _assert_attacks_down(label: str, r, body: dict) -> None:
+    rows = body["techniques"] + body["unmapped"]
+    check(f"{label}: 200 (nunca 500)", r.status_code == 200)
+    check(f"{label}: sources.attacks = source_unavailable sem correlation",
+          body["sources"]["attacks"] == {"available": False, "reason": "source_unavailable",
+                                         "correlation": None})
+    check(f"{label}: attacks e rate None em todas as linhas",
+          all(row["attacks"] is None and row["rate"] is None for row in rows))
+    check(f"{label}: attacks e rate None em todas as táticas",
+          all(t["attacks"] is None and t["rate"] is None for t in body["tactics"]))
+    check(f"{label}: totals.attacks e totals.rate None",
+          body["totals"]["attacks"] is None and body["totals"]["rate"] is None)
+
+
+def run_attacks_down() -> None:
+    saved = (main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report,
+             main.build_attack_registry, main.ATTACK_LOG_PATH)
+    try:
+        client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+
+        # Log com bytes inválidos em UTF-8.
+        with tempfile.TemporaryDirectory() as tmp:
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+            with open(main.ATTACK_LOG_PATH, "wb") as handle:
+                handle.write(b'{"id": 1}\n\xff\xfe\xfa\n')
+            r = client.get("/api/mitre/coverage")
+            body = r.json()
+            _assert_attacks_down("log ilegível (bytes)", r, body)
+            t1110 = next(t for t in body["techniques"] if t["id"] == "T1110")
+            check("log ilegível (bytes): alertas continuam (T1110 total 2, wazuh 1, catalog 1)",
+                  body["sources"]["alerts"]["available"] is True
+                  and t1110["alerts"] == {"total": 2, "wazuh": 1, "catalog": 1})
+            check("log ilegível (bytes): nenhum texto interno nem caminho no corpo",
+                  "Erro interno" not in r.text and "registo de ataques" not in r.text and tmp not in r.text
+                  and os.path.basename(tmp) not in r.text)
+
+        # ATTACK_LOG_PATH a apontar para um diretório.
+        with tempfile.TemporaryDirectory() as tmp:
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+            main.ATTACK_LOG_PATH = tmp
+            r = client.get("/api/mitre/coverage")
+            body = r.json()
+            _assert_attacks_down("log é um diretório", r, body)
+            check("log é um diretório: alertas disponíveis, caminho fora do corpo",
+                  body["sources"]["alerts"]["available"] is True and tmp not in r.text
+                  and "Erro interno" not in r.text)
+
+        # attack_registry a levantar.
+        with tempfile.TemporaryDirectory() as tmp:
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+
+            def boom(*_args, **_kwargs):
+                raise RuntimeError("segredo C:\\x")
+
+            main.build_attack_registry = boom
+            r = client.get("/api/mitre/coverage")
+            body = r.json()
+            _assert_attacks_down("registry a levantar", r, body)
+            check("registry a levantar: alertas disponíveis, 'segredo' fora do corpo",
+                  body["sources"]["alerts"]["available"] is True and "segredo" not in r.text)
+            main.build_attack_registry = saved[2]
+
+        # As duas fontes em baixo.
+        with tempfile.TemporaryDirectory() as tmp:
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+            main.indexer_client.get_recent_alerts = AsyncMock(side_effect=RuntimeError("segredo-interno"))
+            with open(main.ATTACK_LOG_PATH, "wb") as handle:
+                handle.write(b'{"id": 1}\n\xff\xfe\xfa\n')
+            r = client.get("/api/mitre/coverage")
+            body = r.json()
+            check("duas fontes em baixo: 200 (nunca 500)", r.status_code == 200)
+            rows = body["techniques"] + body["unmapped"]
+            check("duas fontes em baixo: 17 linhas em techniques", len(body["techniques"]) == 17)
+            check("duas fontes em baixo: alerts, attacks e rate None em todas as linhas",
+                  all(row["alerts"] is None and row["attacks"] is None and row["rate"] is None for row in rows))
+            check("duas fontes em baixo: totals todos None",
+                  body["totals"] == {"alerts": None, "attacks": None, "rate": None})
+            check("duas fontes em baixo: segredo fora do corpo", "segredo" not in r.text)
+
+        # Modelo ML em falta: ataques continuam, vereditos unknown.
+        with tempfile.TemporaryDirectory() as tmp:
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+
+            def missing_model(_dir):
+                raise FileNotFoundError("C:\\segredo\\modelo.pkl")
+
+            main.ml_anomalies.load_model = missing_model
+            r = client.get("/api/mitre/coverage")
+            body = r.json()
+            check("modelo ML em falta: 200", r.status_code == 200)
+            check("modelo ML em falta: ataques disponíveis com correlation.reason ml_model_unavailable",
+                  body["sources"]["attacks"]["available"] is True
+                  and body["sources"]["attacks"]["correlation"]["reason"] == "ml_model_unavailable")
+            check("modelo ML em falta: todos os vereditos unknown e rate None",
+                  body["totals"]["attacks"]["unknown"] == body["totals"]["attacks"]["launched"]
+                  and body["totals"]["rate"] is None)
+            check("modelo ML em falta: alertas disponíveis, 'segredo' fora do corpo",
+                  body["sources"]["alerts"]["available"] is True and "segredo" not in r.text)
+
+        # Base de incidentes em baixo: não tira os ataques.
+        with tempfile.TemporaryDirectory() as tmp:
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+            main.incident_store.list_incidents = MagicMock(
+                side_effect=sqlite3.OperationalError("disk I/O error em C:\\segredo"))
+            r = client.get("/api/mitre/coverage")
+            body = r.json()
+            check("incidentes em baixo: 200", r.status_code == 200)
+            check("incidentes em baixo: ataques disponíveis e 4 lançados",
+                  body["sources"]["attacks"]["available"] is True
+                  and body["totals"]["attacks"]["launched"] == 4)
+            check("incidentes em baixo: 'segredo' fora do corpo", "segredo" not in r.text)
+    finally:
+        (main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report,
+         main.build_attack_registry, main.ATTACK_LOG_PATH) = saved
+
+
+def run_truncation() -> None:
+    saved = (main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report,
+             main.ATTACK_ALERTS_SIZE)
+    try:
+        check("ATTACK_ALERTS_SIZE continua 8000", main.ATTACK_ALERTS_SIZE == 8000)
+        client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+        for count, expected in ((8000, True), (7999, False)):
+            with tempfile.TemporaryDirectory() as tmp:
+                attacks, _alerts, ml_results = mix_data()
+                wire(tmp, attacks=attacks, alerts=[alert_event(4625, 10)] * count, ml_results=ml_results)
+                body = client.get("/api/mitre/coverage").json()
+                t1110 = next(t for t in body["techniques"] if t["id"] == "T1110")
+                check(f"{count} alertas: alerts_truncated {expected}", body["alerts_truncated"] is expected)
+                check(f"{count} alertas: totals.alerts.fetched {count}",
+                      body["totals"]["alerts"]["fetched"] == count)
+                if count == 8000:
+                    check("8000 alertas: T1110 alerts.catalog 8000", t1110["alerts"]["catalog"] == 8000)
+    finally:
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved[0], saved[1]
+        main.ATTACK_ALERTS_SIZE = 8000
+
+
+def run_window_and_methods() -> None:
+    saved = (main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            headers = {"X-API-Key": os.environ["SENTRYLENS_API_KEY"]}
+            client = TestClient(main.app, headers=headers)
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+
+            check("janela: sem hours -> window_hours 168",
+                  client.get("/api/mitre/coverage").json()["window_hours"] == 168)
+            r = client.get("/api/mitre/coverage?hours=720")
+            check("janela: hours=720 aceite", r.status_code == 200 and r.json()["window_hours"] == 720)
+            for bad in ("0", "721", "abc"):
+                check(f"janela: hours={bad} -> 422", client.get(f"/api/mitre/coverage?hours={bad}").status_code == 422)
+
+            calls = main.indexer_client.get_recent_alerts.await_args_list
+            check("janela: o Indexer foi chamado", len(calls) > 0)
+            check("janela: cada chamada com hours, size=ATTACK_ALERTS_SIZE e exclude_infra_noise=True",
+                  all(set(c.kwargs) == {"hours", "size", "exclude_infra_noise"}
+                      and c.kwargs["size"] == main.ATTACK_ALERTS_SIZE
+                      and c.kwargs["exclude_infra_noise"] is True
+                      and c.kwargs["hours"] in (168, 720) for c in calls))
+
+            mitre_routes = [r for r in main.app.routes if getattr(r, "path", "").startswith("/api/mitre")]
+            check("rotas: /api/mitre/coverage é a única rota sob /api/mitre",
+                  [r.path for r in mitre_routes] == ["/api/mitre/coverage"])
+            route = mitre_routes[0]
+            check("rotas: só GET/HEAD", route.methods <= {"GET", "HEAD"} and "GET" in route.methods)
+            check("rotas: require_api_key nas dependencies da própria rota",
+                  any(getattr(d, "dependency", None) is main.require_api_key for d in route.dependencies))
+            for method in ("POST", "PUT", "PATCH", "DELETE"):
+                r = client.request(method, "/api/mitre/coverage", json={})
+                check(f"{method} /api/mitre/coverage com chave -> 405", r.status_code == 405)
+    finally:
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved
+
+
+INCIDENT_STORE_WRITES = {
+    "create_incident", "attach_evidence", "link_attack", "add_note", "save_triage", "assign_analyst",
+    "set_status", "create_analyst", "update_analyst", "deactivate_analyst", "create_shift",
+    "create_escalation_rule", "auto_triage", "assign_to_tier", "escalate_incident", "set_sla_deadline",
+}
+WRITE_PREFIXES = ("create", "update", "add", "append", "delete", "assign", "set", "save", "record",
+                  "ingest", "link", "attach", "escalate", "deactivate", "auto_")
+
+
+def run_read_only() -> None:
+    saved = (main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+
+            def digest() -> str:
+                with open(main.ATTACK_LOG_PATH, "rb") as handle:
+                    return hashlib.sha256(handle.read()).hexdigest()
+
+            before = digest()
+            r1 = client.get("/api/mitre/coverage")
+            check("só leitura: 200", r1.status_code == 200)
+            check("só leitura: log de ataques byte a byte igual", digest() == before)
+
+            names = [c[0] for c in main.incident_store.method_calls]
+            check("só leitura: nenhum método de escrita do IncidentStore chamado",
+                  not (set(names) & INCIDENT_STORE_WRITES))
+            check("só leitura: nenhum nome com prefixo de escrita",
+                  not any(n.startswith(WRITE_PREFIXES) for n in names))
+            check("só leitura: a única leitura foi list_incidents",
+                  "list_incidents" in names and set(names) <= {"list_incidents"})
+
+            # Atenção: ts() fixa NOW ao importar o módulo; dois GET seguidos dão o mesmo corpo.
+            r2 = client.get("/api/mitre/coverage")
+            check("só leitura: dois GET seguidos dão o mesmo corpo JSON", r1.json() == r2.json())
+    finally:
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved
+
+
 if __name__ == "__main__":
     run_tracer()
     run_mix()
     run_indexer_down()
+    run_attacks_down()
+    run_truncation()
+    run_window_and_methods()
+    run_read_only()
     if failures:
         print(f"\n{len(failures)} caso(s) falharam:")
         for label in failures:

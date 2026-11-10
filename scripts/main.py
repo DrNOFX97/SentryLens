@@ -1875,15 +1875,23 @@ async def get_mitre_coverage(
         logger.warning("GET /api/mitre/coverage: Wazuh Indexer indisponível — fonte de alertas source_unavailable",
                        exc_info=True)
         raw_alerts = None
-    attack_log = await _read_attack_log()
-    registry, correlation, _ = await _build_attack_registry(attack_log, hours)
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    in_window = [
-        a for a in registry["attacks"]
-        if (ts := incident_engine_parse(a["timestamp"])) is not None and ts >= cutoff
-    ]
+    attacks = None
+    correlation = None
+    try:
+        attack_log = await _read_attack_log()
+        registry, correlation, _ = await _build_attack_registry(attack_log, hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        attacks = [
+            a for a in registry["attacks"]
+            if (ts := incident_engine_parse(a["timestamp"])) is not None and ts >= cutoff
+        ]
+    except Exception:  # inclui o HTTPException(500) de _read_attack_log
+        logger.warning("GET /api/mitre/coverage: registo de ataques indisponível — fonte de ataques source_unavailable",
+                       exc_info=True)
+        attacks = None
+        correlation = None
     return mitre_coverage.build_mitre_coverage_report(
-        raw_alerts, in_window, table, hours,
+        raw_alerts, attacks, table, hours,
         alerts_truncated=alerts_truncated, correlation=correlation)
 
 
