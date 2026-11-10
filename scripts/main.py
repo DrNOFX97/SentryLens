@@ -56,6 +56,7 @@ import model_registry
 # `/api/ml-anomalies` já falha se o não tiver — portanto um import tardio aqui
 # não pouparia nada e só mudaria o sítio do erro. Não trocar por `importlib`.
 import ml_training
+import mitre_coverage
 import soc_metrics
 import vaccine_ingest
 from admin_activity import build_admin_activity_report
@@ -1852,6 +1853,29 @@ async def get_attack(attack_id: Annotated[str, Path(pattern=r"^[0-9]{1,9}$")]):
         attack = min(matches, key=lambda a: incident_engine_parse(a["timestamp"]) or datetime.max.replace(tzinfo=timezone.utc))
         return {"attack": attack, "correlation": correlation, "incidents_available": incidents_available}
     raise HTTPException(status_code=404, detail="Ataque não encontrado")
+
+
+@app.get("/api/mitre/coverage", dependencies=_REQUIRE_API_KEY)
+async def get_mitre_coverage(
+    hours: int = Query(168, ge=1, le=ATTACK_MAX_HOURS, description="Janela temporal em horas (alertas e timestamp do ataque)"),
+):
+    """Cobertura MITRE ATT&CK por técnica e por tática (R16). Só leitura, com
+    duas fontes: os alertas do Indexer (contados por origem wazuh/catalog) e o
+    attack_registry (ataques lançados e vereditos). Nada é escrito."""
+    table = load_mitre_techniques()
+    raw_alerts = await indexer_client.get_recent_alerts(
+        hours=hours, size=ATTACK_ALERTS_SIZE, exclude_infra_noise=True)
+    alerts_truncated = len(raw_alerts) >= ATTACK_ALERTS_SIZE
+    attack_log = await _read_attack_log()
+    registry, correlation, _ = await _build_attack_registry(attack_log, hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    in_window = [
+        a for a in registry["attacks"]
+        if (ts := incident_engine_parse(a["timestamp"])) is not None and ts >= cutoff
+    ]
+    return mitre_coverage.build_mitre_coverage_report(
+        raw_alerts, in_window, table, hours,
+        alerts_truncated=alerts_truncated, correlation=correlation)
 
 
 # ---------------------------------------------------------------------------
