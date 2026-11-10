@@ -1863,9 +1863,18 @@ async def get_mitre_coverage(
     duas fontes: os alertas do Indexer (contados por origem wazuh/catalog) e o
     attack_registry (ataques lançados e vereditos). Nada é escrito."""
     table = load_mitre_techniques()
-    raw_alerts = await indexer_client.get_recent_alerts(
-        hours=hours, size=ATTACK_ALERTS_SIZE, exclude_infra_noise=True)
-    alerts_truncated = len(raw_alerts) >= ATTACK_ALERTS_SIZE
+    # Cada fonte isolada (D-07): uma em baixo nunca derruba a outra nem dá 500;
+    # o detalhe da exceção vai só para o log, o corpo leva "source_unavailable".
+    raw_alerts = None
+    alerts_truncated = False
+    try:
+        raw_alerts = await indexer_client.get_recent_alerts(
+            hours=hours, size=ATTACK_ALERTS_SIZE, exclude_infra_noise=True)
+        alerts_truncated = len(raw_alerts) >= ATTACK_ALERTS_SIZE
+    except Exception:
+        logger.warning("GET /api/mitre/coverage: Wazuh Indexer indisponível — fonte de alertas source_unavailable",
+                       exc_info=True)
+        raw_alerts = None
     attack_log = await _read_attack_log()
     registry, correlation, _ = await _build_attack_registry(attack_log, hours)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)

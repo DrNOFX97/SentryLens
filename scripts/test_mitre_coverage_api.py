@@ -202,9 +202,68 @@ def run_mix() -> None:
         main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved
 
 
+def mix_data() -> tuple[list, list, list]:
+    """Os mesmos ataques, alertas e resultados ML de run_mix."""
+    attacks = [
+        {"id": 1, "scenario": "brute_force_rdp", "target": ASSET, "timestamp": ts(3000),
+         "status": "launched", "technique": "T1110", "tool": "hydra"},
+        {"id": 2, "scenario": "smb_enum", "target": ASSET, "timestamp": ts(2000),
+         "status": "launched", "technique": "T1087", "tool": "netexec"},
+        {"id": 3, "scenario": "lateral_movement_schtasks", "target": ASSET, "timestamp": ts(1000),
+         "status": "launched", "technique": "T1053", "tool": "psexec"},
+        {"id": 4, "scenario": "account_lockout_spray", "target": OTHER, "timestamp": ts(500),
+         "status": "launched"},
+        {"id": 5, "scenario": "brute_force_rdp", "target": ASSET, "timestamp": ts(200 * 3600),
+         "status": "launched", "technique": "T1110", "tool": "hydra"},
+    ]
+    ml_results = [ml_row(2980, 4625, True, True), ml_row(970, 4672, True, False)]
+    alerts = [alert_mitre(["T1110"], 2990), alert_event(4625, 2985), alert_event(4624, 2980),
+              alert_mitre(["T1059"], 100)]
+    return attacks, alerts, ml_results
+
+
+def run_indexer_down() -> None:
+    saved = (main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = TestClient(main.app, headers={"X-API-Key": os.environ["SENTRYLENS_API_KEY"]})
+            attacks, alerts, ml_results = mix_data()
+            wire(tmp, attacks=attacks, alerts=alerts, ml_results=ml_results)
+            main.indexer_client.get_recent_alerts = AsyncMock(
+                side_effect=RuntimeError("segredo-interno C:\\caminho\\indexer"))
+
+            r = client.get("/api/mitre/coverage")
+            check("indexer em baixo: 200 (nunca 500)", r.status_code == 200)
+            body = r.json()
+            rows = body["techniques"] + body["unmapped"]
+            check("indexer em baixo: sources.alerts = source_unavailable",
+                  body["sources"]["alerts"] == {"available": False, "reason": "source_unavailable"})
+            check("indexer em baixo: alerts None em todas as linhas",
+                  all(row["alerts"] is None for row in rows))
+            check("indexer em baixo: totals.alerts None", body["totals"]["alerts"] is None)
+            check("indexer em baixo: alerts_truncated None", body["alerts_truncated"] is None)
+            check("indexer em baixo: ataques continuam disponíveis",
+                  body["sources"]["attacks"]["available"] is True)
+            check("indexer em baixo: correlation.reason indexer_unavailable",
+                  body["sources"]["attacks"]["correlation"]["reason"] == "indexer_unavailable")
+            check("indexer em baixo: todos os vereditos unknown (4 lançados)",
+                  body["totals"]["attacks"]["unknown"] == body["totals"]["attacks"]["launched"] == 4)
+            check("indexer em baixo: totals.rate None", body["totals"]["rate"] is None)
+            t1110 = next(t for t in body["techniques"] if t["id"] == "T1110")
+            check("indexer em baixo: T1110 rate None", t1110["rate"] is None)
+            check("indexer em baixo: 17 linhas da tabela", len(body["techniques"]) == 17)
+            check("indexer em baixo: T1087 em unmapped (vem do log)",
+                  any(u["id"] == "T1087" for u in body["unmapped"]))
+            check("indexer em baixo: nenhum texto da exceção no corpo",
+                  "segredo-interno" not in r.text and "caminho" not in r.text)
+    finally:
+        main.ml_anomalies.load_model, main.ml_anomalies.build_ml_anomalies_report = saved
+
+
 if __name__ == "__main__":
     run_tracer()
     run_mix()
+    run_indexer_down()
     if failures:
         print(f"\n{len(failures)} caso(s) falharam:")
         for label in failures:
