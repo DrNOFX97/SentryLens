@@ -4,17 +4,17 @@ milestone: v1.3
 milestone_name: R16 MITRE ATT&CK
 current_phase: 19
 current_phase_name: API de cobertura MITRE
-status: planning
-stopped_at: Phase 19 context gathered
-last_updated: "2026-11-10T09:11:29.870Z"
-last_activity: 2026-11-09
-last_activity_desc: Phase 18 complete, transitioned to Phase 19
-state_head: ea6495a3592170c4a03dcfb34fc71b18a99e699d
+status: executing
+stopped_at: Completed 19-01-PLAN.md
+last_updated: "2026-11-10T10:04:55.353Z"
+last_activity: 2026-11-10
+last_activity_desc: Phase 19 execution started
+state_head: 017af33712ed25bc784bce1120bc56862ac2bfca
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 5
+  completed_plans: 4
   percent: 33
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-11-09)
 
 **Core value:** Medir de forma honesta, com dados reais, quão bem o laboratório deteta e responde a ataques — nunca apresentar como real um valor inventado ou sem amostra.
-**Current focus:** Phase 18 — Técnica e tática por alerta
+**Current focus:** Phase 19 — API de cobertura MITRE
 
 ## Current Position
 
-Phase: 19 — API de cobertura MITRE
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-11-09 — Phase 18 complete, transitioned to Phase 19
+Phase: 19 (API de cobertura MITRE) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-11-10 — Phase 19 execution started
 
 Progress: [███░░░░░░░] 33%
 
@@ -50,6 +50,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 18 P01 | 10min | 3 tasks | 5 files |
 | Phase 18 P02 | 8min | 2 tasks | 2 files |
 | Phase 18 P03 | 25min | 3 tasks | 5 files |
+| Phase 19 P01 | 14 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,8 @@ Recent decisions affecting current work:
 - [Phase 18]: lateral_movement_schtasks (T1053) passa a mitre_tactic Execution; coerencia cenario->tabela e teste, cobertura e regra do carregador
 - [Phase 18]: 18-02: technique_id nos 8 Event IDs inequivocos de CRITICAL_EVENTS; vazio = chave ausente; restantes 23 sem tecnica (na duvida fica vazio)
 - [Phase 18]: 18-03: resolve_alert_techniques substitui (wazuh > catalogo > []); rule.mitre.id so com lixo cai no catalogo; limites 32 elementos e 9 caracteres
+- [Phase 19]: 19-01: dois pedidos ao Indexer por chamada (fonte de alertas propria + _build_attack_registry) em vez de mudar a assinatura do registry (D-09)
+- [Phase 19]: 19-01: rate em % com 1 casa decimal; null sem denominador; unknown fora do denominador; alerts_truncated null com a fonte de alertas em baixo
 
 ### Pending Todos
 
@@ -93,9 +96,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-10T09:11:29.713Z
-Stopped at: Phase 19 context gathered
-Resume file: .planning/phases/19-api-de-cobertura-mitre/19-CONTEXT.md
+Last session: 2026-11-10T10:04:55.293Z
+Stopped at: Completed 19-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
